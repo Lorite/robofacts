@@ -1134,15 +1134,8 @@ def load_robot_actions(app) -> Dict[str, List[Dict[str, str]]]:
 
 # --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--host", default="127.0.0.1",
-                    help="bind address. Localhost by default ON PURPOSE — reach it "
-                         "with `ssh -N -L 8080:localhost:8080 <host>`.")
-    ap.add_argument("--port", type=int, default=8080)
-    roots.add_root_arguments(ap)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="run without a password (only sensible on 127.0.0.1)")
-    args = ap.parse_args(argv)
+    from .arguments import build_parser  # the parser lives apart, so the help needs no Flask
+    args = build_parser().parse_args(argv)
     roots.resolve_root_arguments(args)
 
     password = os.environ.get("EXPERIMENTS_UI_PASSWORD")

@@ -75,7 +75,19 @@ def _version_probe(argv):
 
 
 def _ui(argv):
-    from .ui import app
+    # The parser lives apart from the app, so the help needs no Flask.
+    from .ui.arguments import build_parser
+    if any(a in ("-h", "--help") for a in argv):
+        build_parser().print_help()
+        return 0
+    try:
+        from .ui import app
+    except ImportError as exc:
+        if "flask" in str(exc).lower():
+            print("trials ui: the web interface needs Flask (`pip install flask`), which the dev "
+                  "container has. The other commands do not need it.", file=sys.stderr)
+            return 2
+        raise
     return app.main(argv)
 
 
@@ -91,8 +103,17 @@ def _init(argv):
 
 def _tool(argv):
     from . import tools
+    usage = "usage: trials tool <name> [args...]\n\npackaged tools:\n" + "".join(f"  {n}\n" for n in tools.available())
     if not argv:
-        print("usage: trials tool <kill_ros.sh|estop.sh|robot_action.sh> [args...]", file=sys.stderr)
+        print(usage, file=sys.stderr)
+        return 2
+    if argv[0] in ("-h", "--help", "help"):
+        print(usage)
+        return 0
+    try:
+        tools.path(argv[0])
+    except FileNotFoundError as exc:
+        print(f"trials tool: {exc}", file=sys.stderr)
         return 2
     return tools.exec_tool(argv[0], argv[1:])
 
@@ -104,14 +125,17 @@ def _lint(argv):
     ap = argparse.ArgumentParser(prog="trials lint",
                                  description="check every experiment's declarations against the rules")
     roots.add_root_arguments(ap)
-    ap.add_argument("pytest_args", nargs="*", help="extra pytest arguments, after --")
-    args = ap.parse_args(argv)
+    ap.add_argument("pytest_args", nargs="*",
+                    help="extra pytest arguments (flags such as -k, -x or -v pass through as they are, "
+                         "or after --)")
+    # Flags that are not ours go to pytest, so `trials lint -k rule_L5 -x` works as written.
+    args, passthrough = ap.parse_known_args(argv)
     roots.resolve_root_arguments(args)
     os.environ[roots.ENV_EXPERIMENTS_ROOT] = str(args.experiments_root)
     import pytest
 
     from . import lint
-    return int(pytest.main(["-q", "-p", "no:cacheprovider", lint.__file__, *args.pytest_args]))
+    return int(pytest.main(["-q", "-p", "no:cacheprovider", lint.__file__, *passthrough, *args.pytest_args]))
 
 
 def _roots(argv):

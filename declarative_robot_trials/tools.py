@@ -11,11 +11,16 @@ from typing import List, Optional
 TOOLS_DIR = Path(__file__).resolve().parent / "tools"
 
 
+def available() -> List[str]:
+    """The names of the packaged tools, for ``trials tool`` to list."""
+    return sorted(p.name for p in TOOLS_DIR.glob("*.sh") if p.is_file())
+
+
 def path(name: str) -> Path:
     """The absolute path of a packaged tool, for example ``estop.sh``."""
     tool = TOOLS_DIR / name
     if not tool.is_file():
-        raise FileNotFoundError(f"{name} is not a packaged tool (looked in {TOOLS_DIR})")
+        raise FileNotFoundError(f"{name} is not a packaged tool (looked in {TOOLS_DIR}; the tools are {', '.join(available())})")
     return tool
 
 
