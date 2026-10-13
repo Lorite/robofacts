@@ -1,0 +1,70 @@
+# How to run one trial of the experiment {{name}}.
+#
+# The runner owns the order (gate -> setup steps -> launch -> settle -> record ->
+# action -> stop the recorder first -> stop the stack -> verify steps -> metadata
+# -> slim copy). This file only says what is specific to this experiment.
+
+# true only when every robot of the experiment is simulated or there is none.
+# Every trial records its domain (simulation | hardware) from this flag, and a
+# `gate` factor (shadow or disabled gate) is allowed only in simulation.
+simulation: true
+
+# The stack: `ros2 launch <package> <file>` (launch_mode: launch, the default)
+# or `ros2 run <package> <executable>` (launch_mode: run). Factors of
+# kind launch_arg are appended as name:=value to a launch.
+launch_mode: run
+launch:
+  package: demo_nodes_cpp
+  file: talker
+
+# Foreground commands run after the gate and before the stack is launched, in
+# order. A required step that fails aborts the trial.
+# setup_steps:
+#   - {name: clean_slate, command: "trials tool kill_ros.sh"}
+#   - {name: robot_ready, command: "trials tool robot_action.sh spot stand", required: false}
+
+# Long-running helpers started with the stack and stopped before it.
+# aux_launches:
+#   - {name: viewer, command: "ros2 launch my_package viewer.launch.py"}
+
+# What to record: a list of topics (record_profile: custom), or a named profile
+# selected by the record_profile factor.
+record_topics: ["/chatter", "/rosout"]
+
+# The one foreground command that IS the trial. {factor} placeholders are filled
+# with the trial's levels. It runs in the project root.
+action:
+  command: "python3 experiments/{{name}}/scripts/run_trial.py --listen-time {listen_time}"
+
+# Seconds between the launch and the recorder, and the grace period at stop.
+settle_s: 2
+stop_grace_s: 3
+
+# Optional deadline on the action, in seconds: a still-running action receives
+# SIGTERM and the trial is aborted with the timeout as its reason.
+# action_timeout_s: 120
+
+# Checks against the RECORDED BAG, once the recorder has stopped ({bag} is the
+# bag directory). A non-zero exit marks the trial failed: an action can exit 0
+# without the trial having happened, and only the bag describes the experiment.
+verify_steps:
+  - name: chatter_was_recorded
+    command: "python3 experiments/{{name}}/scripts/verify_chatter.py {bag} --min-messages 3"
+
+# Provenance probed on the host that ran the trial, after it, into the metadata
+# under `key` (the first line of stdout). Never fatal, never a factor.
+# metadata_probes:
+#   - {key: firmware_version, command: "cat firmware/version.txt"}
+
+# One entry per level of the execution_host factor. `local: true` runs here;
+# a remote host gets `ssh <host> docker exec <container> <shell> -lc ...` around
+# every command, and the bag is brought back after the trial.
+hosts:
+  laptop:
+    local: true
+  # rig:
+  #   host: my-robot-host              # an ssh alias
+  #   container: ros2_humble_dev       # omit to run directly on the host
+  #   shell: zsh
+  #   workspace: /workspaces/my_project
+  #   ws_setup: /workspaces/my_project/ros2_ws/install/setup.zsh

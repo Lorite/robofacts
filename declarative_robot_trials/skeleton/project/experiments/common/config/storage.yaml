@@ -1,0 +1,27 @@
+# Where heavy bags live, per host.
+#
+# The runner writes a bag to experiments/<name>/bags/ unless the experiment's
+# runner.yaml says `bags_root: external` (or the command line says --bags-root),
+# in which case the destination is resolved here for the host that records.
+#
+# HOW A DESTINATION IS RESOLVED (first match wins)
+#   1. an explicit CLI value (`--dest`, `--bags-root`)
+#   2. `hosts.<level>.external_dest` below, for the host doing the work
+#   3. nothing: the consumer then FAILS with a message naming this file and the
+#      flag, rather than silently writing to the internal disk
+#
+# HOST LEVELS are the `execution_host` factor's levels (common/config/factors.yaml).
+# A machine's hostname is matched onto its level through that factor's `aliases`,
+# so there is no second list of machine names to keep in sync.
+
+version: 1
+
+# The directory name under a mount point, when a path is given as a mount root.
+external_subdir: trial_bags
+
+hosts:
+  laptop:
+    # Set this to the mount point of an external disk, plus the subdirectory
+    # above, for example /media/<user>/<DISK-LABEL>/trial_bags. null means that
+    # `bags_root: external` refuses on this host, which is the safe default.
+    external_dest: null

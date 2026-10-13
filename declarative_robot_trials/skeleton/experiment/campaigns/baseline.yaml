@@ -1,0 +1,32 @@
+# The first campaign of {{name}}: what set of trials, under what conditions.
+#
+# The planner compares this with the recorded, usable trials and lists what is
+# still missing, so re-running the campaign after a partial session continues
+# where it stopped. Every swept factor needs a metadata_key that is `factor: true`
+# in the metadata contract, or the campaign is refused.
+
+name: baseline
+experiment: {{name}}
+describe: >-
+  Sweep the listen_time factor with two repetitions per level. Write here what
+  the resulting trials will evidence and what is safety-critical about collecting
+  them: the operator reads this at the rig.
+
+repetitions: 2
+sweep:
+  listen_time: [short, long]
+# fixed:
+#   execution_host: laptop
+
+# The order of execution: randomized complete blocks with a seed, when the
+# experiment can be biased by the order of its trials.
+# order: {shuffle: true, seed: 20261013, blocks: true}
+
+# Conditions the campaign owns (they merge with the runner's):
+# preflight_checklist: config/preflight_checklist_static.json   # a different T-0 gate
+# operator_steps:                                               # read before the trial
+#   - "Clear the flight volume."
+# operator_live_steps:                                          # while the trial runs
+#   - "Dim the lights when the drone reaches the first waypoint."
+# verify_steps:                                                 # against the recorded bag
+#   - {name: flew, command: "python3 experiments/{{name}}/scripts/verify_flight.py {bag}"}

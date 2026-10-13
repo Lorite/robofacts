@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block body %}
+<h1 class="{{ 'ok' if ok else 'bad' }}">{{ action }} {{ robot or 'ALL' }} — {{ 'confirmed' if ok else 'DID NOT CONFIRM' }}</h1>
+{% if not ok %}<p class="bad">Use the physical kill switch.</p>{% endif %}
+<pre>{{ output }}</pre>
+{% endblock %}

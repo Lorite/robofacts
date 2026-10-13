@@ -1,0 +1,31 @@
+# Robot stop actions: one place that knows how to stop each robot.
+#
+# Read by the packaged `estop.sh`, `robot_action.sh` and the web interface, so
+# the UI's stop buttons and the command line cannot drift apart, and adding a
+# robot is a config edit, not a code change. This example has no robot, so the
+# list is empty; the commented entry shows the schema.
+#
+# A software stop travels laptop -> ssh -> container -> DDS -> robot, and every
+# hop can fail. The physical e-stop stays the primary kill, and the gate's
+# `estop_reachable` check must pass FROM THE CONTEXT THAT WILL CALL IT before a
+# flight. Every stop command should FIRST write the stop latch file (the gate's
+# `stop_latch` check refuses the next trial while a fresh latch exists), so a
+# running trial aborts even if a later hop of the stop fails.
+#
+# Schema per robot:
+#   host       : ssh target that can reach the robot ('local' = this machine)
+#   container  : docker container to exec into (omit to run directly on the host)
+#   shell      : login shell used inside the container
+#   soft_stop  : land / halt gracefully. Preferred when there is time.
+#   estop      : cut it now.
+#   actions    : named, non-emergency commands the UI may offer (stand, sit, ...)
+
+version: 1
+
+robots: {}
+  # crazyflie:
+  #   host: my-robot-host
+  #   container: ros2_humble_dev
+  #   shell: zsh
+  #   soft_stop: "touch /tmp/trial_stop_latch && ros2 service call /all/land crazyflie_interfaces/srv/Land '{height: 0.0, duration: {sec: 3}}'"
+  #   estop: "touch /tmp/trial_stop_latch && ros2 service call /all/emergency std_srvs/srv/Empty"

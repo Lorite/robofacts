@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>declarative_robot_trials</name>
+  <version>0.1.0</version>
+  <description>Declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, a runner, a coverage index, a linter and named analyses, driven by five declaration files per experiment.</description>
+  <maintainer email="a.lorite.mora@gmail.com">Alejandro Lorite Mora</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-flask</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>demo_nodes_cpp</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

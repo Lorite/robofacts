@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block body %}
+<h1 class="{{ 'ok' if ok else 'bad' }}">{{ robot }}.{{ action }} — {{ 'OK' if ok else 'FAILED' }}</h1>
+{% if not ok %}<p class="bad">The action did not confirm. Check the rig is up (a driver must be running) and see the output below.</p>{% endif %}
+<pre>{{ output }}</pre>
+<p><a href="{{ url_for('index') }}">← back</a></p>
+{% endblock %}

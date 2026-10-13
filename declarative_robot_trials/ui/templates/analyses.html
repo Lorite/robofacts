@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Analyses — {{ experiment }}</h1>
+<table><tr><th>name</th><th>per</th><th>what it computes</th></tr>
+{% for name, a in analyses.items() %}
+<tr><td><code>{{ name }}</code></td><td>{{ a.per }}</td><td>{{ a.describe }}</td></tr>
+{% endfor %}
+</table>
+<p style="font-size:.9rem">Run one with:
+<code>python3 experiments/common/scripts/analysis_runner.py {{ experiment }} &lt;name&gt; --where factor=value --execute</code></p>
+
+<h3>Recent results</h3>
+<ul>{% for r in results %}<li><code>{{ r.parent.name }}</code></li>{% else %}<li>none yet</li>{% endfor %}</ul>
+{% endblock %}

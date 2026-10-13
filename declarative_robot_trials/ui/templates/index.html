@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Experiments</h1>
+{% for experiment, paths in campaigns.items() %}
+  <h2>{{ experiment }}</h2>
+  <p>
+    {% set c = counts.get(experiment, {}) %}
+    <b>{{ c.get('usable', 0) }}</b> usable ·
+    {{ c.get('unverified', 0) }} unverified ·
+    {{ c.get('excluded', 0) }} excluded
+    · <a href="{{ url_for('analyses_view', experiment=experiment) }}">analyses</a>
+  </p>
+  <ul>
+  {% for p in paths %}
+    <li><a href="{{ url_for('campaign_view', experiment=experiment, name=p.stem) }}">{{ p.stem }}</a></li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p>No campaigns declared yet.</p>
+{% endfor %}
+{% if robots %}<p>Robots configured for stop: {{ robots|join(', ') }}</p>{% endif %}
+{% if robot_actions %}
+<h2>Robot actions</h2>
+<p>Declared operator actions (robots.yaml `actions:`) — posture and status, the same narrow allowlist as the stops. ⚠️ `ready`/`stand` claim Spot's body lease: use between trials, and keep the tablet app closed (it silently held the lease through four trials on 2026-08-10).</p>
+{% for robot, actions in robot_actions.items() %}
+  <p><strong>{{ robot }}</strong>:
+  {% for a in actions %}
+    <form method="post" action="{{ url_for('robot_action') }}" style="display:inline" title="{{ a.description }}">
+      <input type="hidden" name="robot" value="{{ robot }}">
+      <input type="hidden" name="action" value="{{ a.name }}">
+      <button type="submit">{{ a.name }}</button>
+    </form>
+  {% endfor %}
+  </p>
+{% endfor %}
+{% endif %}
+{% endblock %}

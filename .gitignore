@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+# What the example project records
+example_project/experiments/*/bags/*/
+example_project/experiments/*/bags_slim/
+example_project/experiments/*/bags_scratch/
+example_project/experiments/*/runs/
+example_project/experiments/*/results/
+*.mcap
+*.db3

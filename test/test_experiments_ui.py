@@ -1,0 +1,750 @@
+"""Tests for the experiments control surface (#96 Phase 5).
+
+Flask's test client exercises every route without a browser, so the properties
+that matter — auth, the two-step run, the stop allowlist, and the UI never being
+able to do something the CLI cannot — are asserted offline.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import time
+
+import pytest
+
+HERE = Path(__file__).resolve().parent
+UI_DIR = HERE.parent / "ui"
+
+pytest.importorskip("flask", reason="the UI needs Flask (present in the dev container)")
+
+from declarative_robot_trials.ui import app as ui  # noqa: E402
+
+PASSWORD = "hunter2"
+
+FACTORS = """
+version: 1
+factors:
+  execution_host:
+    levels: [laptop, orin]
+    default: orin
+    metadata_key: execution_host
+    maps_to: {kind: host}
+  trajectory:
+    levels: [hover, circle]
+    default: hover
+    metadata_key: trajectory
+    maps_to: {kind: launch_arg, name: trajectory}
+"""
+
+CONTRACT = """
+version: 1
+fields:
+  trial_id: {required: true, type: str}
+  execution_host: {required: true, type: str, factor: true}
+  trajectory: {required: false, type: str, factor: true}
+  aborted: {required: true, type: bool}
+"""
+
+RUNNER = """
+launch: {package: demo_nodes_cpp, file: talker}
+action: {command: "echo fly --shape {trajectory}"}
+hosts:
+  laptop: {local: true}
+"""
+
+CAMPAIGN = """
+name: c
+experiment: expA
+repetitions: 2
+sweep:
+  trajectory: [hover, circle]
+fixed:
+  execution_host: laptop
+"""
+
+ANALYSES = """
+analyses:
+  quick_look:
+    describe: "a quick look"
+    per: bag
+    command: "echo {bag} {results}"
+"""
+
+# A campaign that asks the operator for things: manual prep before the trial
+# (one step with a runnable command), and live steps while it flies (one prose,
+# one runnable). Exercises the browser mirror of the CLI's operator waits.
+CAMPAIGN_STEPS = """
+name: steps
+experiment: expA
+repetitions: 1
+sweep:
+  trajectory: [hover]
+fixed:
+  execution_host: laptop
+operator_steps:
+  - text: "Power the drone and place it on the pad"
+  - text: |-
+      Switch the Motive body to the patched arm
+      details on the second line
+    run: "echo motive {execution_host}"
+operator_live_steps:
+  - "prose only: watch the estimator"
+  - text: "hand over to vision"
+    run: "echo handover"
+"""
+
+ROBOTS = """
+version: 1
+robots:
+  crazyflie:
+    host: local
+    verified: true
+    estop: {description: "cut motors", command: "echo ESTOP"}
+    soft_stop: {description: "land", command: "echo SOFT"}
+  spot:
+    host: local
+    verified: true
+    estop: {description: "cut power", command: "echo ESTOP"}
+    soft_stop: {description: "sit", command: "echo SOFT"}
+    actions:
+      ready: {description: "stand and pose the arm", command: "echo READY"}
+      lease: {description: "who holds the lease", command: "echo LEASE"}
+"""
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    (tmp_path / "common" / "config").mkdir(parents=True)
+    (tmp_path / "common" / "config" / "factors.yaml").write_text(FACTORS, encoding="utf-8")
+    (tmp_path / "common" / "config" / "trial_metadata_core.yaml").write_text(CONTRACT, encoding="utf-8")
+    (tmp_path / "common" / "config" / "robots.yaml").write_text(ROBOTS, encoding="utf-8")
+    (tmp_path / "expA" / "config").mkdir(parents=True)
+    (tmp_path / "expA" / "config" / "runner.yaml").write_text(RUNNER, encoding="utf-8")
+    (tmp_path / "expA" / "config" / "analyses.yaml").write_text(ANALYSES, encoding="utf-8")
+    (tmp_path / "expA" / "campaigns").mkdir(parents=True)
+    (tmp_path / "expA" / "campaigns" / "c.yaml").write_text(CAMPAIGN, encoding="utf-8")
+    (tmp_path / "expA" / "campaigns" / "steps.yaml").write_text(CAMPAIGN_STEPS, encoding="utf-8")
+    return tmp_path
+
+
+@pytest.fixture
+def client(root: Path):
+    app = ui.create_app(root, PASSWORD, repo_root=root.parent)
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+def auth(password: str = PASSWORD) -> dict:
+    import base64
+    token = base64.b64encode(f"x:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+# --------------------------------------------------------------------------- #
+# Authentication — this endpoint can start a flight
+# --------------------------------------------------------------------------- #
+def test_unauthenticated_is_refused(client):
+    assert client.get("/").status_code == 401
+
+
+def test_a_wrong_password_is_refused(client):
+    assert client.get("/", headers=auth("nope")).status_code == 401
+
+
+def test_the_right_password_gets_in(client):
+    assert client.get("/", headers=auth()).status_code == 200
+
+
+def test_actions_are_also_behind_auth(client):
+    assert client.post("/run", data={"experiment": "expA", "campaign": "c"}).status_code == 401
+    assert client.post("/stop", data={"action": "estop"}).status_code == 401
+
+
+def test_healthz_needs_no_auth(client):
+    """So a tunnel can be probed without handing over the password."""
+    assert client.get("/healthz").status_code == 200
+
+
+def test_no_password_configured_means_open(root):
+    app = ui.create_app(root, None, repo_root=root.parent)
+    assert app.test_client().get("/").status_code == 200, "--no-auth mode"
+
+
+# --------------------------------------------------------------------------- #
+# Views
+# --------------------------------------------------------------------------- #
+def test_index_lists_experiments_and_campaigns(client):
+    body = client.get("/", headers=auth()).get_data(as_text=True)
+    assert "expA" in body and "c" in body
+
+
+def test_campaign_view_shows_the_coverage_and_the_shortfall(client):
+    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    assert "wanted 4" in body
+    assert "still to fly" in body.lower()
+
+
+def test_campaign_view_marks_non_defaults(client):
+    """The UI requirement from the original ask: non-defaults clearly marked."""
+    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    assert 'class="nd"' in body
+
+
+def _write_bag(root: Path, name: str, metadata: dict) -> None:
+    bag = root / "expA" / "bags" / name
+    bag.mkdir(parents=True)
+    (bag / "trial_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (bag / f"{name}_0.mcap").write_bytes(b"not really a bag")
+
+
+def test_the_bag_table_shows_the_code_version_of_each_trial(client, root):
+    """Both halves of the column, because a trial recorded before code stamping
+    must render as cleanly as one recorded after it — the table is the operator's
+    only view of the bags, so a missing key there breaks the whole page."""
+    _write_bag(root, "t_stamped", {
+        "trial_id": "t_stamped", "execution_host": "laptop", "aborted": False,
+        "trajectory": "hover",
+        "code_version": {"commit": "abcdef1234567890", "branch": "main",
+                         "dirty": True, "dirty_files": ["a.py"],
+                         "dirty_file_count": 1, "captured_on": "remote:orin"},
+    })
+    _write_bag(root, "t_legacy", {
+        "trial_id": "t_legacy", "execution_host": "laptop", "aborted": False,
+        "trajectory": "circle",
+    })
+
+    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    assert "abcdef12" in body, "the stamped trial should show its short commit"
+    assert "remote:orin" in body, "the tooltip should name the host that answered"
+    assert "recorded before code stamping" in body, "the legacy trial needs a reason, not a crash"
+
+
+def test_code_version_is_not_offered_as_a_coverage_axis(client, root):
+    """A dict in the metadata that leaked into the factor columns would put one
+    column per commit in the grid and reopen every cell on every commit."""
+    _write_bag(root, "t1", {
+        "trial_id": "t1", "execution_host": "laptop", "aborted": False,
+        "trajectory": "hover", "code_version": {"commit": "abc", "dirty": False},
+    })
+    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    assert "<th>code_version</th>" not in body
+
+
+def test_unknown_campaign_is_a_clean_404(client):
+    assert client.get("/campaign/expA/nope", headers=auth()).status_code == 404
+
+
+def test_analyses_view_lists_declared_analyses(client):
+    body = client.get("/analyses/expA", headers=auth()).get_data(as_text=True)
+    assert "quick_look" in body
+
+
+def test_api_plan_returns_the_same_numbers_as_the_cli(client, root):
+    from declarative_robot_trials import campaign_plan as cp
+    from declarative_robot_trials import campaign_spec as cs
+    from declarative_robot_trials import trial_index as ti
+    payload = json.loads(client.get("/api/plan/expA/c.json", headers=auth()).get_data(as_text=True))
+    campaign = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
+    expected = cp.build_plan(campaign, ti.load_trials(root, "expA"))
+    assert payload["wanted"] == expected.wanted
+    assert payload["needed"] == expected.needed, "the UI must not compute its own numbers"
+
+
+# --------------------------------------------------------------------------- #
+# Running is a two-step
+# --------------------------------------------------------------------------- #
+def _start_run(client, **extra) -> str:
+    data = {"experiment": "expA", "campaign": "c", "limit": "1"}
+    data.update(extra)
+    # Executing takes BOTH the EXECUTE button and the arm checkbox; the
+    # checkbox alone is a dry run (deliberate, since 2026-07-29).
+    if data.get("confirm") == "yes":
+        data.setdefault("go", "execute")
+    response = client.post("/run", headers=auth(), data=data)
+    assert response.status_code == 302, "a run should redirect to its live page"
+    return response.headers["Location"].rstrip("/").split("/")[-1]
+
+
+def _wait(client, run_id: str, timeout: float = 20.0) -> dict:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        payload = json.loads(client.get(f"/api/run/{run_id}.json",
+                                        headers=auth()).get_data(as_text=True))
+        if payload["state"] in ("finished", "aborted", "error"):
+            return payload
+        time.sleep(0.1)
+    raise AssertionError(f"run {run_id} never finished: {payload}")
+
+
+def test_run_without_confirm_is_a_dry_run(client, root):
+    payload = _wait(client, _start_run(client))
+    assert payload["state"] == "finished" and payload["executed"] is False
+    assert not list((root / "expA" / "bags").glob("*")), "a dry run must create no bag"
+
+
+def test_run_shows_the_commands_it_would_issue(client):
+    payload = _wait(client, _start_run(client))
+    commands = " ".join(c for t in payload["results"] for c in t["commands"])
+    assert "ros2 launch" in commands and "ros2 bag record" in commands
+
+
+def test_the_live_page_renders_and_polls(client):
+    run_id = _start_run(client)
+    body = client.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
+    assert "api/run/" in body, "the page must poll for progress"
+    assert run_id in body
+
+
+def test_progress_is_visible_before_the_run_ends(client):
+    """The whole point of Phase 5 polish: a long campaign must not look frozen."""
+    run_id = _start_run(client, limit="4")
+    payload = json.loads(client.get(f"/api/run/{run_id}.json",
+                                    headers=auth()).get_data(as_text=True))
+    assert payload["wanted"] >= 1
+    assert payload["state"] in ("running", "finished")
+    final = _wait(client, run_id)
+    assert final["done"] == final["wanted"]
+
+
+def test_an_unknown_run_is_a_clean_404(client):
+    assert client.get("/run/nope", headers=auth()).status_code == 404
+    assert client.get("/api/run/nope.json", headers=auth()).status_code == 404
+
+
+def test_abort_marks_the_run_and_never_kills_a_trial(client):
+    """Abort is cooperative: it stops the NEXT trial, it does not interrupt one
+    in flight — that is the e-stop's job, and killing a recorder loses the bag."""
+    run_id = _start_run(client, limit="4")
+    client.post(f"/run/{run_id}/abort", headers=auth())
+    payload = _wait(client, run_id)
+    assert payload["state"] in ("aborted", "finished")
+
+
+def test_only_one_campaign_may_execute_at_a_time(client, root, monkeypatch):
+    """Two campaigns on one rig would fight over radio, recorder and airspace."""
+    from declarative_robot_trials import trial_runner as tr_mod
+    started = {"n": 0}
+    real = tr_mod.run_plan
+
+    def slow(*args, **kwargs):
+        started["n"] += 1
+        import time
+        time.sleep(1.5)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tr_mod, "run_plan", slow)
+    _start_run(client, confirm="yes")
+    second = client.post("/run", headers=auth(),
+                         data={"experiment": "expA", "campaign": "c", "limit": "1",
+                               "go": "execute", "confirm": "yes"})
+    assert second.status_code == 409
+    assert "already running" in second.get_data(as_text=True)
+
+
+def test_a_broken_runner_config_is_reported_not_a_500(client, root):
+    (root / "expA" / "config" / "runner.yaml").write_text("launch: {package: p}\n", encoding="utf-8")
+    response = client.post("/run", headers=auth(),
+                           data={"experiment": "expA", "campaign": "c"})
+    assert response.status_code == 400
+    assert "launch.file is required" in response.get_data(as_text=True)
+
+
+# --------------------------------------------------------------------------- #
+# Stops are a narrow allowlist
+# --------------------------------------------------------------------------- #
+def test_stop_invokes_the_estop_script(client, root, monkeypatch):
+    calls = []
+
+    class Done:
+        returncode = 0
+        stdout = "All robots confirmed the estop."
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    body = client.post("/stop", headers=auth(), data={"action": "estop"}).get_data(as_text=True)
+    assert calls and calls[0][0].endswith("tools/estop.sh")
+    assert "--soft" not in calls[0]
+    assert "confirmed" in body
+
+
+def test_soft_stop_passes_the_soft_flag(client, monkeypatch):
+    calls = []
+
+    class Done:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    client.post("/stop", headers=auth(), data={"action": "soft", "robot": "crazyflie"})
+    assert "--soft" in calls[0] and "--robot" in calls[0] and "crazyflie" in calls[0]
+
+
+def test_a_failed_stop_says_use_the_physical_switch(client, monkeypatch):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "1 robot(s) DID NOT CONFIRM"
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: Failed())
+    body = client.post("/stop", headers=auth(), data={"action": "estop"}).get_data(as_text=True)
+    assert "physical kill switch" in body
+
+
+# --------------------------------------------------------------------------- #
+# Robot actions are the same narrow allowlist (2026-08-10)
+# --------------------------------------------------------------------------- #
+def test_declared_action_invokes_the_action_script(client, monkeypatch):
+    calls = []
+
+    class Done:
+        returncode = 0
+        stdout = "=== OK spot.ready"
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    body = client.post("/robot_action", headers=auth(),
+                       data={"robot": "spot", "action": "ready"}).get_data(as_text=True)
+    assert calls and calls[0][0].endswith("tools/robot_action.sh")
+    assert calls[0][1:] == ["spot", "ready"]
+    assert "OK" in body
+
+
+def test_an_undeclared_action_is_refused_before_any_process(client, monkeypatch):
+    monkeypatch.setattr(ui.subprocess, "run",
+                        lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("spawned!")))
+    resp = client.post("/robot_action", headers=auth(),
+                       data={"robot": "spot", "action": "power_off"})
+    assert resp.status_code == 400
+    resp = client.post("/robot_action", headers=auth(),
+                       data={"robot": "nosuch", "action": "ready"})
+    assert resp.status_code == 400
+
+
+def test_robot_action_requires_auth(client):
+    assert client.post("/robot_action", data={"robot": "spot", "action": "ready"}).status_code == 401
+
+
+def test_index_renders_the_declared_actions(client):
+    body = client.get("/", headers=auth()).get_data(as_text=True)
+    assert "Robot actions" in body and "ready" in body and "lease" in body
+
+
+def test_the_stop_endpoint_cannot_run_arbitrary_commands(client, monkeypatch):
+    """The robot name is passed as an argv element to estop.sh, which validates
+    it against robots.yaml — it is never interpolated into a shell string."""
+    calls = []
+
+    class Done:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    client.post("/stop", headers=auth(), data={"action": "estop", "robot": "; rm -rf /"})
+    assert isinstance(calls[0], list), "the command must be argv, never a shell string"
+    assert calls[0][-1] == "; rm -rf /", "passed as one argv element, not interpreted"
+
+
+# --------------------------------------------------------------------------- #
+# Deep links and defaults
+# --------------------------------------------------------------------------- #
+def test_foxglove_link_is_a_remote_file_deep_link():
+    link = ui.foxglove_link("http://localhost:8080", "expA", "trial1_slim")
+    assert link.startswith("foxglove://open?ds=remote-file&ds.url=")
+    assert link.endswith(".mcap"), "Foxglove needs the extension to pick a reader"
+
+
+def test_viewers_page_offers_live_and_recorded_paths(client):
+    body = client.get("/viewers", headers=auth()).get_data(as_text=True)
+    assert "ws://localhost:8765" in body, "the live path is the foxglove bridge"
+    assert "rviz2 -d" in body, "RViz gets a copy-paste command, having no URL scheme"
+
+
+def test_viewers_page_links_slim_bags_via_foxglove(client, root):
+    bag = root / "expA" / "bags_slim" / "t1_slim"
+    bag.mkdir(parents=True)
+    (bag / "d_0.mcap").write_bytes(b"x")
+    body = client.get("/viewers", headers=auth()).get_data(as_text=True)
+    assert "foxglove://open?ds=remote-file" in body and "t1_slim" in body
+
+
+def test_a_slim_bag_can_be_streamed(client, root):
+    bag = root / "expA" / "bags_slim" / "t1_slim"
+    bag.mkdir(parents=True)
+    (bag / "d_0.mcap").write_bytes(b"MCAPDATA")
+    response = client.get("/bag/expA/t1_slim.mcap", headers=auth())
+    assert response.status_code == 200 and response.get_data() == b"MCAPDATA"
+
+
+def test_bag_serving_rejects_path_traversal(client, root):
+    """Names are resolved against bags that exist, never joined onto a path."""
+    secret = root.parent / "secret.mcap"
+    secret.write_bytes(b"TOPSECRET")
+    for attempt in ("..%2f..%2fsecret", "....//secret", "nonexistent"):
+        response = client.get(f"/bag/expA/{attempt}.mcap", headers=auth())
+        assert response.status_code in (403, 404), attempt
+        assert b"TOPSECRET" not in response.get_data()
+
+
+def test_bag_serving_is_deliberately_public(client):
+    """Slim-bag serving is intentionally unauthenticated, and must stay that way.
+
+    Foxglove (desktop or app.foxglove.dev) fetches the bag URL itself and cannot
+    present Basic credentials, so putting this route behind auth would silently
+    break every "open in Foxglove" link. It serves read-only slim bags from a
+    localhost/tunnel service, and it resolves names against bags that exist
+    rather than joining user input onto a path (see the traversal test above).
+
+    This test asserted 401 until 2026-08-12. The route was made public
+    deliberately in e788cc64ef, which did not update the test, so the suite had
+    been red ever since. It now pins the real contract instead.
+    """
+    response = client.get("/bag/expA/t1_slim.mcap")
+    assert response.status_code != 401, "serving must not demand Basic auth"
+    # No such slim bag in the fixture, so the traversal-safe lookup 404s.
+    assert response.status_code == 404
+
+
+def test_only_bag_serving_and_healthz_are_public(client):
+    """Every other route stays behind auth, including every state-changing one.
+
+    The real invariant worth guarding is not "this one route is authed" but
+    "nothing accidentally stops being authed". requires_auth wraps its view with
+    functools.wraps, so an authed view is exactly one carrying __wrapped__.
+
+    Each name below is public on purpose: `serve_bag` because Foxglove fetches
+    it itself, `healthz` so a tunnel can be probed without the password, and
+    `static` is Flask's own endpoint for the UI's CSS and JS.
+    """
+    expected_public = {"serve_bag", "healthz", "static"}
+    app = client.application
+    public = {name for name, view in app.view_functions.items()
+              if not hasattr(view, "__wrapped__")}
+    assert public == expected_public, (
+        f"unexpected public route(s): {public - expected_public}")
+
+    # And the introspection above agrees with actual behaviour.
+    assert client.get("/").status_code == 401
+    assert client.post("/stop", data={"action": "estop"}).status_code == 401
+    assert client.get("/healthz").status_code == 200
+
+
+def test_the_default_bind_is_localhost():
+    import argparse
+    import inspect
+
+    source = inspect.getsource(ui.main)
+    assert '"--host", default="127.0.0.1"' in source, "must not default to 0.0.0.0"
+
+
+def test_it_refuses_a_public_bind_without_a_password(monkeypatch, capsys):
+    monkeypatch.delenv("EXPERIMENTS_UI_PASSWORD", raising=False)
+    assert ui.main(["--host", "0.0.0.0", "--no-auth"]) == 2
+    assert "without a password" in capsys.readouterr().err
+
+
+def test_it_refuses_to_start_unauthenticated_by_accident(monkeypatch, capsys):
+    monkeypatch.delenv("EXPERIMENTS_UI_PASSWORD", raising=False)
+    assert ui.main([]) == 2
+    assert "EXPERIMENTS_UI_PASSWORD" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# Operator flows: the CLI's waits and tally, mirrored in the browser (2026-08-12)
+# --------------------------------------------------------------------------- #
+def _start_executed_stub_run(client, campaign: str = "steps", **extra) -> str:
+    """EXECUTE with every trial phase disabled: the full executed code path —
+    the operator waits, the gate hooks, the tally — with nothing launched,
+    recorded or flown. hold_s=0 so the manual window costs no test time."""
+    data = {"experiment": "expA", "campaign": campaign, "limit": "1",
+            "go": "execute", "confirm": "yes", "steps_present": "1", "hold_s": "0"}
+    data.update(extra)
+    response = client.post("/run", headers=auth(), data=data)
+    assert response.status_code == 302, response.get_data(as_text=True)
+    return response.headers["Location"].rstrip("/").split("/")[-1]
+
+
+def _wait_for(client, run_id: str, predicate, timeout: float = 10.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        payload = json.loads(client.get(f"/api/run/{run_id}.json",
+                                        headers=auth()).get_data(as_text=True))
+        if predicate(payload):
+            return payload
+        if payload["state"] in ("finished", "aborted", "error"):
+            raise AssertionError(f"run {run_id} ended without matching: {payload}")
+        time.sleep(0.05)
+    raise AssertionError(f"run {run_id} never matched the predicate: {payload}")
+
+
+def test_tally_is_the_clis_own_function():
+    """One tally function for both surfaces — successes first (6d31fcca33)."""
+    from declarative_robot_trials import trial_runner as tr
+    t = tr.tally(["ran", "ran", "blocked", "dry-run"])
+    assert (t["total"], t["ok"], t["blocked"], t["failed"]) == (4, 2, 1, 0)
+    assert t["line"] == "4 trial(s): 2 OK, 1 blocked, 0 failed"
+    assert t["bad"] is True
+    assert tr.tally(["ran"])["bad"] is False
+
+
+def test_executed_run_waits_for_the_operator_steps(client):
+    """The browser mirror of the CLI's Enter wait (8f1213cc6e): with
+    operator_steps declared, an EXECUTE launches NOTHING until the operator
+    confirms on the run page — otherwise the T-0 gate races the physical prep.
+    Also the reason the UI must pass its own confirmation surface into
+    run_plan: the tty default would park the worker on the SERVER's stdin."""
+    run_id = _start_executed_stub_run(client)
+    payload = _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
+    assert payload["state"] == "running" and payload["done"] == 0
+    assert "hover" in payload["awaiting_what"]
+
+    body = client.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
+    assert f"/run/{run_id}/proceed" in body, "the run page must carry the confirm button"
+
+    client.post(f"/run/{run_id}/proceed", headers=auth())
+    final = _wait(client, run_id)
+    assert final["state"] == "finished"
+    assert [r["status"] for r in final["results"]] == ["ran"]
+    assert final["awaiting_kind"] == ""
+    assert final["tally"]["ok"] == 1 and final["tally"]["bad"] is False
+
+
+def test_abort_while_waiting_refuses_the_trial(client):
+    """Abort must wake a parked confirmation AND the woken trial must refuse
+    to launch — otherwise 'abort' either hangs forever or flies one more."""
+    run_id = _start_executed_stub_run(client)
+    _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
+    client.post(f"/run/{run_id}/abort", headers=auth())
+    final = _wait(client, run_id)
+    assert final["state"] == "aborted"
+    assert [r["status"] for r in final["results"]] == ["blocked"]
+    assert "not confirmed" in final["results"][0]["detail"]
+    assert final["tally"]["blocked"] == 1
+
+
+def test_the_pose_pause_waits_in_the_browser_too(client):
+    """The second Enter wait (b0b42729ac), between the T-0 gate and the
+    recorder. Same surface, kind 'pose', opted in by the form checkbox."""
+    run_id = _start_executed_stub_run(client, pose_pause="1")
+    _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
+    client.post(f"/run/{run_id}/proceed", headers=auth())
+    payload = _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "pose")
+    assert payload["done"] == 0, "nothing may be recorded while the rig is being posed"
+    client.post(f"/run/{run_id}/proceed", headers=auth())
+    final = _wait(client, run_id)
+    assert final["state"] == "finished"
+    assert [r["status"] for r in final["results"]] == ["ran"]
+
+
+def test_a_dry_run_never_asks_for_confirmation(client):
+    """Dry runs preview; parking one on an operator wait would be absurd."""
+    final = _wait(client, _start_run(client, campaign="steps"))
+    assert final["state"] == "finished" and final["executed"] is False
+
+
+def test_proceed_when_nothing_waits_is_harmless(client):
+    run_id = _start_run(client)
+    response = client.post(f"/run/{run_id}/proceed", headers=auth())
+    assert response.status_code == 302
+    assert _wait(client, run_id)["state"] == "finished"
+
+
+def test_campaign_page_shows_live_steps_with_the_cockpit_command(client):
+    """The UI's live panel and the tmux handover panes come from the same
+    extractor (campaign_live_steps.annotate), text plus a copyable one-liner."""
+    body = client.get("/campaign/expA/steps", headers=auth()).get_data(as_text=True)
+    assert "hand over to vision" in body
+    assert "echo handover" in body
+    assert "copystep" in body, "the one-liner must be copyable"
+    assert "prose only" in body, "prose-only steps stay visible in the browser"
+
+
+def test_operator_step_runs_only_the_campaigns_declared_commands(client):
+    """The campaign file is the allowlist: the browser posts an INDEX, and only
+    indices that carry a declared run command execute anything."""
+    def post(kind, index):
+        return client.post("/operator_step", headers=auth(),
+                           data={"experiment": "expA", "campaign": "steps",
+                                 "kind": kind, "index": str(index)})
+
+    assert post("live", 0).status_code == 400, "a prose step has nothing to run"
+    assert post("live", 7).status_code == 400, "out of range is refused"
+    ran = post("live", 1)
+    assert ran.status_code == 200
+    assert "handover" in ran.get_data(as_text=True)
+    substituted = post("pre", 1).get_data(as_text=True)
+    assert "motive laptop" in substituted, "fixed factor values are substituted"
+
+
+def test_run_trial_refuses_an_unconfirmed_trial(root):
+    """Runner-side contract behind the UI flow: a False from the confirmation
+    surface blocks the trial before ANY process is spawned or path created."""
+    from declarative_robot_trials import campaign_spec as cs
+    from declarative_robot_trials import trial_runner as tr
+    campaign = cs.load_campaign(root / "expA" / "campaigns" / "steps.yaml", root)
+    config = tr.RunnerConfig.load("expA", root)
+    trial = next(campaign.combinations())
+    asked = []
+    result = tr.run_trial(trial, campaign.factors, config, root / "expA" / "bags",
+                          dry_run=False,
+                          operator_steps=campaign.operator_steps,
+                          confirm_steps=lambda t, s: (asked.append(s), False)[1])
+    assert result.status == "blocked" and "not confirmed" in result.detail
+    assert asked == [campaign.operator_steps], "the surface must see the campaign's steps"
+    assert not (root / "expA" / "bags").exists(), "nothing may be created"
+
+
+def test_the_tty_surface_passes_through_headless(monkeypatch):
+    """confirm_operator_steps_tty keeps the pre-8f1213cc6e headless behaviour:
+    no tty means no prompt, no block, proceed."""
+    import types
+    from declarative_robot_trials import trial_runner as tr
+    monkeypatch.setattr(tr.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+    assert tr.confirm_operator_steps_tty(None, [{"text": "x"}]) is True
+
+
+def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
+    """A campaign's own verify steps must actually be executed.
+
+    They were accepted by RunManager.start() and then dropped before
+    tr.run_plan by a later edit, so `vision_was_in_the_loop` never ran: two
+    hover trials that never had vision in the loop were written as usable
+    coverage — precisely the wrong-result failure that check exists to
+    prevent, and invisible because a missing check looks exactly like a
+    passing one.
+    """
+    import sys
+    from pathlib import Path
+    pytest.importorskip("flask")
+    from declarative_robot_trials.ui import app as ui
+    from declarative_robot_trials import trial_runner as tr
+    seen = {}
+
+    def fake_run_plan(plan, config, bags_dir, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(tr, "run_plan", fake_run_plan)
+    runs = ui.RunManager()
+    journal = ui.RunJournal()
+    steps = [{"name": "vision_was_in_the_loop", "command": "true {bag}"}]
+
+    class _Plan:
+        needed = 1
+        cells = []
+
+    run = runs.start(experiment="e", campaign_name="c", campaign_file="c", plan=_Plan(),
+                     config=None, bags_dir=tmp_path, executed=True, limit=1,
+                     journal=journal, extra_verify=steps)
+    for _ in range(50):
+        if run.state != "running":
+            break
+        time.sleep(0.05)
+    assert seen.get("extra_verify") == steps, (
+        "the campaign's verify steps never reached run_plan — a campaign can ask for a "
+        "check that silently does not run")

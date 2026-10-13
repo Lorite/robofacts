@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Pre-flight checklist for the framework demo (#87). Only machine checks that",
+    "need no hardware, so the gate genuinely passes on any machine — that is what",
+    "makes this usable as a smoke test of the whole chain."
+  ],
+  "variables": {},
+  "checklist": [
+    {
+      "text": "[HARD] The kernel can give CycloneDDS the receive buffer its config demands. net.core.rmem_max is NOT persistent across reboots; when it reverts, EVERY node dies at rmw_create_node and the rest of this gate reports symptoms instead of the cause (2026-08-19).",
+      "check": "dds_socket_buffer"
+    },
+    {
+      "text": "[HARD] No leftover talker from a previous run: exactly this trial's talker binary is running (the gate runs after the launch since 2026-07-29, so the pattern names the binary, lib/demo_nodes_cpp/talker; the plain 'demo_nodes_cpp' also matched the `ros2 run` wrapper and refused every trial, found by the E3 execution on 2026-10-02).",
+      "check": "ros_clean_slate",
+      "args": {"pattern": "demo_nodes_cpp/talker", "max_each": "1"}
+    },
+    {
+      "text": "Enough disk for the (tiny) demo bag.",
+      "check": "disk_space",
+      "args": {"path": ".", "min_gb": "1"}
+    },
+    {
+      "text": "[HARD] The bag directory is writable on the machine that will record.",
+      "check": "bag_dir_writable",
+      "args": {"path": "experiments/demo_talker_listener/bags", "label": "demo bags"}
+    },
+    "Nothing physical to check — this demo has no robot, which is the point."
+  ]
+}

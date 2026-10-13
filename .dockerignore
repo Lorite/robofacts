@@ -1,0 +1,5 @@
+.git
+**/__pycache__
+example_project/experiments/*/bags/*/
+example_project/experiments/*/runs
+example_project/experiments/*/results

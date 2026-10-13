@@ -1,0 +1,30 @@
+# How to run one trial of the framework demo (#96 Phase 4).
+# `ros2 run demo_nodes_cpp talker` — a single node, not a launch file.
+# No robot at all, only software: its trials count in the `simulation` domain of the
+# coverage view (2026-10-06), which means "no hardware involved".
+simulation: true
+
+launch_mode: run
+launch:
+  package: demo_nodes_cpp
+  file: talker
+
+action:
+  command: "python3 experiments/demo_talker_listener/scripts/listen_for.py --rate {chatter_rate}"
+
+settle_s: 2
+stop_grace_s: 3
+# No named record profile applies here, so list the topics outright.
+record_topics: ["/chatter", "/rosout"]
+
+hosts:
+  # The level of the execution_host factor that runs the trial on this machine.
+  laptop:
+    local: true
+  # A second machine would look like this: the runner wraps every command in
+  # `ssh <host> docker exec <container> <shell> -lc ...` and brings the bag back.
+  # rig:
+  #   host: my-robot-host            # an ssh alias
+  #   container: ros2_humble_dev     # omit to run directly on the host
+  #   shell: zsh
+  #   workspace: /workspaces/my_project

@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "The T-0 gate of the experiment {{name}}: what must hold seconds before the trial.",
+    "Each entry is either a machine check ({text, check, args}) or a plain string the",
+    "operator confirms. A check is a script in the package's preflight/checks/ or in",
+    "this project's experiments/common/preflight/checks/ (same name wins). Its exit",
+    "code decides: 0 PASS, 1 FAIL, 3 SKIP. A text starting with [HARD] cannot be",
+    "overridden by the operator. ${name} in an argument is filled from the trial's",
+    "factor values and launch arguments. Checks run after the stack is launched, so",
+    "they measure the real processes and topics of this trial."
+  ],
+  "variables": {},
+  "checklist": [
+    {
+      "text": "[HARD] The DDS configuration is known and the kernel can give it the receive buffer it demands (net.core.rmem_max).",
+      "check": "dds_socket_buffer"
+    },
+    {
+      "text": "[HARD] Exactly this trial's talker is running: no leftover from a previous run.",
+      "check": "ros_clean_slate",
+      "args": {"pattern": "demo_nodes_cpp/talker", "max_each": "1"}
+    },
+    {
+      "text": "Enough disk for the bag.",
+      "check": "disk_space",
+      "args": {"path": ".", "min_gb": "1"}
+    },
+    {
+      "text": "[HARD] The bag directory is writable on the machine that records.",
+      "check": "bag_dir_writable",
+      "args": {"path": "experiments/{{name}}/bags", "label": "bags"}
+    },
+    "Operator: the stack and the recording are the ones this trial declares (a plain string is confirmed by the operator)."
+  ]
+}

@@ -1,0 +1,15 @@
+# The project file of the declarative_robot_trials framework. `trials` commands run
+# from anywhere below this directory find the experiments through it.
+experiments_root: experiments
+project_root: .
+
+
+# Optional project settings (the package defaults apply when a key is absent):
+# stop_latch: /tmp/trial_stop_latch        # the file every stop command writes first; the gate refuses a fresh one
+# record_profiles:                         # the names the named record profiles build their topics from
+#   cf_name: cf1
+#   spot_name: spot
+#   camera: /camera
+#   markerless_node: /estimator
+#   extpos_bridge: /estimator_bridge
+#   watchdog: /localization_watchdog

@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{%- macro step_cell(step, kind, index, experiment, campaign) -%}
+<li style="margin:.45rem 0">
+  <span style="white-space:pre-wrap">{{ step.text }}</span>
+  {%- if step.run %}
+  <div style="margin:.3rem 0 .1rem;display:flex;gap:.4rem;align-items:flex-start">
+    <button type="button" class="runstep" title="run on the trial host"
+            data-experiment="{{ experiment }}" data-campaign="{{ campaign }}"
+            data-kind="{{ kind }}" data-index="{{ index }}"
+            style="padding:.2rem .5rem">▶</button>
+    <button type="button" class="copystep" data-cmd="{{ step.cmd or step.run }}"
+            title="copy the one-liner (exactly what a cockpit pane pre-types)"
+            style="padding:.2rem .5rem">⧉</button>
+    <code style="flex:1;white-space:pre-wrap">{{ step.cmd or step.run }}</code>
+  </div>
+  <pre class="stepout" style="display:none;margin:.2rem 0;font-size:.8rem"></pre>
+  {%- endif %}
+</li>
+{%- endmacro -%}
+{% block body %}
+<h1>{{ 'Run' if run.executed else 'Dry run' }}: {{ run.campaign }}
+    <small>({{ run.experiment }})</small></h1>
+
+<p id="state" style="font-size:1.15rem"><b>{{ run.state }}</b> — {{ run.results|length }} / {{ run.wanted }} trial(s)</p>
+<p id="phase" style="font-size:.9rem"></p>
+<p id="tally" style="font-weight:700"></p>
+{% if not run.executed %}<p><i>Nothing was launched or recorded.</i></p>{% endif %}
+{% if run.error %}<p class="bad">{{ run.error }}</p>{% endif %}
+
+{% if run.state in ('running', 'aborting') %}
+<form method="post" action="{{ url_for('abort_run', run_id=run.run_id) }}">
+  <button class="soft" type="submit">Abort after the current trial</button>
+</form>
+<p style="font-size:.85rem">Aborting never interrupts a trial in flight — use E-STOP for that.</p>
+{% endif %}
+
+{% if run.executed %}
+<div id="waitconfirm" class="bar"
+     style="display:{{ 'flex' if run.awaiting_kind else 'none' }};border-color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--bg))">
+  <div style="flex:1 1 20rem">
+    <b>⏸ WAITING FOR YOU</b> — <span id="waitmsg"></span>
+    <span id="waittrial" style="display:block;font-size:.85rem;color:var(--muted)">{{ run.awaiting_what }}</span>
+  </div>
+  <form method="post" action="{{ url_for('proceed', run_id=run.run_id) }}" style="margin:0">
+    <button id="waitbtn" type="submit"
+            style="background:var(--ok);color:#fff;border:0;font-weight:700">✔ Confirm</button>
+  </form>
+</div>
+{% endif %}
+
+{% if run.live_steps %}
+<div class="bar" style="border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--bg));display:block">
+  <b>⏱ DO THIS WHILE IT FLIES</b> — the runner cannot, and a missed live step means reflying:
+  <ol style="margin:.4rem 0 0 1.2rem;font-size:.95rem">
+    {% for step in run.live_steps %}
+      {{ step_cell(step, 'live', loop.index0, run.experiment, run.campaign_file) }}{% endfor %}
+  </ol>
+</div>
+{% endif %}
+
+{% if run.operator_steps %}
+<div class="bar" style="border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,var(--bg));display:block">
+  <b>👤 Your manual steps for this campaign</b> — carried here from the campaign page, because
+  this is when you need them:
+  <ol style="margin:.4rem 0 0 1.2rem;font-size:.92rem">
+    {% for step in run.operator_steps %}
+      {{ step_cell(step, 'pre', loop.index0, run.experiment, run.campaign_file) }}{% endfor %}
+  </ol>
+</div>
+{% endif %}
+
+<details id="term" open>
+  <summary style="cursor:pointer;font-weight:600">Terminal — what the runner is doing</summary>
+  <div style="font-size:.82rem;margin:.35rem 0;display:flex;gap:.9rem;flex-wrap:wrap;align-items:center">
+    <label><input type="checkbox" class="src" value="runner" checked> runner steps</label>
+    <label><input type="checkbox" class="src" value="stack" checked> stack</label>
+    <label><input type="checkbox" class="src" value="nodes" checked> nodes</label>
+    <label><input type="checkbox" class="src" value="recorder"> recorder</label>
+    <label><input type="checkbox" class="src" value="other" checked> other</label>
+    <span style="border-left:1px solid var(--line);padding-left:.9rem">
+      <label><input type="checkbox" id="onlyprob"> problems only</label>
+    </span>
+    <label><input type="checkbox" id="follow" checked> follow</label>
+    <button type="button" id="copybtn" style="padding:.25rem .6rem">copy</button>
+    <span id="logcount" style="color:var(--muted)"></span>
+  </div>
+  <pre id="termlog" class="term">waiting for output…</pre>
+</details>
+
+<div id="results"></div>
+
+<p><a href="{{ url_for('campaign_view', experiment=run.experiment, name=run.campaign) }}">← back to the campaign</a>
+ · <a href="{{ url_for('viewers') }}">viewers</a></p>
+
+
+<script>
+// Runs a step by INDEX — the browser never sends a command, so the campaign
+// file stays the allowlist for everything this page can execute.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.runstep');
+  if (!btn) return;
+  const out = btn.closest('li').querySelector('.stepout');
+  btn.disabled = true; btn.textContent = '…';
+  out.style.display = 'block'; out.textContent = 'running…';
+  try {
+    const body = new URLSearchParams({
+      experiment: btn.dataset.experiment, campaign: btn.dataset.campaign,
+      kind: btn.dataset.kind, index: btn.dataset.index,
+    });
+    const r = await fetch('/operator_step', {method: 'POST', body});
+    out.textContent = await r.text();
+  } catch (err) {
+    out.textContent = 'request failed: ' + err;
+  }
+  btn.disabled = false; btn.textContent = '▶';
+});
+// Copies the step's one-liner — the same string a cockpit pane pre-types —
+// for pasting into a terminal that the UI deliberately is not.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.copystep');
+  if (!btn) return;
+  try {
+    await navigator.clipboard.writeText(btn.dataset.cmd);
+    btn.textContent = '✓';
+  } catch (err) {
+    // clipboard API needs a secure context; over plain http fall back to a
+    // temporary selection so the command is still one keystroke away.
+    const ta = document.createElement('textarea');
+    ta.value = btn.dataset.cmd; document.body.appendChild(ta); ta.select();
+    btn.textContent = document.execCommand('copy') ? '✓' : '✗';
+    ta.remove();
+  }
+  setTimeout(() => { btn.textContent = '⧉'; }, 1200);
+});
+</script>
+
+<script>
+const runId = {{ run.run_id|tojson }};
+const base  = {{ base_url|tojson }};
+let lastLog = [];
+
+function visibleLines() {
+  const srcs = new Set([...document.querySelectorAll('.src')]
+      .filter(c => c.checked).map(c => c.value));
+  const onlyProblems = document.getElementById('onlyprob').checked;
+  return lastLog
+    .filter(e => srcs.has(e.src) && (!onlyProblems || e.lvl !== 'info'))
+    .map(e => e.text);
+}
+
+function renderLog() {
+  const pre = document.getElementById('termlog');
+  const lines = visibleLines();
+  pre.textContent = lines.length ? lines.join('\n') : 'no output matches the filters';
+  document.getElementById('logcount').textContent =
+    `${lines.length} / ${lastLog.length} lines`;
+  if (document.getElementById('follow').checked) pre.scrollTop = pre.scrollHeight;
+}
+
+// Re-render on any filter change; the data is already in the browser, so
+// changing what you look at never costs a round trip or loses history.
+document.addEventListener('change', e => {
+  if (e.target.matches('.src, #onlyprob, #follow')) renderLog();
+});
+document.getElementById('copybtn').addEventListener('click', async () => {
+  const btn = document.getElementById('copybtn');
+  // Copies exactly what is on screen, filters included — the point is to paste
+  // the relevant slice into a note or a message, not the whole firehose.
+  try {
+    await navigator.clipboard.writeText(visibleLines().join('\n'));
+    btn.textContent = 'copied ✓';
+  } catch (err) {
+    // clipboard API needs a secure context; over a plain-http tunnel it throws.
+    const pre = document.getElementById('termlog');
+    const sel = window.getSelection(); const range = document.createRange();
+    range.selectNodeContents(pre); sel.removeAllRanges(); sel.addRange(range);
+    btn.textContent = document.execCommand('copy') ? 'copied ✓' : 'select+copy';
+  }
+  setTimeout(() => { btn.textContent = 'copy'; }, 1500);
+});
+async function poll() {
+  const r = await fetch(`/api/run/${runId}.json`);
+  if (!r.ok) return;
+  const d = await r.json();
+  const icons = {ran: '✅', 'dry-run': '🔍', blocked: '🚫', failed: '❌'};
+  const meaning = {
+    ran: 'flew and recorded',
+    'dry-run': 'preview only — nothing launched',
+    blocked: 'pre-flight said no-go — nothing recorded, nothing flew',
+    failed: 'started but did not produce a usable trial',
+  };
+  document.getElementById('state').innerHTML =
+    `<b>${d.state}</b> — ${d.done} / ${d.wanted} trial(s)`;
+  // While a trial is in flight the runner is mid-sequence and silent; say
+  // which stage it is in rather than leaving the page looking hung.
+  const phase = document.getElementById('phase');
+  if (d.state === 'running' && d.awaiting_kind) {
+    phase.textContent = d.awaiting_kind === 'steps'
+      ? 'paused BEFORE the trial — confirm the operator steps; nothing has launched.'
+      : 'paused AFTER the T-0 gate — pose the rig, then confirm; nothing is recording yet.';
+  } else if (d.state === 'running') {
+    phase.textContent = d.executed
+      ? `trial ${d.done + 1} of ${d.wanted} in progress — kill stale rig → launch → settle → PRE-FLIGHT GATE → record → fly → stop recorder. Takes a few minutes; this page updates itself.`
+      : 'building the plan…';
+  } else if (d.state === 'aborting') {
+    phase.textContent = 'finishing the trial in flight, then stopping (E-STOP is the only thing that interrupts a flight).';
+  } else {
+    phase.textContent = '';
+  }
+  // The operator-wait banner: the runner is parked until the button. The two
+  // waits mirror the CLI's two Enter prompts, so the wording says which one.
+  const waitbox = document.getElementById('waitconfirm');
+  if (waitbox) {
+    waitbox.style.display = d.awaiting_kind ? 'flex' : 'none';
+    document.getElementById('waittrial').textContent = d.awaiting_what || '';
+    if (d.awaiting_kind === 'steps') {
+      document.getElementById('waitmsg').textContent =
+        'do the 👤 manual steps below, then confirm. Nothing has launched yet; the T-0 gate runs right after this.';
+      document.getElementById('waitbtn').textContent = '✔ Steps done — launch the trial';
+    } else if (d.awaiting_kind === 'pose') {
+      document.getElementById('waitmsg').textContent =
+        'T-0 gate PASSED — pose the rig now (stand Spot, set the gripper). Recording and the flight start on your confirm.';
+      document.getElementById('waitbtn').textContent = '✔ Posed — record and fly';
+    }
+  }
+  // The closing tally, the CLI's own line (same function server-side), so two
+  // clean flights never again read as "it crashed" because only the blocked
+  // count was visible.
+  const tallyEl = document.getElementById('tally');
+  if (d.executed && ['finished', 'aborted', 'error'].includes(d.state)) {
+    tallyEl.textContent = d.tally.line;
+    tallyEl.className = d.tally.bad ? 'bad' : 'ok';
+  }
+  document.getElementById('results').innerHTML = d.results.map(t => {
+    const cls = (t.status === 'ran' || t.status === 'dry-run') ? 'ok' : 'bad';
+    const fox = t.bag
+      ? ` · <a href="foxglove://open?ds=remote-file&ds.url=${base}/bag/${d.experiment}/${t.bag}_slim.mcap">open in Foxglove</a>`
+      : '';
+    // The reason a trial did not fly is the single most important thing on
+    // this page, so it goes first, in full, and never inside a <pre> dump.
+    const detail = t.detail
+      ? `<pre class="bad" style="white-space:pre-wrap;font-size:.95rem">${t.detail}</pre>` : '';
+    return `<h3 class="${cls}">${icons[t.status] || ''} ${t.status} — <small>${meaning[t.status] || ''}</small></h3>`
+         + detail
+         + `<p style="font-size:.85rem">${t.describe}</p>`
+         + (t.bag ? `<p>bag: <code>${t.bag}</code>${fox}</p>` : '')
+         + `<details><summary style="font-size:.85rem">commands</summary>`
+         + `<pre>${t.commands.map(c => '$ ' + c).join('\n')}</pre></details>`;
+  }).join('');
+  lastLog = d.log || [];
+  renderLog();
+  // Stop polling once it is over; a finished run does not change again.
+  if (['finished', 'aborted', 'error'].includes(d.state)) return;
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+{% endblock %}

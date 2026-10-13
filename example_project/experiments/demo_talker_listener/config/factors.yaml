@@ -1,0 +1,25 @@
+# Factors for the framework demo (#96).
+#
+# The "robot" is `demo_nodes_cpp talker`, so this runs anywhere ROS 2 is
+# installed — no drone, no mocap, no radio. It exists so the framework can be
+# learned, demonstrated and smoke-tested without a rig.
+
+version: 1
+
+factors:
+  record_profile:
+    describe: "The demo records /chatter only; the flight profiles do not apply."
+    levels: [demo]
+    default: demo
+    metadata_key: record_profile
+    maps_to: {kind: record_profile}
+
+  chatter_rate:
+    describe: >-
+      Stand-in for a real independent variable. It changes how long the listener
+      runs, so different levels really do produce different bags — enough to see
+      the coverage grid fill in.
+    levels: [slow, fast]
+    default: slow
+    metadata_key: chatter_rate
+    maps_to: {kind: internal}

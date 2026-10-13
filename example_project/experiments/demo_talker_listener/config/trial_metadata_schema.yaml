@@ -1,0 +1,18 @@
+# Metadata contract for the framework demo (#96 Phase 0).
+version: 1
+fields:
+  chatter_rate:
+    required: true
+    type: str
+    factor: true
+    enum: [slow, fast]
+    describe: "Declared factor: true so the coverage grid can group by it."
+
+  record_profile:
+    required: false
+    type: str
+    factor: true
+    enum: [demo]
+    describe: "Overrides the core enum: the flight profiles do not apply to a
+               demo that records /chatter. This is the per-experiment override
+               mechanism — the core file is not forked."

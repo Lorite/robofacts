@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Viewers</h1>
+<p style="font-size:.9rem">This page is served by the rig, but your browser runs on the laptop —
+which is what lets a <code>foxglove://</code> link open <em>your</em> Foxglove. RViz has no such
+scheme, so it gets a copy-paste command instead.</p>
+
+<h3>Live</h3>
+<p>On the rig: <code>ros2 launch <your_package> foxglove_bridge.launch.py</code><br>
+On the laptop: <code>ssh -N -L 8765:localhost:8765 &lt;trial-host&gt;</code><br>
+Then in Foxglove: <b>Open connection → Foxglove WebSocket → <code>ws://localhost:8765</code></b></p>
+<p style="font-size:.9rem">A TCP websocket, so it sidesteps the lab Wi-Fi's fragmented-UDP ceiling
+that makes cross-host DDS unreliable. The bridge is read-only: a browser cannot publish to the rig.</p>
+<p>RViz instead (needs working cross-host DDS):
+<code>rviz2 -d experiments/common/config/rviz/markerless_debug.rviz</code></p>
+
+<h3>Recorded — open a slim bag in Foxglove</h3>
+{% if recent %}
+<table><tr><th>experiment</th><th>bag</th><th></th></tr>
+{% for r in recent %}
+<tr><td>{{ r.experiment }}</td><td><code>{{ r.name }}</code></td>
+    <td><a href="{{ r.link }}">open in Foxglove</a>
+        &nbsp;<a href="{{ base_url }}/bag/{{ r.experiment }}/{{ r.name }}.mcap">download</a></td></tr>
+{% endfor %}
+</table>
+<p style="font-size:.9rem">The link streams the bag through this UI over your SSH tunnel — no copy needed
+(slim bags are a few MB). It fails <b>silently</b> if Foxglove is not installed; use the download link then.</p>
+{% else %}
+<p>No slim bags yet. They are produced automatically after each recording.</p>
+{% endif %}
+{% endblock %}

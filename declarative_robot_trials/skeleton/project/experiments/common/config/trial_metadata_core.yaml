@@ -1,0 +1,155 @@
+# Shared core of the trial-metadata contract (#96 Phase 0).
+#
+# Every recorded trial must carry these, whatever the experiment. Per-experiment
+# additions live in experiments/<name>/config/trial_metadata_schema.yaml and are
+# merged on top of this file — the same common/ + <name>/ split the pre-flight
+# checklists use (#87), where the file is the contract and a test enforces it.
+#
+# Why this exists: an index is only as trustworthy as its metadata, and an audit
+# of the 179 existing trials found real holes — battery_start_v null on 34 of 37
+# position-only trials, demo_name null on 6 apriltag bags, aborted null on 2 spot
+# bags. A coverage grid built on those looks authoritative while being wrong.
+#
+# Recovered values are marked, always (2026-08-05). A field this contract makes
+# required is required of every trial ever recorded, including the ones flown
+# before the field existed, so a good flight can start reading `unverified` and
+# its campaign cell can start asking for a flight that already happened. When
+# such a field can be PROVEN from the recorded bag,
+# `common/scripts/backfill_trial_metadata.py` fills it and stamps the proof in a
+# `_backfilled` block next to it:
+#
+#   "altitude": "1.0",
+#   "_backfilled": {"altitude": {"value": "1.0", "recovered_at": "...",
+#                                "by": "...backfill_trial_metadata.py",
+#                                "source": "bag:/rosout",
+#                                "evidence": ["[CrazyflieAPI] ... altitude=1.00 m ...", ...],
+#                                "from_bag": "..."}}
+#
+# The stamp is not decoration: a value that was recovered afterwards is a weaker
+# claim than one captured at record time, and a reader must be able to tell them
+# apart forever. Underscore-prefixed keys are ignored by the validator and never
+# offered as a coverage axis. A field the bag cannot prove is left MISSING on
+# purpose, because an honest hole is cheaper than a confident wrong number.
+#
+# Field spec:
+#   required : bool   - must be present AND non-null
+#   type     : str|int|float|bool|list|dict  (optional; checked when given)
+#   enum     : [...]  - allowed values (optional)
+#   factor   : bool   - part of the experiment factor space, i.e. something the
+#                       coverage grid may group by. Non-factor fields are
+#                       provenance or outcome, not axes.
+#   describe : str    - why it matters; shown in validation errors
+
+version: 1
+
+fields:
+  trial_id:
+    required: true
+    type: str
+    factor: false
+    describe: "Stable identifier for the trial; ties bag, metadata and results together."
+
+  execution_host:
+    required: true
+    type: str
+    factor: true
+    describe: "Which machine actually ran it. The same code behaves differently on a
+               laptop, a lab workstation and an on-robot computer, so a number without a
+               host is not comparable."
+
+  execution_container:
+    required: false
+    type: str
+    factor: false
+    describe: "Container/image the trial ran in, for reproducing an old result."
+
+  code_version:
+    required: false
+    type: dict
+    factor: false
+    # NOT required, deliberately: making it so would retroactively fail every
+    # trial recorded before 2026-08-04, and a trial that fails the contract
+    # counts `unverified` in trial_index, so campaign_plan reports the cell as
+    # STILL TO FLY and the campaign asks for a flight that already happened.
+    # That is the exact failure the record_profile enum gap caused.
+    #
+    # NOT a factor, equally deliberately: the coverage grid groups by factors,
+    # so every commit would open a fresh level and every cell of every campaign
+    # would reopen after any commit. Code version is provenance, not an axis.
+    describe: "Which code produced the trial, probed on the host that flew it (see
+               common/scripts/code_version.py): commit, branch, and — the field that
+               matters most — `dirty`, the tracked-file modifications that make the
+               recorded commit an incomplete description of what ran. A bare hash over
+               a modified tree claims a reproducibility that does not exist. Absent
+               means the trial predates the stamp; `dirty: null` means the probe could
+               not answer, which is not the same claim as `dirty: false`."
+
+  experiment_variant:
+    required: false
+    type: str
+    factor: true
+    describe: "Named variant within the experiment (e.g. exp1_lawnmower)."
+
+  record_profile:
+    required: false
+    type: str
+    factor: true
+    # markerless_replay, static_sweep and static_sweep_light added 2026-08-04.
+    # They existed in record_profiles.PROFILES but not here, and the consequence
+    # is the one the describe below warns about: a trial recorded on a profile
+    # missing from this list fails the contract, so trial_index counts it
+    # `unverified` instead of `usable`, campaign_plan reports the cell as STILL
+    # TO FLY, and the campaign asks for a flight that already happened. Caught
+    # by test_experiment_config_lint L9, which now fails the build on the gap.
+    # spot_route_replay added 2026-08-05 with the beyond-the-volume route campaign,
+    # in the same commit as the profile itself — L9 exists because the previous
+    # profile was added without this line.
+    # spot_observer_handcam_replay added 2026-08-11 with the depth-confounds
+    # campaign, same commit as the profile itself (the shadow rig's bag with
+    # replay-grade hand-camera pixels; static material only).
+    # livox_mapping and livox_mapping_spot added 2026-09-30 with the Livox Mid-360S
+    # profiles (#109), in the same commit as the profiles: L9 caught the gap at push.
+    # aideck_mocap added 2026-10-01 with the Paper 3 handheld relocalization experiment
+    # (#107), in the same change as the profile.
+    enum: [position_only, markerless_light, markerless_replay, markerless_full, static_sweep, static_sweep_light, spot_observer, spot_observer_handcam, spot_observer_handcam_replay, spot_route_replay, livox_mapping, livox_mapping_spot, aideck_mocap, custom, unknown]
+    describe: "Which topic set was recorded (#94). Determines what the bag can answer. Keep in sync with common/scripts/record_profiles.py — a profile missing here invalidates every trial recorded on it."
+
+  aborted:
+    required: true
+    type: bool
+    factor: false
+    describe: "Did the trial complete? MUST be explicit — null is what makes a bag
+               ambiguous forever. An aborted trial is legitimate data about a failure,
+               but only if it is labelled as one."
+
+  abort_reason:
+    required: false
+    type: str
+    factor: false
+    describe: "Why it aborted. Required in spirit whenever aborted is true."
+
+  preflight:
+    required: false
+    type: dict
+    factor: false
+    describe: "The #87 gate result, including any operator override and its reason.
+               Absent means the trial predates the gate."
+
+  # 2026-10-06, SAC 2027 framework paper: the coverage view per condition and
+  # domain (trial_index.py --condition-space). Written by the runner from
+  # runner.yaml `simulation:` and any factor `domain:` map. NOT required: older
+  # trials lack it, and trial_index derives it for them from the same sources
+  # (marked derived in the view) rather than calling them unverified.
+  domain:
+    required: false
+    type: str
+    factor: false
+    enum: [simulation, hardware]
+    describe: "Whether the trial ran on simulated or real robots."
+
+  domain_basis:
+    required: false
+    type: str
+    factor: false
+    describe: "Why the trial has its domain: runner.yaml's simulation flag, or the
+               factor level that decided it (e.g. backend=sim)."

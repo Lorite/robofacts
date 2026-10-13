@@ -1,0 +1,9 @@
+# The demo campaign: two rates, two repetitions each = 4 trials.
+name: rates
+experiment: demo_talker_listener
+describe: >-
+  Sweep the stand-in factor so the coverage grid visibly fills in as trials run.
+  Nothing flies; this is the framework's worked example and smoke test.
+repetitions: 2
+sweep:
+  chatter_rate: [slow, fast]
