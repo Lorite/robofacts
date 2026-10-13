@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -51,6 +52,14 @@ from typing import Any, Dict, Optional
 
 
 from . import roots
+
+#: git exports these to hooks. From a worktree they are absolute paths, so a git call that
+#: inherits them answers for the hook's repository instead of ``path`` (2026-10-14).
+_GIT_HOOK_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_COMMON_DIR")
+
+
+def _env_without_git_hook_vars() -> Dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k not in _GIT_HOOK_VARS}
 
 
 def __getattr__(name):
@@ -161,7 +170,8 @@ def probe(target=None, workspace: Optional[Path] = None,
     try:
         if target is None:
             result = subprocess.run(["sh", "-c", script], capture_output=True,
-                                    text=True, timeout=timeout)
+                                    text=True, timeout=timeout,
+                                    env=_env_without_git_hook_vars())
         else:
             from .remote_exec_utils import remote_sh
             result = remote_sh(target, script, timeout=timeout)

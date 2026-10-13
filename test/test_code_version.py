@@ -7,6 +7,7 @@ The parser is shared by the local and remote probes on purpose (see
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,10 @@ import pytest
 HERE = Path(__file__).resolve().parent
 
 from declarative_robot_trials import code_version as cv
+
+# git exports GIT_DIR and friends to hooks (the pre-push hook runs this file). With them set,
+# every git call below would act on the hook's repository instead of the temporary one.
+_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 @pytest.fixture(autouse=True)
 def _clean_cache():
     cv.reset_cache()
@@ -27,7 +32,7 @@ def _clean_cache():
 def repo(tmp_path: Path) -> Path:
     """A real git repo — the probe shells out to git, so faking it proves nothing."""
     def git(*args):
-        subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=tmp_path,
+        subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=tmp_path, env=_ENV,
                        check=True, capture_output=True, text=True)
 
     git("init", "-q", "-b", "main")
@@ -75,10 +80,10 @@ def test_untracked_files_do_not_make_it_dirty(repo):
 def test_dirty_file_list_is_capped_but_the_count_is_exact(repo):
     for i in range(cv.MAX_DIRTY_FILES + 5):
         (repo / f"f{i:02d}.py").write_text("a = 0\n", encoding="utf-8")
-    subprocess.run(["git", "-c", "safe.directory=*", "add", "."], cwd=repo,
+    subprocess.run(["git", "-c", "safe.directory=*", "add", "."], cwd=repo, env=_ENV,
                    check=True, capture_output=True)
     subprocess.run(["git", "-c", "safe.directory=*", "-c", "user.email=t@e.com",
-                    "-c", "user.name=t", "commit", "-q", "-m", "many"], cwd=repo,
+                    "-c", "user.name=t", "commit", "-q", "-m", "many"], cwd=repo, env=_ENV,
                    check=True, capture_output=True)
     for i in range(cv.MAX_DIRTY_FILES + 5):
         (repo / f"f{i:02d}.py").write_text("a = 1\n", encoding="utf-8")
@@ -181,3 +186,20 @@ def test_summary_leads_with_the_dirty_warning():
     assert "uncommitted" in cv.summary(dirty)
     assert "abcdef12" in cv.summary(dirty)
     assert "unknown" in cv.summary(cv.unknown("nope", "local", "/x"))
+
+
+def test_the_probe_answers_for_the_given_path_even_inside_a_git_hook(repo, tmp_path, monkeypatch):
+    """git exports GIT_DIR to hooks. On 2026-10-14 the pre-push hook ran this suite from a
+    worktree, every git call answered for that worktree, and the fixture committed into it."""
+    other = tmp_path / "other"
+    other.mkdir()
+    for args in (["init", "-q", "-b", "other"], ["config", "user.email", "t@e.com"],
+                 ["config", "user.name", "t"], ["commit", "-q", "--allow-empty", "-m", "other"]):
+        subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=other, check=True,
+                       capture_output=True, text=True, env=_ENV)
+    other_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=other, capture_output=True,
+                                text=True, env=_ENV).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    version = cv.probe(None, repo)
+    assert version["branch"] == "main"
+    assert version["commit"] != other_head
