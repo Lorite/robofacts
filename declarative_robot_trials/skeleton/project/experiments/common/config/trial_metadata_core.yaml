@@ -111,7 +111,9 @@ fields:
     # profiles (#109), in the same commit as the profiles: L9 caught the gap at push.
     # aideck_mocap added 2026-10-01 with the Paper 3 handheld relocalization experiment
     # (#107), in the same change as the profile.
-    enum: [position_only, markerless_light, markerless_replay, markerless_full, static_sweep, static_sweep_light, spot_observer, spot_observer_handcam, spot_observer_handcam_replay, spot_route_replay, livox_mapping, livox_mapping_spot, aideck_mocap, custom, unknown]
+    # Every profile the package ships (record_profiles.PROFILES, pinned by lint L9), plus
+    # custom (runner.yaml record_topics) and unknown.
+    enum: [aideck_mocap, aideck_vio_shadow, livox_mapping, livox_mapping_spot, markerless_full, markerless_light, markerless_replay, position_only, spot_observer, spot_observer_handcam, spot_observer_handcam_replay, spot_route_replay, static_sweep, static_sweep_light, custom, unknown]
     describe: "Which topic set was recorded (#94). Determines what the bag can answer. Keep in sync with common/scripts/record_profiles.py — a profile missing here invalidates every trial recorded on it."
 
   aborted:
