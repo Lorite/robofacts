@@ -192,3 +192,29 @@ def test_continuous_session_reuses_one_stack_and_closes_it(demo_root, demo_confi
     leftovers = subprocess.run(["pgrep", "-fc", "demo_nodes_cpp"], capture_output=True, text=True)
     assert int((leftovers.stdout or "0").strip() or 0) == 0, "the shared stack survived"
 
+
+
+def test_the_trial_leaves_rosout_txt_beside_the_bag(demo_root, demo_config, monkeypatch):
+    """experiments/AGENTS.md asks for rosout.txt beside every bag. Before 2026-10-14 only the
+    run notebooks wrote it, and no runner-written bag had one."""
+    monkeypatch.setattr(tr, "record_command",
+                        lambda trial, factors, config, bag_dir: [
+                            "ros2", "bag", "record", "-s", "mcap", "-o", str(bag_dir),
+                            "/chatter", "/rosout"])
+    bags = demo_root / "demo" / "bags"
+    factors = cs.load_factors("demo", demo_root)
+    result = tr.run_trial(_trial(), factors, demo_config, bags, dry_run=False, slim=False)
+
+    assert result.status == "ran", result.detail
+    text = (result.bag_dir / "rosout.txt").read_text(encoding="utf-8")
+    assert "Publishing" in text, "the talker's log lines should be in rosout.txt"
+
+
+def test_a_bag_without_rosout_still_finishes_the_trial(demo_root, demo_config):
+    """The default demo records only /chatter: the export is skipped and the trial counts."""
+    bags = demo_root / "demo" / "bags"
+    factors = cs.load_factors("demo", demo_root)
+    result = tr.run_trial(_trial(), factors, demo_config, bags, dry_run=False, slim=False)
+    assert result.status == "ran", result.detail
+    assert not (result.bag_dir / "rosout.txt").exists()
+    assert (result.bag_dir / "trial_metadata.json").is_file()

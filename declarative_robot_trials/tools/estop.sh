@@ -157,7 +157,15 @@ build_command() {
         # `zsh -lc` is required, not bash: CYCLONEDDS_URI is defaulted only in
         # /etc/zsh/zshenv, and a bash login shell silently loses DDS discovery,
         # so the call would reach nothing while appearing to succeed.
-        wrapped="docker exec $container $shell -lc $(printf '%q' "$inner")"
+        #
+        # The inner `timeout` bounds the command inside the container. The outer
+        # `timeout` only kills the local docker or ssh client, and the process
+        # that `docker exec` started keeps running in the container after its
+        # client dies, so a hung stop would hold DDS state until the container
+        # restarts. The inner limit ends 2 s before the outer one, so a hung stop
+        # still exits with 124 and the FAIL line keeps its explanation. `-k 2`
+        # sends SIGKILL to a command that ignores SIGTERM.
+        wrapped="docker exec $container timeout -k 2 $INNER_TIMEOUT $shell -lc $(printf '%q' "$inner")"
         if docker container inspect "$container" >/dev/null 2>&1; then
             printf '%s' "$wrapped"
             return
@@ -170,6 +178,12 @@ build_command() {
     fi
     printf '%s' "$wrapped"
 }
+
+if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [ "$TIMEOUT" -lt 1 ]; then
+    echo "--timeout must be a whole number of seconds, at least 1 (got '$TIMEOUT')" >&2
+    exit 2
+fi
+INNER_TIMEOUT=$(( TIMEOUT > 3 ? TIMEOUT - 2 : 1 ))
 
 MAPFILE=$(read_config)
 if [ -z "$MAPFILE" ]; then

@@ -326,23 +326,27 @@ def test_abort_marks_the_run_and_never_kills_a_trial(client):
 
 def test_only_one_campaign_may_execute_at_a_time(client, root, monkeypatch):
     """Two campaigns on one rig would fight over radio, recorder and airspace."""
+    import threading
     from declarative_robot_trials import trial_runner as tr_mod
-    started = {"n": 0}
-    real = tr_mod.run_plan
+    release = threading.Event()
 
-    def slow(*args, **kwargs):
-        started["n"] += 1
-        import time
-        time.sleep(1.5)
-        return real(*args, **kwargs)
+    # The first campaign holds the rig until the test releases it. It runs no real
+    # trial: the earlier version called the real run_plan and returned before the
+    # trial ended, so pytest left its `ros2 bag record` running after the session.
+    def held(*args, **kwargs):
+        release.wait(timeout=20)
 
-    monkeypatch.setattr(tr_mod, "run_plan", slow)
-    _start_run(client, confirm="yes")
-    second = client.post("/run", headers=auth(),
-                         data={"experiment": "expA", "campaign": "c", "limit": "1",
-                               "go": "execute", "confirm": "yes"})
-    assert second.status_code == 409
-    assert "already running" in second.get_data(as_text=True)
+    monkeypatch.setattr(tr_mod, "run_plan", held)
+    first = _start_run(client, confirm="yes")
+    try:
+        second = client.post("/run", headers=auth(),
+                             data={"experiment": "expA", "campaign": "c", "limit": "1",
+                                   "go": "execute", "confirm": "yes"})
+        assert second.status_code == 409
+        assert "already running" in second.get_data(as_text=True)
+    finally:
+        release.set()
+    assert _wait(client, first)["state"] == "finished"
 
 
 def test_a_broken_runner_config_is_reported_not_a_500(client, root):
@@ -423,6 +427,56 @@ def test_an_undeclared_action_is_refused_before_any_process(client, monkeypatch)
     resp = client.post("/robot_action", headers=auth(),
                        data={"robot": "nosuch", "action": "ready"})
     assert resp.status_code == 400
+
+
+def _lease_echo(owner: str) -> str:
+    """`ros2 topic echo .../status/leases --once` as robot_action.sh prints it, in the format
+    of a LeaseArray recorded from the real Spot on 2026-08-17 (client name anonymized)."""
+    blocks = []
+    for resource in ("all-leases", "arm", "body", "fan", "full-arm", "gripper", "mobility"):
+        blocks.append(f"""- resource: {resource}
+  lease:
+    resource: {resource}
+    epoch: jloxOXQHyAqctmup
+    sequence:
+    - 4
+  lease_owner:
+    client_name: '{owner}'
+    user_name: ''""")
+    return "=== spot.lease ===\nresources:\n" + "\n".join(blocks) + "\n---\n=== OK spot.lease\n"
+
+
+def test_the_lease_action_states_who_holds_the_body_lease(client, monkeypatch):
+    class Done:
+        returncode = 0
+        stdout = _lease_echo("ros_rig:__main__.py-192339")
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: Done())
+    body = client.post("/robot_action", headers=auth(),
+                       data={"robot": "spot", "action": "lease"}).get_data(as_text=True)
+    assert "Body lease: held by ros_rig:__main__.py-192339" in body
+    assert all(f"<tr><td>{r}</td>" in body for r in ("all-leases", "arm", "body", "mobility"))
+
+
+def test_a_free_body_lease_says_so(client, monkeypatch):
+    class Done:
+        returncode = 0
+        stdout = _lease_echo("")
+        stderr = ""
+
+    monkeypatch.setattr(ui.subprocess, "run", lambda cmd, **kw: Done())
+    body = client.post("/robot_action", headers=auth(),
+                       data={"robot": "spot", "action": "lease"}).get_data(as_text=True)
+    assert "Body lease: nobody holds it" in body
+
+
+def test_other_actions_show_no_lease_table():
+    assert ui.lease_owners("=== OK spot.ready") is None
+    assert ui.lease_owners("resources: [unclosed") is None
+    owners = ui.lease_owners(_lease_echo("tablet"))
+    assert [o["resource"] for o in owners][:3] == ["all-leases", "arm", "body"]
+    assert {o["client_name"] for o in owners} == {"tablet"}
 
 
 def test_robot_action_requires_auth(client):
@@ -535,11 +589,12 @@ def test_only_bag_serving_and_healthz_are_public(client):
 
 
 def test_the_default_bind_is_localhost():
-    import argparse
-    import inspect
+    # Checks the parsed default, not the source text: the parser moved to its own
+    # module so that `trials ui --help` needs no Flask, and a source grep of
+    # ui.main stopped seeing it.
+    from declarative_robot_trials.ui.arguments import build_parser
 
-    source = inspect.getsource(ui.main)
-    assert '"--host", default="127.0.0.1"' in source, "must not default to 0.0.0.0"
+    assert build_parser().parse_args([]).host == "127.0.0.1", "must not default to 0.0.0.0"
 
 
 def test_it_refuses_a_public_bind_without_a_password(monkeypatch, capsys):

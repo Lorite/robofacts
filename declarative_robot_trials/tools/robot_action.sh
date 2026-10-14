@@ -59,6 +59,11 @@ while [ $# -gt 0 ]; do
 done
 
 [ -f "$CONFIG" ] || { echo "Robot config not found: $CONFIG" >&2; exit 2; }
+if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [ "$TIMEOUT" -lt 1 ]; then
+    echo "--timeout must be a whole number of seconds, at least 1 (got '$TIMEOUT')" >&2
+    exit 2
+fi
+INNER_TIMEOUT=$(( TIMEOUT > 3 ? TIMEOUT - 2 : 1 ))
 
 if [ "$LIST" -eq 1 ]; then
     python3 - "$CONFIG" <<'PY'
@@ -121,7 +126,9 @@ wrapped="$COMMAND"
 if [ -n "$CONTAINER" ]; then
     # zsh -lc, never bash: CYCLONEDDS_URI lives in /etc/zsh/zshenv (the
     # documented false-dead trap).
-    wrapped="docker exec $CONTAINER $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
+    # The inner `timeout` bounds the command inside the container, because the
+    # outer one only kills the local docker or ssh client (see estop.sh).
+    wrapped="docker exec $CONTAINER timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
 fi
 if [ "$HOST" != "local" ] && [ "$(hostname)" != "$HOST" ]; then
     wrapped="ssh -o ConnectTimeout=5 -o BatchMode=yes -o ForwardX11=no $HOST $(printf '%q' "$wrapped")"

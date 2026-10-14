@@ -596,3 +596,16 @@ def rsync_back(
         completed = subprocess.run(cmd, check=False)
         results[Path(path)] = completed.returncode
     return results
+
+
+def package_module_command(project_root: Path, module: str, args: list) -> list:
+    """A command that runs one package module on another host.
+
+    The project's shim ``experiments/common/scripts/<module>.py`` when the checkout has one
+    (it finds the package in the source tree without a build), else ``python3 -m`` on the
+    installed package, so a project without the shims works too.
+    """
+    shim = shlex.quote(str(Path(project_root) / "experiments" / "common" / "scripts" / f"{module}.py"))
+    rest = " ".join(shlex.quote(a) for a in args)
+    return ["sh", "-c", f"if [ -f {shim} ]; then exec python3 {shim} {rest}; "
+                        f"else exec python3 -m declarative_robot_trials.{module} {rest}; fi"]

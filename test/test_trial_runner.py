@@ -898,3 +898,40 @@ def test_start_background_quiet_sink_bypasses_stdout(tmp_path, capsys):
         _time.sleep(0.1)
     assert "[stack] pumped-line" in sink.getvalue()
     assert "pumped-line" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# rosout.txt on the host that holds the bag (2026-10-14)
+# --------------------------------------------------------------------------- #
+def test_a_package_module_runs_through_the_shim_or_the_installed_package():
+    cmd = tr.package_module_command(Path("/ws"), "export_rosout_text", ["/ws/bags/t 1"])
+    assert cmd[:2] == ["sh", "-c"]
+    assert "if [ -f /ws/experiments/common/scripts/export_rosout_text.py ]" in cmd[2]
+    assert "python3 -m declarative_robot_trials.export_rosout_text '/ws/bags/t 1'" in cmd[2]
+
+
+def test_a_remote_trial_exports_rosout_on_the_rig(capsys):
+    calls = []
+
+    class Done:
+        returncode = 0
+
+    class Hooks:
+        def run_foreground(self, cmd, target, cwd=None, check=False):
+            calls.append((cmd, target, cwd))
+            return Done()
+
+    class Target:
+        host = "rig"
+        workspace = "/rig/ws"
+
+    tr.export_rosout(Path("/rig/ws/experiments/e/bags/t"), Target(), Hooks(), None)
+    (cmd, target, cwd), = calls
+    assert "export_rosout_text" in cmd[2] and "/rig/ws/experiments/e/bags/t" in cmd[2]
+    assert cwd == Path("/rig/ws")
+    assert "written on the rig" in capsys.readouterr().out
+
+
+def test_a_failed_export_never_raises(tmp_path, capsys):
+    tr.export_rosout(tmp_path / "not_a_bag", None, None, tmp_path)
+    assert "rosout export skipped" in capsys.readouterr().out

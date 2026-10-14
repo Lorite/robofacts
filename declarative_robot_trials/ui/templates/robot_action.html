@@ -2,6 +2,15 @@
 {% block body %}
 <h1 class="{{ 'ok' if ok else 'bad' }}">{{ robot }}.{{ action }} — {{ 'OK' if ok else 'FAILED' }}</h1>
 {% if not ok %}<p class="bad">The action did not confirm. Check the rig is up (a driver must be running) and see the output below.</p>{% endif %}
+{% if lease_owners %}
+{% for r in lease_owners if r.resource == 'body' %}
+<p class="{{ 'ok' if not r.client_name else '' }}"><strong>Body lease: {% if r.client_name %}held by {{ r.client_name }}{% if r.user_name %} (user {{ r.user_name }}){% endif %}{% else %}nobody holds it{% endif %}</strong></p>
+{% endfor %}
+<table>
+<tr><th>Resource</th><th>Held by</th></tr>
+{% for r in lease_owners %}<tr><td>{{ r.resource }}</td><td>{{ r.client_name or '(nobody)' }}{% if r.user_name %} (user {{ r.user_name }}){% endif %}</td></tr>
+{% endfor %}</table>
+{% endif %}
 <pre>{{ output }}</pre>
 <p><a href="{{ url_for('index') }}">← back</a></p>
 {% endblock %}

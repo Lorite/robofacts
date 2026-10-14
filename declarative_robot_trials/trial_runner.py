@@ -1407,6 +1407,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     _ctx["metadata"] = {"aborted": metadata.get("aborted"),
                         "abort_reason": metadata.get("abort_reason")}
 
+    # rosout.txt beside the bag (experiments/AGENTS.md), on the host that holds it, and
+    # before the slim copy, which carries it (2026-10-14). Never fatal.
+    export_rosout(bag_dir, target, hooks, cwd)
+
     # Leave a slim, transferable copy (#94). Never fatal: the trial has flown.
     if slim:
         try:
@@ -1417,6 +1421,28 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 
     status = "failed" if (action_failed or detail.startswith("execution error")) else "ran"
     return TrialResult(trial, bag_dir, status, detail, commands)
+
+
+from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
+
+
+def export_rosout(bag_dir: Path, target, hooks: "ProcessHooks", project_root: Path) -> None:
+    """Write ``<bag>/rosout.txt`` from the bag's /rosout. Never raises: the trial has flown."""
+    try:
+        if target is None:
+            from .export_rosout_text import export_rosout_text
+            count = export_rosout_text(Path(bag_dir), Path(bag_dir) / "rosout.txt")
+            print(f"[runner] rosout.txt: {count} /rosout messages")
+            return
+        root = Path(project_root or target.workspace)
+        completed = hooks.run_foreground(
+            package_module_command(root, "export_rosout_text", [str(bag_dir)]),
+            target, cwd=root, check=False)
+        rc = getattr(completed, "returncode", 0)
+        print("[runner] rosout.txt written on the rig" if rc == 0
+              else f"[runner] rosout export failed on the rig (rc={rc}) - continuing")
+    except Exception as exc:  # noqa: BLE001 - a finished trial outranks a text export
+        print(f"[runner] rosout export skipped ({exc})")
 
 
 #: The attempt ledger's file name, under experiments/<name>/runs/.

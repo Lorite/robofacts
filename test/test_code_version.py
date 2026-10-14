@@ -203,3 +203,99 @@ def test_the_probe_answers_for_the_given_path_even_inside_a_git_hook(repo, tmp_p
     version = cv.probe(None, repo)
     assert version["branch"] == "main"
     assert version["commit"] != other_head
+
+
+# --------------------------------------------------------------------------- #
+# The build: source repositories under a colcon workspace and the install time
+# --------------------------------------------------------------------------- #
+def _git_at(cwd: Path, when: int, *args):
+    env = dict(_ENV, GIT_COMMITTER_DATE=f"{when} +0000", GIT_AUTHOR_DATE=f"{when} +0000")
+    subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=cwd, env=env,
+                   check=True, capture_output=True, text=True)
+
+
+@pytest.fixture
+def workspace(repo: Path) -> Path:
+    """The project repo holds ros2_ws/ with one package of its own and one own repository."""
+    ws = repo / "ros2_ws"
+    (ws / "src" / "inside_pkg").mkdir(parents=True)
+    (ws / "src" / "inside_pkg" / "package.xml").write_text("<package/>\n", encoding="utf-8")
+    driver = ws / "src" / "driver"
+    driver.mkdir()
+    _git_at(driver, 1_000_000_000, "init", "-q", "-b", "main")
+    _git_at(driver, 1_000_000_000, "config", "user.email", "test@example.com")
+    _git_at(driver, 1_000_000_000, "config", "user.name", "test")
+    (driver / "node.py").write_text("x = 1\n", encoding="utf-8")
+    _git_at(driver, 1_000_000_000, "add", "node.py")
+    _git_at(driver, 1_000_000_000, "commit", "-q", "-m", "driver")
+    (ws / "install" / "lib").mkdir(parents=True)
+    built = ws / "install" / "lib" / "node"
+    built.write_text("built\n", encoding="utf-8")
+    os.utime(built, (1_500_000_000, 1_500_000_000))
+    for d in (ws / "install" / "lib", ws / "install"):
+        os.utime(d, (1_500_000_000, 1_500_000_000))
+    # The project's own HEAD predates the build too.
+    _git_at(repo, 1_000_000_000, "commit", "-q", "--amend", "--no-edit", "--date", "1000000000 +0000")
+    return ws
+
+
+@pytest.fixture
+def default_workspaces(monkeypatch):
+    monkeypatch.setattr(cv.roots, "setting", lambda key, default=None, start=None: default)
+
+
+def test_the_probe_records_each_source_repository_and_the_build_time(repo, workspace, default_workspaces):
+    version = cv.probe(None, repo)
+    (build,) = version["builds"]
+    assert build["workspace"] == "ros2_ws"
+    assert build["install_newest"] == pytest.approx(1_500_000_000, abs=1)
+    # Only directories that are their own repository: inside_pkg is covered by `commit`.
+    assert set(build["sources"]) == {"driver"}
+    assert len(build["sources"]["driver"]["commit"]) == 40
+    assert build["sources"]["driver"]["committed_at"] == 1_000_000_000
+    assert build["sources"]["driver"]["dirty_file_count"] == 0
+    assert build["possibly_unbuilt"] == []
+    assert version["committed_at"] == 1_000_000_000
+    assert "built before" not in cv.summary(version)
+
+
+def test_a_commit_after_the_build_is_listed_as_possibly_unbuilt(repo, workspace, default_workspaces):
+    driver = workspace / "src" / "driver"
+    (driver / "node.py").write_text("x = 2\n", encoding="utf-8")
+    _git_at(driver, 1_600_000_000, "commit", "-q", "-am", "after the build")
+    _git_at(repo, 1_700_000_000, "commit", "-q", "--allow-empty", "-m", "project after the build")
+    version = cv.probe(None, repo)
+    assert version["builds"][0]["possibly_unbuilt"] == [".", "driver"]
+    assert "built before the last commit of ., driver" in cv.summary(version)
+
+
+def test_a_dirty_source_repository_is_counted(repo, workspace, default_workspaces):
+    (workspace / "src" / "driver" / "node.py").write_text("x = 3\n", encoding="utf-8")
+    assert cv.probe(None, repo)["builds"][0]["sources"]["driver"]["dirty_file_count"] == 1
+
+
+def test_a_workspace_without_install_is_not_reported(repo, default_workspaces):
+    (repo / "ros2_ws" / "src").mkdir(parents=True)
+    assert cv.probe(None, repo)["builds"] == []
+
+
+def test_the_declared_workspaces_replace_the_defaults(repo, workspace, monkeypatch):
+    monkeypatch.setattr(cv.roots, "setting",
+                        lambda key, default=None, start=None: ["elsewhere"] if key == "colcon_workspaces" else default)
+    assert cv.workspaces_to_probe() == ["elsewhere"]
+    assert cv.probe(None, repo)["builds"] == []
+
+
+def test_a_slow_build_query_still_records_the_commit(repo, workspace, default_workspaces, monkeypatch):
+    real_run = subprocess.run
+
+    def run(args, **kwargs):
+        if "for ws in" in args[-1]:
+            raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(cv.subprocess, "run", run)
+    version = cv.probe(None, repo)
+    assert len(version["commit"]) == 40
+    assert version["builds"] == []
+    assert "timed out" in version["builds_error"]

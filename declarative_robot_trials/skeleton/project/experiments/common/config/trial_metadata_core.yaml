@@ -82,7 +82,10 @@ fields:
                recorded commit an incomplete description of what ran. A bare hash over
                a modified tree claims a reproducibility that does not exist. Absent
                means the trial predates the stamp; `dirty: null` means the probe could
-               not answer, which is not the same claim as `dirty: false`."
+               not answer, which is not the same claim as `dirty: false`. Since
+               2026-10-14 also `builds`: for each colcon workspace, the HEAD of every
+               source repository under src/ and the newest install/ time, with
+               `possibly_unbuilt` naming the repositories committed after that build."
 
   experiment_variant:
     required: false

@@ -252,11 +252,15 @@ def archive_and_sync(bag_dir: Path, remote_target=None, *, project_root: Optiona
 
         from .remote_exec_utils import rsync_back, run_foreground
 
+        from .remote_exec_utils import package_module_command
+
         root = Path(project_root or remote_target.workspace)
-        script = root / "experiments/common/scripts/slim_bag_archive.py"
-        cmd = ["python3", str(script), "--bag", str(bag_dir), "--copy-if-light"]
+        # The project's shim when the rig's checkout has one, else the installed package
+        # (2026-10-14: before, a project without the lab's shims could not slim remotely).
+        args = ["--bag", str(bag_dir), "--copy-if-light"]
         if not compress:
-            cmd.append("--no-compress")
+            args.append("--no-compress")
+        cmd = package_module_command(root, "slim_bag_archive", args)
         print(f"[slim] slimming on {remote_target.host} (nothing transferred yet)")
         completed = run_foreground(cmd, remote_target, cwd=root, check=False)
         if completed.returncode != 0:
