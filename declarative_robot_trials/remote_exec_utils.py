@@ -44,6 +44,9 @@ class RemoteTarget:
         # in exactly the places an operator reads for a pass/fail verdict.
         '-x',
     ))
+    #: Further files to source after ros_setup and ws_setup, such as an overlay
+    #: workspace that is not part of ros2_ws (OpenVINS in ~/ov_ws, 2026-10-14).
+    env_setup: tuple[str, ...] = ()
 
 
 # pkill patterns for workspace-anchored ros2 processes, scoped by *kind* so a
@@ -127,12 +130,15 @@ _PKILL_PATTERN_TEMPLATES: dict[str, str] = {
 }
 
 
+def _source_chain(files: Iterable[str]) -> str:
+    return ''.join(f'source {shlex.quote(str(f))} && ' for f in files if f)
+
+
 def wrap_command(cmd: list[str], target: RemoteTarget) -> list[str]:
     """Build the local argv that runs `cmd` inside the Jetson container."""
     inner = (
-        f'source {shlex.quote(target.ros_setup)} && '
-        f'source {shlex.quote(target.ws_setup)} && '
-        f'cd {shlex.quote(str(target.workspace))} && '
+        _source_chain((target.ros_setup, target.ws_setup, *target.env_setup))
+        + f'cd {shlex.quote(str(target.workspace))} && '
         f'exec {shlex.join(cmd)}'
     )
     docker_str = (
@@ -140,6 +146,23 @@ def wrap_command(cmd: list[str], target: RemoteTarget) -> list[str]:
         f'{shlex.quote(target.shell)} -c {shlex.quote(inner)}'
     )
     return ['ssh', '-tt', *target.ssh_opts, target.host, docker_str]
+
+
+def local_setup_command(cmd: list[str], files: Iterable[str], shell: str = 'zsh') -> list[str]:
+    """The argv that runs `cmd` on THIS machine after sourcing `files`.
+
+    For a runner that executes locally although the host spec names setup
+    files: the rig cockpit runs the runner inside the rig's own container,
+    where the ssh+docker wrapper (and with it the host's ros_setup, ws_setup
+    and env_setup) is skipped. Without this, an overlay workspace declared
+    for the host was sourced only when the trial ran remotely (2026-10-14).
+    ``exec`` keeps the command's own argv, so the process-group stop and the
+    pkill patterns see the same process as before.
+    """
+    chain = _source_chain(files)
+    if not chain:
+        return list(cmd)
+    return [shell, '-c', chain + f'exec {shlex.join(cmd)}']
 
 
 def start_background(

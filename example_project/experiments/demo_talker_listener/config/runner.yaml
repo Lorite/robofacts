@@ -28,3 +28,5 @@ hosts:
   #   container: ros2_humble_dev     # omit to run directly on the host
   #   shell: zsh
   #   workspace: /workspaces/my_project
+  #   env_setup: [/home/me/overlay_ws/install/setup.zsh]   # also sourced when the runner runs ON that host
+  # The T-0 gate of a trial runs on its host as well, with the checklist sent along.

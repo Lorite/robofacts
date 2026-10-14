@@ -72,8 +72,10 @@ was the latch when the gate said no" is a field rather than a parsed string.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import os
+import shlex
 import json
 import re
 import socket
@@ -147,6 +149,9 @@ class GateResult:
     #: The stop_latch check's result, measured age (s, None = no latch) and
     #: detail. None when the checklist has no stop_latch entry or nothing ran.
     stop_latch: Optional[Dict[str, Any]] = None
+    #: Where the checks ran: "local", or "<ssh host>/<container>" for a trial on
+    #: another machine (2026-10-14, the gate runs where the trial runs).
+    ran_on: str = "local"
 
     @property
     def verdict(self) -> str:
@@ -173,6 +178,7 @@ class GateResult:
             "n_checks": self.n_checks,
             "factor_checks": [dict(i) for i in self.factor_checks],
             "stop_latch": dict(self.stop_latch) if self.stop_latch else None,
+            "ran_on": self.ran_on,
         }
 
 
@@ -208,6 +214,14 @@ class PreflightGate:
     #: "concurrency", then run_preflight.py's default (concurrent, 2026-10-13).
     #: The verdict, the gate log and the metadata block do not depend on it.
     concurrency: str = ""
+    #: The machine the trial runs on (a remote_exec_utils.RemoteTarget), set by
+    #: with_target(). None runs the checks here, in a subprocess of the runner.
+    target: Any = None
+    #: (shell, files) to source before a LOCAL run (RunnerConfig.local_setup).
+    local_setup: Optional[tuple] = None
+    #: The project root of THIS checkout, to find the package's source tree on
+    #: the target, whose checkout sits at target.workspace.
+    project_root: Optional[Path] = None
 
     _last_pass_monotonic: Optional[float] = field(default=None, init=False, repr=False)
     _last_result: Optional[GateResult] = field(default=None, init=False, repr=False)
@@ -238,6 +252,27 @@ class PreflightGate:
         """
         return dataclasses.replace(self, extra_entries=[dict(e) for e in entries])
 
+    def with_target(self, target: Any, local_setup: Optional[tuple] = None,
+                    project_root: Optional[Path] = None) -> "PreflightGate":
+        """A copy of this gate that runs its checks where the trial runs.
+
+        Before 2026-10-14 the gate always ran on the runner's machine. A trial
+        started on the laptop with ``execution_host=orin`` was gated on the
+        laptop's processes, disk, network and stop latch (which robots.yaml
+        writes inside the rig's container), so a clean laptop passed the gate
+        of a dirty rig. With a target, the checklist is sent along with the
+        command and ``run_preflight`` runs inside the target's container. A
+        copy, like with_mode, so the host of one trial never leaks into the next.
+        """
+        return dataclasses.replace(self, target=target, local_setup=local_setup,
+                                   project_root=Path(project_root) if project_root else None)
+
+    def ran_on(self) -> str:
+        if self.target is None:
+            return "local"
+        container = getattr(self.target, "container", "")
+        return f"{self.target.host}/{container}" if container else str(self.target.host)
+
     def effective_mode(self) -> str:
         if self.mode:
             return self.mode
@@ -247,6 +282,10 @@ class PreflightGate:
 
     def check(self, trial_label: str = "",
               values: Optional[Dict[str, Any]] = None) -> GateResult:
+        return self._check(trial_label, values)
+
+    def _check(self, trial_label: str = "",
+               values: Optional[Dict[str, Any]] = None) -> GateResult:
         """Gate one trial. Returns the result, or raises PreflightBlocked.
 
         ``values`` are the trial's factor values: each scalar one is passed to
@@ -282,7 +321,8 @@ class PreflightGate:
             self._log(trial_label, values, result, [])
             return result
 
-        print(f"[preflight]{label} running gate…")
+        where = "" if self.target is None else f" on {self.ran_on()}"
+        print(f"[preflight]{label} running gate{where}…")
         checklist, scratch = self._materialize()
         try:
             rc, output = self._run(values, checklist)
@@ -375,25 +415,71 @@ class PreflightGate:
                         "detail": match["detail"] if match else ""})
         return out
 
+    def _arguments(self, values: Optional[Dict[str, Any]]) -> List[str]:
+        args: List[str] = []
+        # A remote run does not see this process's environment, so the choice is spelled out.
+        concurrency = self.concurrency or (os.environ.get("TRIALS_PREFLIGHT_CONCURRENCY", "")
+                                           if self.target is not None else "")
+        if concurrency:
+            args += ["--concurrency", concurrency]
+        for name, value in self.gate_variables(values).items():
+            args += ["--var", f"{name}={value}"]
+        return args
+
+    def command(self, values: Optional[Dict[str, Any]] = None,
+                checklist: Optional[Path] = None) -> List[str]:
+        """The argv that runs the checks: here, here after the host's setup files, or on the target."""
+        checklist = Path(checklist or self.checklist)
+        if self.target is None:
+            cmd = runner_command(self.runner) + ["--checklist", str(checklist)] + self._arguments(values)
+            if self.local_setup:
+                from .remote_exec_utils import local_setup_command
+                shell, files = self.local_setup
+                cmd = local_setup_command(cmd, files, shell)
+            return cmd
+        from .remote_exec_utils import wrap_command
+        return wrap_command(["sh", "-c", remote_gate_script(
+            checklist.read_bytes(), self._arguments(values), self._remote_pythonpath())], self.target)
+
+    def _remote_pythonpath(self) -> str:
+        """This package's directory on the target, when it lives inside this checkout.
+
+        Run from a source tree (or a colcon install inside the checkout), the
+        same relative path under target.workspace holds the target's copy, so
+        the target runs the gate code of its own checkout. An installed package
+        outside the checkout is found by the target's sourced workspace instead.
+        """
+        if self.project_root is None:
+            return ""
+        package_parent = Path(__file__).resolve().parents[1]
+        try:
+            rel = package_parent.relative_to(Path(self.project_root).resolve())
+        except ValueError:
+            return ""
+        return str(Path(self.target.workspace) / rel)
+
     def _run(self, values: Optional[Dict[str, Any]] = None,
              checklist: Optional[Path] = None) -> tuple[int, str]:
-        cmd = runner_command(self.runner) + ["--checklist", str(checklist or self.checklist)]
-        if self.concurrency:
-            cmd += ["--concurrency", self.concurrency]
-        for name, value in self.gate_variables(values).items():
-            cmd += ["--var", f"{name}={value}"]
+        cmd = self.command(values, checklist)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout_s,
-                                  env=runner_env())
+                                  env=runner_env(), stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return RC_FAIL, f"gate timed out after {self.timeout_s:.0f}s (treated as FAIL)"
         except OSError as exc:
             return RC_USAGE, f"could not run {self.runner}: {exc}"
-        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if self.target is not None:
+            # ssh -tt gives the remote output CRLF line ends, and a result line must parse alike.
+            output = output.replace("\r\n", "\n").replace("\r", "")
+            if proc.returncode == 255:
+                return RC_USAGE, output + f"\nssh to {self.ran_on()} failed (treated as an ERROR)"
+        return proc.returncode, output
 
     def _log(self, trial_label: str, values: Optional[Dict[str, Any]],
              result: GateResult, items: List[Dict[str, Any]]) -> None:
         """Append one verdict line to the gate log. Never raises."""
+        result.ran_on = self.ran_on()
         if self.log_path is None:
             return
         try:
@@ -420,6 +506,23 @@ class PreflightGate:
     @property
     def last_result(self) -> Optional[GateResult]:
         return self._last_result
+
+
+def remote_gate_script(checklist: bytes, arguments: List[str], pythonpath: str = "") -> str:
+    """A shell script that runs the gate on another machine.
+
+    The checklist travels inside the script (base64), because the trial's
+    checklist may exist only here (factor checks are merged into a temporary
+    copy) and the ssh wrapper forces a tty, which makes stdin unreliable. It is
+    written to a temporary file there, run, and removed. The exit code is the
+    gate's.
+    """
+    encoded = base64.b64encode(checklist).decode("ascii")
+    env = f"PYTHONPATH={shlex.quote(pythonpath)}${{PYTHONPATH:+:$PYTHONPATH}} " if pythonpath else ""
+    return (f'f=$(mktemp /tmp/trials_gate_XXXXXX) || exit 2; '
+            f'echo {encoded} | base64 -d > "$f" || {{ rm -f "$f"; exit 2; }}; '
+            f'{env}python3 -m declarative_robot_trials.preflight.run_preflight --checklist "$f" '
+            f'{shlex.join(arguments)}; rc=$?; rm -f "$f"; exit $rc')
 
 
 def stop_latch_measurement(items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -526,6 +629,8 @@ def gate_log_record(*, experiment: str, campaign: Optional[str], trial_label: st
         "duration_s": result.duration_s,
         "host": host,
     }
+    if result.ran_on != "local":
+        record["ran_on"] = result.ran_on
     if result.stop_latch is not None:
         # The latch's measured age, for a GO as much as for a NO-GO (2026-10-12).
         record["stop_latch"] = {k: result.stop_latch.get(k) for k in ("result", "age_s")}

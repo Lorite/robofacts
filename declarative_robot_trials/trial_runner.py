@@ -42,6 +42,7 @@ coverage index or the planner.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import hashlib
 import shlex
@@ -52,7 +53,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
@@ -222,7 +223,29 @@ class RunnerConfig:
             ros_setup=str(spec.get("ros_setup", "/opt/ros/humble/setup.zsh")),
             ws_setup=str(spec.get("ws_setup", workspace / "ros2_ws/install/setup.zsh")),
             shell=str(spec.get("shell", "zsh")),
+            env_setup=tuple(str(f) for f in spec.get("env_setup") or ()),
         )
+
+    def local_setup(self, host_level: Optional[Any]) -> Optional[Tuple[str, List[str]]]:
+        """(shell, files to source) for a trial that runs on THIS machine, or None.
+
+        A runner inside the rig's container (``container_hostname``) or on a
+        ``local: true`` host runs every command directly, so the host's setup
+        files were never sourced: the runner's own environment applied, which
+        held ROS and ros2_ws but not an overlay such as OpenVINS in ~/ov_ws
+        (2026-10-14). The files a host spec NAMES (``ros_setup``, ``ws_setup``,
+        ``env_setup``) are now sourced locally too. Defaults are not: the
+        runner's environment already holds them, and a host spec that names no
+        file keeps its commands exactly as before.
+        """
+        spec = self.hosts.get(str(host_level)) if host_level is not None else None
+        if not spec or self.remote_target(host_level) is not None:
+            return None
+        files = [str(spec[k]) for k in ("ros_setup", "ws_setup") if spec.get(k)]
+        files += [str(f) for f in spec.get("env_setup") or ()]
+        if not files:
+            return None
+        return str(spec.get("shell", "zsh")), files
 
     @classmethod
     def load(cls, experiment: str, experiments_root: Optional[Path] = None) -> "RunnerConfig":
@@ -237,6 +260,12 @@ class RunnerConfig:
         for required in ("package", "file"):
             if not launch.get(required):
                 raise RunnerError(f"{path}: launch.{required} is required")
+        for level, spec in (raw.get("hosts") or {}).items():
+            env_setup = (spec or {}).get("env_setup") if isinstance(spec, dict) else None
+            if env_setup is not None and (not isinstance(env_setup, list)
+                                          or not all(isinstance(f, str) and f for f in env_setup)):
+                raise RunnerError(f"{path}: hosts.{level}.env_setup must be a list of file paths "
+                                  f"to source, got {env_setup!r}")
         launch_mode = str(raw.get("launch_mode", "launch"))
         if launch_mode not in ("launch", "run"):
             raise RunnerError(f"{path}: launch_mode must be 'launch' or 'run', got {launch_mode!r}")
@@ -652,6 +681,23 @@ class ProcessHooks:
         return cls(start_background=start_background, run_foreground=run_foreground,
                    stop_process=stop_remote_process)
 
+    def with_local_setup(self, shell: str, files: List[str]) -> "ProcessHooks":
+        """These hooks, with every LOCAL command run after sourcing ``files``
+        (RunnerConfig.local_setup). Remote commands are wrapped by their target."""
+        from .remote_exec_utils import local_setup_command
+        start, run = self.start_background, self.run_foreground
+
+        def start_background(cmd, target, **kwargs):
+            return start(cmd if target is not None else local_setup_command(cmd, files, shell),
+                         target, **kwargs)
+
+        def run_foreground(cmd, target, **kwargs):
+            return run(cmd if target is not None else local_setup_command(cmd, files, shell),
+                       target, **kwargs)
+
+        return dataclasses.replace(self, start_background=start_background,
+                                   run_foreground=run_foreground)
+
 
 @dataclass
 class TrialResult:
@@ -773,6 +819,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     mark("start")
     target = config.remote_target(trial.host(factors))
     hooks = hooks or ProcessHooks.default()
+    local_env = config.local_setup(trial.host(factors))
+    if local_env is not None:
+        hooks = hooks.with_local_setup(*local_env)
     steps = {**DEFAULT_STEPS, **(steps or {})}
 
     # SCRATCH FLIGHT (2026-08-12): scratch_label is not None means this is an
@@ -875,7 +924,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         """What would actually run, ssh/docker wrapper included, so --dry-run is
         an honest preview rather than the un-wrapped local form."""
         if target is None:
-            return cmd
+            if local_env is None:
+                return cmd
+            from .remote_exec_utils import local_setup_command
+            return local_setup_command(cmd, local_env[1], local_env[0])
         from .remote_exec_utils import wrap_command
         return wrap_command(cmd, target)
 
@@ -1059,6 +1111,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # a bag, and nothing has flown yet. Teardown is in the finally below.
         if gate is not None:
             trial_gate = gate
+            # The gate runs where the trial runs (2026-10-14): a laptop-driven
+            # trial on the Orin used to check the LAPTOP's processes, disk,
+            # network and stop latch. A gate that cannot move (a test double,
+            # the UI's shell gate) keeps running here.
+            if hasattr(gate, "with_target"):
+                trial_gate = gate.with_target(target, local_env, config.project_root)
             if gate_spec is not None:
                 trial_gate = gate.with_mode(
                     gate_spec[2], reason=f"shadow: {gate_spec[0]}={gate_spec[1]} "

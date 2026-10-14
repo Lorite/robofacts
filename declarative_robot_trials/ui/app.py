@@ -401,8 +401,13 @@ class ShellPreflightGate:
             cmd += ["--checklist", f"experiments/{self.experiment}/{self.checklist}"]
         target = self.config.remote_target(self.host_level)
         if target is not None:
-            from .remote_exec_utils import wrap_command
+            from ..remote_exec_utils import wrap_command
             cmd = wrap_command(cmd, target)
+        elif self.config.local_setup(self.host_level) is not None:
+            # On the rig itself, the host's named setup files apply too (2026-10-14).
+            from ..remote_exec_utils import local_setup_command
+            shell, files = self.config.local_setup(self.host_level)
+            cmd = local_setup_command(cmd, files, shell)
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=360,
                               cwd=None if target else str(self.repo_root))
         # Print the whole gate report so it reaches the terminal AND the run
@@ -757,7 +762,7 @@ def create_app(experiments_root: Optional[Path] = None,
         target = config.remote_target(host_level)
         cmd = ["bash", f"experiments/{experiment}/scripts/preflight.sh"]
         if target is not None:
-            from .remote_exec_utils import wrap_command
+            from ..remote_exec_utils import wrap_command
             cmd = wrap_command(cmd, target)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=360,
@@ -812,7 +817,7 @@ def create_app(experiments_root: Optional[Path] = None,
         target = config.remote_target(host_level)
         argv = ["bash", "-lc", command]
         if target is not None:
-            from .remote_exec_utils import wrap_command
+            from ..remote_exec_utils import wrap_command
             argv = wrap_command(argv, target)
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=30,
@@ -891,7 +896,7 @@ def create_app(experiments_root: Optional[Path] = None,
         run = runs.current()
         if run is not None and run.state == "running":
             runs.abort(run.run_id)
-            from .remote_exec_utils import terminate_current_foreground
+            from ..remote_exec_utils import terminate_current_foreground
             if terminate_current_foreground():
                 extra = ("\n\nThe running trial was ended too: its action was stopped, so the "
                          "runner is now closing the bag first and then the stack, in that order. "
@@ -954,7 +959,7 @@ def create_app(experiments_root: Optional[Path] = None,
             workspace = app.config["REPO_ROOT"]
             argv = ["bash", "-lc", f"cd {shlex.quote(str(workspace))} && {tools.remote_invocation('kill_ros.sh')}"]
             if spec["host"]:
-                from .remote_exec_utils import RemoteTarget, wrap_command
+                from ..remote_exec_utils import RemoteTarget, wrap_command
                 target = RemoteTarget(host=spec["host"], container=spec["container"],
                                       workspace=Path(spec.get("workspace") or workspace),
                                       ros_setup=spec.get("ros_setup") or "/opt/ros/humble/setup.zsh",
