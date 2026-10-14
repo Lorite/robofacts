@@ -42,7 +42,9 @@ def test_nobody_listening_neither_blocks_nor_raises():
 
 def test_an_unresolvable_host_name_returns_quickly_and_false():
     t0 = time.monotonic()
-    assert ov.send("x", host="no-such-host.invalid", port=47900, env={}) is False
+    # The trailing dot makes the name absolute: a network whose DNS search domain answers every
+    # name (a guest Wi-Fi, 2026-10-14) would otherwise resolve no-such-host.invalid.<domain>.
+    assert ov.send("x", host="no-such-host.invalid.", port=47900, env={}) is False
     assert time.monotonic() - t0 < 2 * ov.RESOLVE_TIMEOUT_S + 0.5
 
 

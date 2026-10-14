@@ -53,7 +53,7 @@ jobs:
           cd ws/src/declarative_robot_trials
           ros2 run declarative_robot_trials trials --version
           ./quickstart.sh
-      - name: A generated experiment passes lint, plan and a dry run
+      - name: A generated experiment passes lint, plan and a dry run, and so does a copy of it
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash && source ws/install/setup.bash
@@ -64,6 +64,7 @@ jobs:
           trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1
           trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1 --execute --no-pause
           trials index --experiment my_experiment --summary
+          trials new my_variant --from my_experiment && trials validate experiments/my_variant
 
   pip-no-ros:
     name: pip install and the robot-free tests (no ROS)
@@ -87,6 +88,8 @@ jobs:
           trials lint
           trials plan experiments/my_experiment/campaigns/baseline.yaml
           trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1
+          trials validate experiments/my_experiment
+          trials new my_variant --from my_experiment && trials validate experiments/my_variant
 
   docker-image:
     name: the quickstart image builds and runs the example

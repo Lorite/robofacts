@@ -23,7 +23,7 @@ L4  every {placeholder} in a command must be a declared factor (or {bag} in a
     written by hand and would have raised at trial time, i.e. on the rig.)
 L5  a campaign's pre-flight operator_steps must not start ROS processes: a
     trial's setup steps tear down the previous stack first (scripts/kill_ros.sh,
-    which matches /opt/ros/ and ros2_ws/install/, or an experiment's own stop
+    which matches /opt/ros/ and any *_ws/install/, or an experiment's own stop
     script), so anything the operator starts beforehand is killed by the trial
     it was started for. Such things belong in aux_launches, or in
     operator_live_steps.
@@ -85,6 +85,7 @@ L15 a campaign's spoken cues (`voice_cues`, `voice_announce`, 2026-10-13) are
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -114,9 +115,16 @@ PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 STARTS_ROS_PROCESS = re.compile(r"\bros2\s+(run|launch)\b")
 
 
+# `trials lint --experiment <name>` (and `trials validate`) set this to lint ONE experiment.
+# The rules that read shared files (the record profiles, the core factors) still run.
+ENV_ONLY_EXPERIMENT = "TRIALS_LINT_EXPERIMENT"
+
+
 def experiments_with_runner() -> list[str]:
-    return sorted(p.parent.parent.name
-                  for p in EXPERIMENTS_ROOT.glob("*/config/runner.yaml"))
+    names = sorted(p.parent.parent.name
+                   for p in EXPERIMENTS_ROOT.glob("*/config/runner.yaml"))
+    only = os.environ.get(ENV_ONLY_EXPERIMENT, "")
+    return [n for n in names if n == only] if only else names
 
 
 def campaigns_of(experiment: str) -> list[Path]:
@@ -265,7 +273,7 @@ def test_pre_flight_operator_steps_do_not_start_ros_processes(experiment):
             assert not STARTS_ROS_PROCESS.search(str(step)), (
                 f"{path.name}: an operator_step starts a ROS process:\n  {str(step)[:120]}\n"
                 f"A trial's setup steps tear down the previous stack before the launch "
-                f"(scripts/kill_ros.sh matches /opt/ros/ and ros2_ws/install/), so it would "
+                f"(scripts/kill_ros.sh matches /opt/ros/ and any *_ws/install/), so it would "
                 f"be killed by the very trial it was started for. Put it in aux_launches "
                 f"(the runner starts it) or operator_live_steps (started while the trial "
                 f"runs)")
@@ -457,9 +465,10 @@ def test_gate_factors_only_in_simulated_experiments(experiment):
 
 
 def factor_files() -> list[Path]:
-    """The core factor file and every experiment's own one."""
+    """The core factor file and every experiment's own one (or only the linted one's)."""
+    only = os.environ.get(ENV_ONLY_EXPERIMENT, "")
     return [EXPERIMENTS_ROOT / cs.CORE_FACTORS] + sorted(
-        EXPERIMENTS_ROOT.glob("*/" + cs.PER_EXPERIMENT_FACTORS))
+        EXPERIMENTS_ROOT.glob((only or "*") + "/" + cs.PER_EXPERIMENT_FACTORS))
 
 
 @pytest.mark.parametrize("path", factor_files(),

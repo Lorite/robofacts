@@ -3,10 +3,11 @@
     trials plan    experiments/<exp>/campaigns/<c>.yaml   what the campaign still needs
     trials run     experiments/<exp>/campaigns/<c>.yaml   dry run; --execute runs the trials
     trials index   --experiment <exp> --summary            the coverage index
-    trials lint                                            every declaration against the rules
+    trials lint    [--experiment <exp>]                    the declarations against the rules
+    trials validate <exp | campaign.yaml>                  is it ready: check, plan, gate, lint, tests, dry run
     trials gate    --checklist <path>                      the T-0 gate, by hand
     trials analyze <exp> <analysis> --execute              a named analysis over a cohort
-    trials new     <name>                                  a new experiment from the template
+    trials new     <name> [--from <exp>]                   a new experiment from the template or a similar one
     trials init    <dir>                                   a new project (experiments root)
     trials ui                                              the web interface
 
@@ -91,6 +92,11 @@ def _ui(argv):
     return app.main(argv)
 
 
+def _validate(argv):
+    from . import validate
+    return validate.main(argv)
+
+
 def _new(argv):
     from . import scaffold
     return scaffold.main_new(argv)
@@ -125,6 +131,8 @@ def _lint(argv):
     ap = argparse.ArgumentParser(prog="trials lint",
                                  description="check every experiment's declarations against the rules")
     roots.add_root_arguments(ap)
+    ap.add_argument("--experiment", metavar="NAME",
+                    help="lint only this experiment (the rules over shared files still run)")
     ap.add_argument("pytest_args", nargs="*",
                     help="extra pytest arguments (flags such as -k, -x or -v pass through as they are, "
                          "or after --)")
@@ -132,6 +140,11 @@ def _lint(argv):
     args, passthrough = ap.parse_known_args(argv)
     roots.resolve_root_arguments(args)
     os.environ[roots.ENV_EXPERIMENTS_ROOT] = str(args.experiments_root)
+    if args.experiment:
+        if not (args.experiments_root / args.experiment / "config").is_dir():
+            print(f"ERROR: no experiment {args.experiment!r} under {args.experiments_root}", file=sys.stderr)
+            return 2
+        os.environ["TRIALS_LINT_EXPERIMENT"] = args.experiment
     import pytest
 
     from . import lint
@@ -164,6 +177,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "run": (_run, "run the trials a campaign still needs (dry run without --execute)"),
     "index": (_index, "the coverage index over the recorded trials"),
     "lint": (_lint, "check every declaration against the rules (pytest)"),
+    "validate": (_validate, "is an experiment ready: check, plan, gate, lint, its tests, dry run"),
     "gate": (_gate, "run a T-0 gate checklist by hand"),
     "analyze": (_analyze, "run a named analysis over a cohort of bags"),
     "check": (_check, "validate one campaign file, or list an experiment's factor space"),
@@ -172,7 +186,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "slim": (_slim, "archive slim copies of recorded bags"),
     "version": (_version_probe, "the code version stamped into trials"),
     "ui": (_ui, "the web interface"),
-    "new": (_new, "a new experiment from the commented template"),
+    "new": (_new, "a new experiment from the template, or --from a similar one"),
     "init": (_init, "a new project: the experiments root with its shared config"),
     "tool": (_tool, "run a packaged shell tool (kill_ros.sh, estop.sh, robot_action.sh)"),
     "roots": (_roots, "show how the experiments root and the project root resolve"),

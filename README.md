@@ -48,6 +48,15 @@ trials run  experiments/my_experiment/campaigns/baseline.yaml --execute    # the
 
 `trials new <name>` writes a commented experiment that works as generated (it listens to `demo_nodes_cpp talker`). Edit, in this order: `config/factors.yaml` (the axes and how the runner realizes each level), `config/trial_metadata_schema.yaml` (the fields every trial records, with the coverage axes), `config/preflight_checklist.json` (the gate), `config/runner.yaml` (the stack, one trial, the verify steps, the computers) and `campaigns/baseline.yaml` (the sweep, the fixed levels, the repetitions). The linter and the planner then check the declarations before any trial runs.
 
+**When a similar experiment exists, start from it instead.** `trials new <name> --from <existing> [--campaign <c>[:<new_name>]]` copies that experiment's declarations (`config/`, the campaigns, `scripts/`, the runbook and the other text files) with its name replaced, and leaves out its bags, runs, results, notebooks, tests and large files. The README becomes a short stub that names the source. Change only what differs, then ask one question:
+
+```bash
+trials new my_variant --from my_experiment --campaign baseline:my_claim   # copy one campaign, renamed
+trials validate experiments/my_variant      # check, plan, gate, lint, its own tests, a dry run per host: READY or NOT READY
+```
+
+`trials validate` takes an experiment or one campaign file, prints one line per stage with its time, shows the output of a failed stage, and exits 0 only when every stage passed. It runs in seconds because every stage is scoped to that experiment. The full test suite of a project is for CI.
+
 ## Where the experiments are
 
 Every command resolves the experiments root in this order: the `--experiments-root` flag, the `TRIALS_EXPERIMENTS_ROOT` environment variable, a `trials.yaml` found by walking up from the current directory (`experiments_root:` and `project_root:` keys, relative to that file), or the nearest `experiments/` directory. The project root (the working directory of the runner's commands) is `--project-root`, `TRIALS_PROJECT_ROOT`, `trials.yaml`, or the parent of the experiments root. `trials roots` prints the resolution.
@@ -63,13 +72,14 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials plan <campaign>` | what the campaign still needs, against the recorded usable trials |
 | `trials run <campaign>` | a dry run of the next trials, `--execute` runs them, `--scratch` one diagnostic run |
 | `trials index` | the coverage index, `--condition-space` one condition across experiments |
-| `trials lint` | every declaration against the rules (pytest) |
+| `trials validate <exp \| campaign>` | is it ready for a first trial: check, plan, gate, the lint and the tests of that experiment, a dry run per host. One verdict |
+| `trials lint` | every declaration against the rules (pytest), `--experiment <exp>` for one experiment |
 | `trials gate --checklist <json>` | a T-0 gate by hand, `--validate` and `--list` for the checklist |
 | `trials analyze <exp> <name>` | a named analysis over a cohort of usable bags |
 | `trials check <campaign>` | the expanded plan of one campaign, `--factors <exp>` the factor space |
 | `trials metadata` | audit the recorded metadata against the contract |
 | `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required) |
-| `trials new`, `trials init` | the scaffolding |
+| `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
 
 ## A project's own gate checks

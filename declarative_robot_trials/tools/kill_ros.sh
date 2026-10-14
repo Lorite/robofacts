@@ -67,15 +67,18 @@ done
 # -----------------------------------------------------------------------------
 # What counts as a ROS process.
 #
-# Most nodes live under /opt/ros/<distro>/ or the workspace install/build tree,
+# Most nodes live under /opt/ros/<distro>/ or a workspace install/build tree,
 # which catches ros2 launch/run/bag, rviz2, robot_state_publisher and every
-# workspace node. The explicit patterns below cover the ones that do not:
-# the daemon (a bare python module), Gazebo, and vendor binaries.
+# workspace node. Any colcon workspace named *_ws counts, not only ros2_ws:
+# an overlay such as ~/ov_ws (OpenVINS, 2026-10-14) left an orphaned
+# run_subscribe_msckf that the next trial's gate then refused. The explicit
+# patterns below cover the ones that do not: the daemon (a bare python
+# module), Gazebo, and vendor binaries.
 # -----------------------------------------------------------------------------
 PATTERNS=(
     '/opt/ros/'
-    'ros2_ws/install/'
-    'ros2_ws/build/'
+    '_ws/install/'
+    '_ws/build/'
     '_ros2_daemon'
     'ros2 daemon'
     'component_container'
