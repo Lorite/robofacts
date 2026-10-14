@@ -157,7 +157,7 @@ PARALLEL_SAFE_CHECKS = frozenset({
     "dds_socket_buffer", "disk_space", "drone_armable", "ekf_convergence",
     "estop_reachable", "file_exists", "gpu_memory", "graph_nav_localized",
     "gz_world_matches", "host_reachable", "mocap_stream",
-    "node_present", "px4_preflight_pass", "rosout_report",
+    "node_present", "px4_preflight_pass", "ros_param_equals", "rosout_report",
     "stop_latch", "topic_rate", "watchdog_health",
 })
 

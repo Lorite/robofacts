@@ -240,6 +240,7 @@ def test_preflight_ui_renders_object_entries(tmp_path: Path):
     ("node_present.sh", []),
     ("rigidbody_continuity.sh", []),
     ("topic_rate.sh", ["topic=/x"]),  # min_hz missing
+    ("ros_param_equals.sh", ["node=/n", "param=p"]),  # expected missing
 ])
 def test_missing_required_argument_exits_usage(script: str, argv):
     """A check missing an argument must exit 2, not stumble on with an empty
@@ -414,6 +415,98 @@ def test_mem_available_check_runs_without_ros():
     bad = subprocess.run(["bash", str(CHECKS_DIR / "mem_available.sh"), "min_gb=99999999"],
                          capture_output=True, text=True)
     assert bad.returncode == 1 and bad.stdout.startswith("FAIL:"), bad.stdout
+
+
+# --------------------------------------------------------------------------- #
+# topic_rate max_hz and ros_param_equals (2026-10-14, operator factors checked)
+# --------------------------------------------------------------------------- #
+def _run_topic_rate_against(tmp_path: Path, n_messages: int, *argv) -> subprocess.CompletedProcess:
+    """topic_rate.sh with a stubbed `ros2`: `topic list` advertises /img, `topic echo`
+    prints n_messages separators. window_s=3.2 leaves 2.0 s after the 1.2 s connect
+    correction, so the measured rate is n_messages / 2."""
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir(exist_ok=True)
+    stub = stub_bin / "ros2"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$2\" = list ]; then echo /img; exit 0; fi\n"
+                    f"for i in $(seq {n_messages}); do echo 'data: x'; echo '---'; done\n")
+    stub.chmod(0o755)
+    env = dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}")
+    return subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/img",
+                           "window_s=3.2", *argv],
+                          capture_output=True, text=True, env=env, timeout=30)
+
+
+def test_topic_rate_without_max_is_unchanged(tmp_path: Path):
+    """No max_hz keeps the historical floor-only semantics every checklist relies on."""
+    result = _run_topic_rate_against(tmp_path, 22, "min_hz=9")
+    assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout
+    assert "(>= 9)" in result.stdout
+
+
+def test_topic_rate_max_hz_tells_the_aideck_builds_apart(tmp_path: Path):
+    """The stream_format factor's two levels: the raw build at ~11 fps passes raw and
+    fails jpeg, the JPEG build at ~8 fps passes jpeg and fails raw."""
+    raw, jpeg = ("min_hz=9",), ("min_hz=7", "max_hz=9")
+    assert _run_topic_rate_against(tmp_path, 22, *raw).returncode == 0
+    fast_as_jpeg = _run_topic_rate_against(tmp_path, 22, *jpeg)
+    assert fast_as_jpeg.returncode == 1 and "at or above max_hz=9" in fast_as_jpeg.stdout, \
+        fast_as_jpeg.stdout
+    slow = _run_topic_rate_against(tmp_path, 16, *jpeg)
+    assert slow.returncode == 0 and "< 9" in slow.stdout, slow.stdout
+    assert _run_topic_rate_against(tmp_path, 16, *raw).returncode == 1
+
+
+def test_topic_rate_max_hz_still_needs_a_flowing_topic(tmp_path: Path):
+    """A dead stream is below every max: the min_hz floor must still refuse it."""
+    result = _run_topic_rate_against(tmp_path, 0, "min_hz=7", "max_hz=9")
+    assert result.returncode == 1 and "stalled or dead" in result.stdout, result.stdout
+
+
+def _run_param_check_against(tmp_path: Path, reply: str, *argv) -> subprocess.CompletedProcess:
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir(exist_ok=True)
+    canned = tmp_path / "reply.txt"
+    canned.write_text(reply)
+    stub = stub_bin / "ros2"
+    stub.write_text(f"#!/usr/bin/env bash\ncat '{canned}'\n"
+                    f"grep -q 'value is' '{canned}' || exit 1\n")
+    stub.chmod(0o755)
+    env = dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}")
+    return subprocess.run(["bash", str(CHECKS_DIR / "ros_param_equals.sh"),
+                           "node=/camera/d435", "param=depth_module.visual_preset", *argv],
+                          capture_output=True, text=True, env=env, timeout=30)
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ("Integer value is: 3\n", "3"),
+    ("Double value is: 4.0\n", "4"),
+    ("Boolean value is: True\n", "true"),
+    ("String value is: HighAccuracy\n", "highaccuracy"),
+])
+def test_ros_param_equals_passes_on_the_declared_value(tmp_path: Path, reply, expected):
+    result = _run_param_check_against(tmp_path, reply, f"expected={expected}")
+    assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout
+
+
+def test_ros_param_equals_refuses_another_value(tmp_path: Path):
+    """The visual_preset case: the camera runs preset 4 while the trial declares 3."""
+    result = _run_param_check_against(tmp_path, "Integer value is: 4\n", "expected=3")
+    assert result.returncode == 1 and "declares 3" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize("reply", ["Node not found\n", "Parameter not set.\n", ""])
+def test_ros_param_equals_unreadable_is_a_failure(tmp_path: Path, reply):
+    """An absent node or an unset parameter is not evidence of the declared value."""
+    result = _run_param_check_against(tmp_path, reply, "expected=3")
+    assert result.returncode == 1 and "cannot read" in result.stdout, result.stdout
+
+
+def test_ros_param_equals_undeclared_expected_fails(tmp_path: Path):
+    """A null per-level value (expected=) is "not declared yet" and must never pass."""
+    result = _run_param_check_against(tmp_path, "Integer value is: 3\n", "expected=")
+    assert result.returncode == 1 and "no expected value" in result.stdout, result.stdout
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
