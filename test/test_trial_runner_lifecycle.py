@@ -26,8 +26,13 @@ HERE = Path(__file__).resolve().parent
 
 from declarative_robot_trials import campaign_spec as cs
 from declarative_robot_trials import trial_runner as tr
-pytestmark = pytest.mark.skipif(shutil.which("ros2") is None,
-                                reason="needs ROS 2 (run inside the dev container)")
+pytestmark = [
+    pytest.mark.skipif(shutil.which("ros2") is None,
+                       reason="needs ROS 2 (run inside the dev container)"),
+    # Real talker and recorder: the settle and stop grace are what let them
+    # discover each other and let the bag finalize.
+    pytest.mark.real_sleep,
+]
 
 FACTORS = """
 version: 1
