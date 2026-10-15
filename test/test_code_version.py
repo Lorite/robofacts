@@ -112,7 +112,50 @@ def test_a_missing_workspace_is_reported(tmp_path):
 def test_unknown_keeps_the_same_keys_as_a_success(repo, tmp_path):
     """A consumer reading version["dirty"] must not have to branch on whether
     the probe worked."""
-    assert set(cv.probe(None, repo)) - {"error"} == set(cv.probe(None, tmp_path / "x")) - {"error"}
+    assert set(cv.probe(None, repo)) - {"error"} == set(cv.probe(None, tmp_path / "x")) - {"error", "warning"}
+
+
+def test_a_worktree_whose_git_file_names_a_missing_path_warns(repo, tmp_path):
+    """The adoption test of 2026-10-15: a worktree made on the host, used in the container.
+    Its .git file names /home/<user>/..., which the container does not have."""
+    worktree = tmp_path / "wt"
+    subprocess.run(["git", "-c", "safe.directory=*", "worktree", "add", "-q", str(worktree)],
+                   cwd=repo, env=_ENV, check=True, capture_output=True)
+    missing = "/home/nobody/checkout/.git/worktrees/wt"
+    (worktree / ".git").write_text(f"gitdir: {missing}\n", encoding="utf-8")
+
+    version = cv.probe(None, worktree)
+    assert version["commit"] is None and version["dirty"] is None
+    assert missing in version["error"]
+    assert "commit null" in version["warning"] and "gitdir: ../../.git/worktrees/<name>" in version["warning"]
+
+
+def test_a_relative_gitdir_resolves(repo, tmp_path):
+    """The remedy the warning names: a relative gitdir line works on the host and in a container."""
+    worktree = repo / "wt"
+    subprocess.run(["git", "-c", "safe.directory=*", "worktree", "add", "-q", str(worktree)],
+                   cwd=repo, env=_ENV, check=True, capture_output=True)
+    (worktree / ".git").write_text("gitdir: ../.git/worktrees/wt\n", encoding="utf-8")
+    version = cv.probe(None, worktree, builds=False)
+    assert len(version["commit"]) == 40 and "warning" not in version
+
+
+def test_the_runner_prints_an_unknown_version_as_a_warning(monkeypatch, tmp_path, capsys):
+    from declarative_robot_trials import trial_runner as tr
+    monkeypatch.setattr(cv, "cached", lambda target: cv.unknown("git produced no commit", "local", tmp_path))
+    metadata = {}
+    tr.stamp_code_version(metadata, None)
+    out = capsys.readouterr().out
+    assert metadata["code_version"]["commit"] is None
+    assert "[runner] WARNING: the code version of this trial is unknown" in out
+    assert metadata["code_version"]["warning"] in out
+
+
+def test_the_runner_prints_no_warning_for_a_known_version(repo, monkeypatch, capsys):
+    from declarative_robot_trials import trial_runner as tr
+    monkeypatch.setattr(cv, "cached", lambda target: cv.probe(None, repo, builds=False))
+    tr.stamp_code_version({}, None)
+    assert "WARNING" not in capsys.readouterr().out
 
 
 def test_a_timeout_is_survivable(monkeypatch, repo):

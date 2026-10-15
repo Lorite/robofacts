@@ -44,6 +44,13 @@ the build, so an empty list bounds the code that ran, it does not prove it.
 Nothing here is ever fatal. A trial that has already flown must never be lost
 to a failed git query, so every failure path returns a dict with ``commit:
 None`` and an ``error`` string instead of raising.
+
+**Unknown is said out loud (2026-10-15).** A failed probe also carries a
+``warning`` sentence, which the runner prints, because a quiet ``commit: null``
+was found only when the bag was read. The common cause is a git worktree made on
+the host and used inside the container: its ``.git`` file names an absolute host
+path that the container does not have, so every git call fails. The warning
+names that path and the remedy (a relative ``gitdir:`` line works on both sides).
 """
 from __future__ import annotations
 
@@ -99,6 +106,9 @@ def _script(workspace: str, workspaces: Sequence[str] = ()) -> str:
     d = shlex.quote(str(workspace))
     return (
         f"cd {d} 2>/dev/null || {{ echo error=no-workspace; exit 0; }}; "
+        # A worktree's .git file that names a directory missing here (see the docstring).
+        "if [ -f .git ]; then g=$(sed -n 's/^gitdir: *//p' .git); "
+        '[ -n "$g" ] && [ ! -e "$g" ] && { echo "error=dangling-gitdir $g"; exit 0; }; fi; '
         f"{_GIT} rev-parse --git-dir >/dev/null 2>&1 || {{ echo error=not-a-repo; exit 0; }}; "
         f"echo commit=$({_GIT} rev-parse HEAD 2>/dev/null); "
         f"echo branch=$({_GIT} rev-parse --abbrev-ref HEAD 2>/dev/null); "
@@ -155,18 +165,38 @@ _ERRORS = {
 }
 
 
+DANGLING_GITDIR = "dangling-gitdir"
+
+
+def _dangling_gitdir_reason(gitdir: str) -> str:
+    return (f"the checkout's .git file names {gitdir}, which does not exist on this host "
+            f"(a git worktree made on another host or outside this container)")
+
+
 def unknown(reason: str, captured_on: str, workspace: Any) -> Dict[str, Any]:
     """The shape returned when the probe could not answer.
 
     Deliberately the same keys as a successful probe: a consumer that reads
     ``code_version["dirty"]`` must not have to care whether the query worked,
     and `None` (unknown) is a different claim from `False` (verified clean).
+    ``warning`` is the extra key: the sentence the runner prints.
     """
     return {"commit": None, "branch": None, "dirty": None,
             "dirty_files": [], "dirty_file_count": 0,
             "committed_at": None, "builds": [],
             "captured_on": captured_on, "workspace": str(workspace),
-            "error": reason}
+            "error": reason, "warning": warning_for(reason, workspace)}
+
+
+def warning_for(reason: str, workspace: Any) -> str:
+    """One sentence for the runner output and the metadata: what is unknown, why, what to do."""
+    line = (f"the code version of this trial is unknown, so its metadata records commit null "
+            f"({reason})")
+    if reason.startswith("the checkout's .git file names "):
+        line += (f". Run the trials from the main checkout, or make the worktree's .git file "
+                 f"relative so the host and the container both resolve it, for example "
+                 f"'gitdir: ../../.git/worktrees/<name>' in {Path(str(workspace)) / '.git'}")
+    return line
 
 
 def parse(stdout: str, captured_on: str, workspace: Any) -> Dict[str, Any]:
@@ -182,6 +212,9 @@ def parse(stdout: str, captured_on: str, workspace: Any) -> Dict[str, Any]:
         # path by one character and every dirty file is reported truncated.
         value = raw.strip()
         if key == "error":
+            if value.startswith(DANGLING_GITDIR + " "):
+                return unknown(_dangling_gitdir_reason(value[len(DANGLING_GITDIR) + 1:]),
+                               captured_on, workspace)
             return unknown(_ERRORS.get(value, value), captured_on, workspace)
         if key == "commit":
             commit = value or None

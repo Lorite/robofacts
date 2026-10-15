@@ -85,7 +85,10 @@ fields:
                not answer, which is not the same claim as `dirty: false`. Since
                2026-10-14 also `builds`: for each colcon workspace, the HEAD of every
                source repository under src/ and the newest install/ time, with
-               `possibly_unbuilt` naming the repositories committed after that build."
+               `possibly_unbuilt` naming the repositories committed after that build.
+               Since 2026-10-15 a probe that could not answer (`commit: null`) also
+               carries `warning`, the sentence the runner prints: what is unknown, why,
+               and the remedy (a worktree whose .git names a host path, for example)."
 
   experiment_variant:
     required: false

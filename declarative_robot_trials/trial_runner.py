@@ -779,6 +779,20 @@ def confirm_operator_steps_tty(trial: cs.TrialSpec,
     return True
 
 
+def stamp_code_version(metadata: Dict[str, Any], target) -> None:
+    """Record which code ran the trial in ``metadata["code_version"]`` and print it. An
+    unknown version is printed as a WARNING (2026-10-15): the adoption test found a
+    ``commit: null`` only when it read the bag, because the line looked like any other."""
+    try:
+        from . import code_version as cv
+        metadata["code_version"] = cv.cached(target)
+        print(f"[runner] code version: {cv.summary(metadata['code_version'])}")
+        if metadata["code_version"].get("warning"):
+            print(f"[runner] WARNING: {metadata['code_version']['warning']}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[runner] WARNING: code version unavailable ({exc}) - continuing")
+
+
 def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: RunnerConfig,
               bags_dir: Path, *, _ctx: Dict[str, Any], gate=None, dry_run: bool = True,
               hooks: Optional[ProcessHooks] = None, slim: bool = True,
@@ -1413,12 +1427,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # routinely behind the laptop's — and cached per host, so a 40-trial
     # campaign pays one ssh round-trip rather than 40. Never fatal: the trial
     # has already flown, and losing it to a git query would be absurd.
-    try:
-        from . import code_version as cv
-        metadata["code_version"] = cv.cached(target)
-        print(f"[runner] code version: {cv.summary(metadata['code_version'])}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"[runner] code version unavailable ({exc}) - continuing")
+    stamp_code_version(metadata, target)
     # Experiment-declared provenance (the PX4 checkout, the Gazebo release):
     # facts about the apparatus that code_version's repo HEAD cannot carry.
     # A checked factor's realized value, measured from the bag (2026-10-06):
