@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import shlex
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -189,6 +190,41 @@ def test_an_empty_launch_arg_value_is_dropped_not_passed_bare(root):
                         ["execution_host", "trajectory"], 1)
     assert "observer_pose_topic_override:=/markerless/drone_pose" in \
         tr.launch_command(real, factors, config)
+
+
+def test_a_launch_arg_value_with_a_space_stays_one_argument(root):
+    """The guide's advice for a launch file without a headless switch (2026-10-15): append
+    the simulator's own flag to an argument the launch file pastes into its command line, as
+    the adoption test did with `world_file: "<world>.sdf -s"`. That works only if the value
+    reaches `ros2 launch` as ONE argument, locally (Popen gets the list) and remotely
+    (ssh + docker exec + shell -c)."""
+    from declarative_robot_trials import remote_exec_utils as rx
+
+    (root / "common" / "config" / "factors.yaml").write_text(
+        CORE + """  world:
+    levels: [ground]
+    default: ground
+    metadata_key: world
+    maps_to:
+      kind: launch_arg
+      names: [world_file]
+      level_values:
+        ground: {world_file: "/w/ground_plane.sdf -s"}
+""", encoding="utf-8")
+    factors = cs.load_factors("expA", root)
+    config = tr.RunnerConfig.load("expA", root)
+    trial = cs.TrialSpec("expA", {"execution_host": "laptop", "record_profile": "position_only",
+                                  "trajectory": "circle", "world": "ground"},
+                         ["execution_host", "trajectory"], 1)
+    cmd = tr.launch_command(trial, factors, config)
+    assert "world_file:=/w/ground_plane.sdf -s" in cmd
+
+    local = rx.local_setup_command(cmd, ["/ws/install/setup.zsh"])
+    assert shlex.split(local[2].split("&& exec ", 1)[1]) == cmd
+    target = rx.RemoteTarget(host="orin-host", container="ros2_jetson_dev", workspace="/ws",
+                             ros_setup="/opt/ros/humble/setup.zsh", ws_setup="/ws/setup.zsh")
+    inner = shlex.split(rx.wrap_command(cmd, target)[-1])[-1]
+    assert shlex.split(inner.split("&& exec ", 1)[1]) == cmd
 
 
 def test_launch_mode_run_uses_ros2_run(root):
