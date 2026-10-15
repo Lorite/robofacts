@@ -64,6 +64,18 @@ def new_experiment(name: str, experiments_root: Path) -> List[Path]:
 DATA_DIRS = ("bags", "runs", "results", "notebooks")
 #: Larger files are data or assets, not declarations, and are reported instead of copied.
 MAX_COPY_BYTES = 1_000_000
+#: The files the framework reads by name, and the per-experiment metadata templates. With the
+#: copied campaigns they are where a copy starts (2026-10-15). A file at the top level or under
+#: scripts/ is copied only when one of them, or a file copied because of them, names it. A file
+#: under config/ that none names is copied but listed for review, because a launch file of a
+#: package outside the experiment may load it. An experiment also holds files that belong to
+#: its own history (an AGENTS.md, a design note such as GATE_LOG_TODO.md, the scripts and
+#: predictions of one study, a CycloneDDS file for one host), and a copy that keeps them
+#: describes the source.
+DECLARATIONS = ("config/factors.yaml", "config/trial_metadata_schema.yaml",
+                "config/preflight_checklist.json", "config/runner.yaml",
+                "config/analyses.yaml", "RUNBOOK.md",
+                "trial_metadata.template.json", "analysis_metadata.template.json")
 
 README_DERIVED = """# {name}
 
@@ -91,6 +103,10 @@ class CopyReport:
         self.campaigns: List[str] = []
         #: Copied files that still name a renamed campaign as a word, to review by hand.
         self.campaign_mentions: List[str] = []
+        #: Top-level and scripts/ files of the source that no declaration names (DECLARATIONS).
+        self.left_out: List[str] = []
+        #: config/ files that no declaration names: copied, to review and delete when unused.
+        self.unreferenced_config: List[str] = []
 
 
 def _name_pattern(name: str) -> "re.Pattern[str]":
@@ -108,7 +124,7 @@ def _source_entries(source: Path) -> Iterable[Path]:
         here = Path(root)
         # Data directories are left out even when they are links to external storage.
         dirs[:] = sorted(d for d in dirs
-                         if d not in ("__pycache__", ".ipynb_checkpoints")
+                         if d not in ("__pycache__", ".ipynb_checkpoints", ".pytest_cache")
                          and not _is_data_dir((here / d).relative_to(source)))
         # Symbolic links to directories are copied as links, never walked into.
         for d in list(dirs):
@@ -119,11 +135,62 @@ def _source_entries(source: Path) -> Iterable[Path]:
             yield here / f
 
 
+def _needs_a_reference(path: Path, rel: Path) -> bool:
+    """True for the files a declaration should name: the top level (but not a dotfile such as
+    .gitignore, or a link to a shared package), config/ and scripts/. Other directories
+    (launch files, worlds, models) are copied whole, because their files name each other in
+    ways a file name search does not see (``model://`` URIs, package-relative paths)."""
+    if path.is_symlink():
+        return False
+    if len(rel.parts) == 1:
+        return not rel.name.startswith(".")
+    return rel.parts[0] in ("config", "scripts")
+
+
+def _names(text: str, rel: Path) -> bool:
+    """Does ``text`` name the file ``rel``: its file name, or for a Python module its import
+    name. Whole names only, so ``plot.py`` is not named by ``replot.py``."""
+    if _name_pattern(rel.name).search(text):
+        return True
+    return rel.suffix == ".py" and _name_pattern(rel.stem).search(text) is not None
+
+
+def _referenced(entries: List[Path], source: Path, roots_rel: Iterable[Path]) -> set:
+    """The files of ``entries`` reachable from the declarations: the roots, every file outside
+    the referenced-only directories, and transitively every file a kept file names."""
+    def text_of(path: Path) -> str:
+        if path.is_symlink() or path.stat().st_size > MAX_COPY_BYTES:
+            return ""
+        try:
+            return path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            return ""
+
+    roots_rel = set(roots_rel)
+    kept = {p for p in entries
+            if p.relative_to(source) in roots_rel or not _needs_a_reference(p, p.relative_to(source))}
+    texts = {p: text_of(p) for p in kept}
+    candidates = [p for p in entries if p not in kept]
+    changed = True
+    while changed:
+        changed = False
+        for path in list(candidates):
+            rel = path.relative_to(source)
+            if any(_names(text, rel) for other, text in texts.items() if other != path):
+                kept.add(path)
+                texts[path] = text_of(path)
+                candidates.remove(path)
+                changed = True
+    return kept
+
+
 def new_experiment_from(name: str, source_name: str, experiments_root: Path,
                         campaigns: Optional[List[str]] = None) -> CopyReport:
     """Write experiments/<name>/ as a renamed copy of the declarations of an existing
     experiment: config/, the campaigns (all, or the named ones), scripts/ and the other
-    text files. Recorded data, notebooks, caches, large files and tests are not copied.
+    text files. Recorded data, notebooks, caches, large files and tests are not copied, and
+    neither is a top-level or scripts/ file that no declaration names (see DECLARATIONS):
+    the source's AGENTS.md, notes and study scripts stay with it.
     The README becomes a short derived-from stub, because the design is the one part a
     copy cannot carry over."""
     if not NAME_RE.match(name):
@@ -157,6 +224,7 @@ def new_experiment_from(name: str, source_name: str, experiments_root: Path,
     pattern = _name_pattern(source_name)
     report = CopyReport()
     report.campaigns = [renames.get(c, c) for c in wanted]
+    entries = []
     for path in _source_entries(source):
         rel = path.relative_to(source)
         if rel.parts[0] == "campaigns" and len(rel.parts) == 2 and path.suffix == ".yaml" \
@@ -171,6 +239,16 @@ def new_experiment_from(name: str, source_name: str, experiments_root: Path,
             continue
         if path.suffix in (".pyc", ".FCBak") or path.name == ".DS_Store":
             continue
+        entries.append(path)
+    declarations = [Path(d) for d in DECLARATIONS] + [Path("campaigns") / f"{c}.yaml" for c in wanted]
+    referenced = _referenced(entries, source, declarations)
+    for path in entries:
+        rel = path.relative_to(source)
+        if path not in referenced:
+            if rel.parts[0] != "config":
+                report.left_out.append(str(rel))
+                continue
+            report.unreferenced_config.append(str(rel))
         new_rel = Path(*(pattern.sub(name, part) for part in rel.parts))
         is_campaign = rel.parts[0] == "campaigns" and len(rel.parts) == 2
         if is_campaign and path.stem in renamed_campaigns:
@@ -297,6 +375,17 @@ def _print_copy_report(args, report: CopyReport) -> None:
         print("\nNot copied:")
         for path, why in report.skipped:
             print(f"  {path}: {why}")
+    if report.left_out:
+        source_rel = rel(args.experiments_root / args.source)
+        print(f"\nLeft out, no declaration names them (the source's own notes and study files). "
+              f"Copy one from {source_rel}/ when this experiment needs it:")
+        for path in report.left_out:
+            print(f"  {path}")
+    if report.unreferenced_config:
+        print("\nCopied, but no declaration names them. Delete each one this experiment does not "
+              "use (a launch file of a package may load one, so check before you delete):")
+        for path in report.unreferenced_config:
+            print(f"  {path}")
     first = f"campaigns/{report.campaigns[0]}.yaml" if report.campaigns else "campaigns/<c>.yaml"
     print(f"""
 Everything still describes {args.source}. Change, in this order, only what differs:

@@ -99,6 +99,37 @@ def test_new_from_renames_a_campaign(project):
     assert validate.validate("demo_copy", experiments(project)).ready
 
 
+def test_new_from_leaves_out_what_no_declaration_names(project, capsys):
+    """The adoption test of 2026-10-15 deleted the source's AGENTS.md, its gate-log design
+    note, two study scripts and a CycloneDDS file by hand after `trials new --from`."""
+    source = experiments(project) / SOURCE
+    (source / "AGENTS.md").write_text(f"# AGENTS.md: {SOURCE}\n")
+    (source / "GATE_LOG_TODO.md").write_text("design note\n")
+    (source / ".gitignore").write_text("*.log\n")
+    (source / "scripts" / "e2_analysis.py").write_text("print('one study')\n")
+    (source / "config" / "cyclonedds_local_sim.xml").write_text("<!-- export cyclonedds_local_sim.xml -->\n")
+    # Named by the RUNBOOK, and that script imports a module: both reach the copy.
+    (source / "RUNBOOK.md").write_text("Record with `scripts/record.sh`.\n")
+    (source / "scripts" / "record.sh").write_text("python3 -c 'import rate_lib'\n")
+    (source / "scripts" / "rate_lib.py").write_text("RATE = 1\n")
+
+    rc = cli.main(["new", "demo_copy", "--from", SOURCE, "--experiments-root", str(experiments(project))])
+    out = capsys.readouterr().out
+    target = experiments(project) / "demo_copy"
+
+    assert rc == 0
+    for kept in ("RUNBOOK.md", ".gitignore", "scripts/record.sh", "scripts/rate_lib.py",
+                 "scripts/listen_for.py", "ros2_pkg"):
+        assert (target / kept).exists() or (target / kept).is_symlink(), kept
+    for gone in ("AGENTS.md", "GATE_LOG_TODO.md", "scripts/e2_analysis.py"):
+        assert not (target / gone).exists(), gone
+        assert f"  {gone}\n" in out.split("Left out")[1]
+    # A launch file outside the experiment may load a config file, so it is copied and listed.
+    assert (target / "config" / "cyclonedds_local_sim.xml").is_file()
+    assert "  config/cyclonedds_local_sim.xml" in out.split("Copied, but no declaration names them")[1]
+    assert validate.validate("demo_copy", experiments(project)).ready
+
+
 @pytest.mark.parametrize("name, source, campaigns, message", [
     ("Bad-Name", SOURCE, None, "not a valid experiment name"),
     ("demo_copy", "no_such_experiment", None, "no experiment 'no_such_experiment'"),
