@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Kill every ROS 2 process in this container - clean slate before a new test
+# Kill the ROS 2 processes of your ROS_DOMAIN_ID - clean slate before a new test
 # =============================================================================
 # Half of the "mystery" failures in this workspace are leftovers from the
 # previous run, not bugs in the new one. Observed repeatedly:
@@ -16,7 +16,16 @@
 #     new run is about to record
 #
 # Run this BEFORE launching a new test. It is deliberately blunt: everything
-# ROS-ish in this container dies, then the daemon is restarted fresh.
+# ROS-ish on your ROS_DOMAIN_ID dies, then the daemon is restarted fresh.
+#
+# Only your domain, since 2026-10-15. Several sessions and agents share one
+# container, each on its own ROS_DOMAIN_ID, and the old kill-everything run
+# stopped their trials in the middle. A process belongs to a domain by the
+# ROS_DOMAIN_ID in its environment (/proc/<pid>/environ, unset means 0, as in
+# ROS 2), which an orphan keeps after its launch dies, so a reparented gz sim of
+# your previous run is still found. Processes on other domains are listed, not
+# killed: a camera driver or a NatNet client started on another domain still
+# holds its device, and the list is how you find it. --all kills them too.
 #
 # It will NOT kill this script, its ancestors (your shell, the VS Code server,
 # sshd), so it is safe to run from an integrated terminal.
@@ -27,24 +36,30 @@ set -uo pipefail
 DRY_RUN=0
 GRACE_S=3
 VERBOSE=0
+ALL_DOMAINS=0
+MY_DOMAIN="${ROS_DOMAIN_ID:-0}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/kill_ros.sh [--dry-run] [--grace <seconds>] [--verbose]
+Usage: scripts/kill_ros.sh [--all] [--dry-run] [--grace <seconds>] [--verbose]
 
+  --all            Kill the ROS processes of every ROS_DOMAIN_ID, not only yours.
   --dry-run        List what would be killed, kill nothing. Exit 0 always.
   --grace <s>      Seconds to wait after SIGTERM before SIGKILL (default: 3).
   --verbose        Print the full command line of every matched process.
   -h, --help       Show this help.
 
-Kills ROS 2 nodes, launches, bag recorders, RViz, Gazebo/gz, the RealSense and
-motion-capture drivers, component containers and the ros2 daemon, then starts a
-fresh daemon. Safe to run from a terminal you are sitting in.
+Kills the ROS 2 nodes, launches, bag recorders, RViz, Gazebo/gz, the RealSense and
+motion-capture drivers and component containers of your ROS_DOMAIN_ID (unset
+means 0), then restarts the ros2 daemon of that domain. Processes on other
+domains are listed and left alone, unless --all. Safe to run from a terminal you
+are sitting in.
 EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --all) ALL_DOMAINS=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --grace) GRACE_S="$2"; shift 2 ;;
         --verbose) VERBOSE=1; shift ;;
@@ -107,11 +122,35 @@ matches() {
     return 1
 }
 
+# The ROS_DOMAIN_ID a process runs on: from its environment, 0 when unset (the
+# ROS 2 default), "?" when the environment cannot be read (another user's
+# process). A "?" process is never killed without --all.
+domain_of() {
+    local env_file="/proc/$1/environ"
+    [ -r "$env_file" ] || { echo "?"; return; }
+    local value
+    value="$(tr '\0' '\n' < "$env_file" 2>/dev/null | sed -n 's/^ROS_DOMAIN_ID=//p' | head -n 1)"
+    echo "${value:-0}"
+}
+
+show() {
+    local pid="$1" args="$2" note="$3"
+    if [ "$VERBOSE" -eq 1 ]; then
+        echo "  $pid  $note$args"
+    else
+        echo "  $pid  $note$(echo "$args" | cut -c1-100)"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Collect victims.
 # -----------------------------------------------------------------------------
 PIDS=()
 DESCS=()
+DOMAINS=()
+OTHER_PIDS=()
+OTHER_DESCS=()
+OTHER_DOMAINS=()
 SELF_NAME="$(basename "${BASH_SOURCE[0]}")"
 
 while read -r pid args; do
@@ -120,20 +159,40 @@ while read -r pid args; do
     # Don't match on our own command line (it contains every pattern above).
     case "$args" in *"$SELF_NAME"*) continue ;; esac
     matches "$args" || continue
-    PIDS+=("$pid")
-    DESCS+=("$args")
+    domain="$(domain_of "$pid")"
+    if [ "$ALL_DOMAINS" -eq 1 ] || [ "$domain" = "$MY_DOMAIN" ]; then
+        PIDS+=("$pid")
+        DESCS+=("$args")
+        DOMAINS+=("$domain")
+    else
+        OTHER_PIDS+=("$pid")
+        OTHER_DESCS+=("$args")
+        OTHER_DOMAINS+=("$domain")
+    fi
 done < <(ps -eo pid=,args= 2>/dev/null)
 
-if [ ${#PIDS[@]} -eq 0 ]; then
-    echo "✓ No ROS processes running - already a clean slate."
+if [ "$ALL_DOMAINS" -eq 1 ]; then
+    scope="on every ROS_DOMAIN_ID (--all)"
 else
-    echo "Found ${#PIDS[@]} ROS process(es):"
+    scope="on ROS_DOMAIN_ID=$MY_DOMAIN"
+fi
+if [ ${#PIDS[@]} -eq 0 ]; then
+    echo "✓ No ROS processes $scope - already a clean slate."
+else
+    echo "Found ${#PIDS[@]} ROS process(es) $scope:"
     for i in "${!PIDS[@]}"; do
-        if [ "$VERBOSE" -eq 1 ]; then
-            echo "  ${PIDS[$i]}  ${DESCS[$i]}"
+        if [ "$ALL_DOMAINS" -eq 1 ]; then
+            show "${PIDS[$i]}" "${DESCS[$i]}" "[domain ${DOMAINS[$i]}] "
         else
-            echo "  ${PIDS[$i]}  $(echo "${DESCS[$i]}" | cut -c1-100)"
+            show "${PIDS[$i]}" "${DESCS[$i]}" ""
         fi
+    done
+fi
+if [ ${#OTHER_PIDS[@]} -gt 0 ]; then
+    echo "Left alone, ${#OTHER_PIDS[@]} ROS process(es) on other domains (another session's,"
+    echo "or a leftover that may still hold a device; --all kills them too):"
+    for i in "${!OTHER_PIDS[@]}"; do
+        show "${OTHER_PIDS[$i]}" "${OTHER_DESCS[$i]}" "[domain ${OTHER_DOMAINS[$i]}] "
     done
 fi
 
@@ -172,7 +231,8 @@ fi
 
 # -----------------------------------------------------------------------------
 # Fresh daemon. A stale daemon reports an empty node/service list on a perfectly
-# healthy stack, which reads as "everything is dead" (2026-07-22).
+# healthy stack, which reads as "everything is dead" (2026-07-22). `ros2 daemon`
+# acts on the daemon of the caller's ROS_DOMAIN_ID only.
 # -----------------------------------------------------------------------------
 if command -v ros2 >/dev/null 2>&1; then
     ros2 daemon stop >/dev/null 2>&1
