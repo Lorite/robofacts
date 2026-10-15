@@ -527,6 +527,21 @@ def test_viewers_page_links_slim_bags_via_foxglove(client, root):
     assert "foxglove://open?ds=remote-file" in body and "t1_slim" in body
 
 
+def test_viewers_page_lists_per_experiment_foxglove_layouts(client, root):
+    """#130: a layout an experiment ships as config/foxglove*.json is listed with a download
+    link, and the download route serves it (and only it) behind auth."""
+    layout = root / "expA" / "config" / "foxglove_demo.json"
+    layout.write_text('{"configById": {}, "layout": null}', encoding="utf-8")
+    (root / "expA" / "config" / "not_a_layout.json").write_text("{}", encoding="utf-8")
+    body = client.get("/viewers", headers=auth()).get_data(as_text=True)
+    assert "foxglove_demo.json" in body and "/layout/expA/foxglove_demo.json" in body
+    assert "not_a_layout.json" not in body, "only names starting with foxglove are layouts"
+    got = client.get("/layout/expA/foxglove_demo.json", headers=auth())
+    assert got.status_code == 200 and b'"configById"' in got.data
+    assert client.get("/layout/expA/not_a_layout.json", headers=auth()).status_code == 404
+    assert client.get("/layout/expA/foxglove_demo.json").status_code == 401, "layouts stay behind auth"
+
+
 def test_a_slim_bag_can_be_streamed(client, root):
     bag = root / "expA" / "bags_slim" / "t1_slim"
     bag.mkdir(parents=True)

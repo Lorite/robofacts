@@ -489,6 +489,20 @@ def discover_campaigns(experiments_root: Path) -> Dict[str, List[Path]]:
     return out
 
 
+def foxglove_layouts(root: Path) -> Dict[str, List[Path]]:
+    """The Foxglove layouts each experiment ships: ``experiments/<exp>/config/foxglove*.json``.
+
+    A convention, not a schema: any JSON exported from Foxglove (Layouts -> Export)
+    whose name starts with ``foxglove`` (case does not matter) is listed on the Viewers
+    page for its experiment.
+    """
+    out: Dict[str, List[Path]] = {}
+    for f in sorted(root.glob("*/config/*.json")):
+        if f.name.lower().startswith("foxglove"):
+            out.setdefault(f.parents[1].name, []).append(f)
+    return out
+
+
 def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
     """Deep link that opens the laptop's Foxglove on a bag served by this UI.
 
@@ -1075,8 +1089,22 @@ def create_app(experiments_root: Optional[Path] = None,
                         "name": bag.name,
                         "link": foxglove_link(base, slim_root.parent.name, bag.name),
                     })
-        return render_template("viewers.html", recent=recent, base_url=base,
+        # Per-experiment Foxglove layouts (experiments/<exp>/config/foxglove*.json): a
+        # foxglove:// link cannot carry a layout, so the page offers the file to import
+        # once (Layouts -> Import), next to the bags of its experiment.
+        layouts = {exp: [f.name for f in files] for exp, files in foxglove_layouts(root).items()}
+        return render_template("viewers.html", recent=recent, base_url=base, layouts=layouts,
                                journal=journal.snapshot())
+
+    @app.route("/layout/<experiment>/<path:name>")
+    @requires_auth
+    def layout_file(experiment: str, name: str):
+        """A per-experiment Foxglove layout, as a download for Layouts -> Import."""
+        root = app.config["EXPERIMENTS_ROOT"]
+        for f in foxglove_layouts(root).get(experiment, []):
+            if f.name == name:
+                return send_file(f, mimetype="application/json", as_attachment=True, download_name=f.name)
+        return {"error": f"no Foxglove layout named {name!r} in {experiment}"}, 404
 
     @app.route("/healthz")
     def healthz():

@@ -28,4 +28,14 @@ that makes cross-host DDS unreliable. The bridge is read-only: a browser cannot 
 {% else %}
 <p>No slim bags yet. They are produced automatically after each recording.</p>
 {% endif %}
+{% if layouts %}
+<h4>Layouts</h4>
+<p style="font-size:.9rem">An experiment that ships a Foxglove layout (<code>config/foxglove*.json</code>) lists it here:
+download it once and import it in Foxglove (<b>Layouts → Import from file</b>), then open any of its bags above.</p>
+<table><tr><th>experiment</th><th>layout</th></tr>
+{% for exp, files in layouts.items() %}{% for f in files %}
+<tr><td>{{ exp }}</td><td><a href="{{ base_url }}/layout/{{ exp }}/{{ f }}">{{ f }}</a></td></tr>
+{% endfor %}{% endfor %}
+</table>
+{% endif %}
 {% endblock %}
