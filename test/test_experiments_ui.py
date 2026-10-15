@@ -527,6 +527,18 @@ def test_viewers_page_links_slim_bags_via_foxglove(client, root):
     assert "foxglove://open?ds=remote-file" in body and "t1_slim" in body
 
 
+def test_viewers_page_lists_slim_scratch_bags(client, root):
+    """#130: a slim copy of a scratch flight (bags_scratch/*_slim) is listed like a campaign's."""
+    fat = root / "expA" / "bags_scratch" / "t9_scratch_x"
+    slim = root / "expA" / "bags_scratch" / "t9_scratch_x_slim"
+    for b in (fat, slim):
+        b.mkdir(parents=True)
+        (b / "d_0.mcap").write_bytes(b"x")
+    body = client.get("/viewers", headers=auth()).get_data(as_text=True)
+    assert "t9_scratch_x_slim" in body
+    assert body.count("t9_scratch_x<") == 0 and "t9_scratch_x.mcap" not in body, "the fat scratch bag is not offered"
+
+
 def test_viewers_page_lists_per_experiment_foxglove_layouts(client, root):
     """#130: a layout an experiment ships as config/foxglove*.json is listed with a download
     link, and the download route serves it (and only it) behind auth."""

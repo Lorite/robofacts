@@ -1024,11 +1024,16 @@ def create_app(experiments_root: Optional[Path] = None,
         """
         root = app.config["EXPERIMENTS_ROOT"]
         for slim_root in (root / experiment / "bags_slim",
-                          root / experiment / "bags_issues_slim"):
+                          root / experiment / "bags_issues_slim",
+                          root / experiment / "bags_scratch"):
             if not slim_root.is_dir():
                 continue
             for candidate in slim_root.iterdir():
                 if candidate.name != name or not candidate.is_dir():
+                    continue
+                # Only slim copies are served from bags_scratch: a fat scratch bag is
+                # hundreds of MB, and a viewer streaming it through the UI is a mistake.
+                if slim_root.name == "bags_scratch" and not name.endswith("_slim"):
                     continue
                 splits = sorted(candidate.glob("*.mcap"))
                 if splits:
@@ -1081,14 +1086,18 @@ def create_app(experiments_root: Optional[Path] = None,
         root = app.config["EXPERIMENTS_ROOT"]
         base = request.host_url.rstrip("/")
         recent = []
-        for slim_root in sorted(root.glob("*/bags_slim")):
-            for bag in sorted(slim_root.iterdir(), reverse=True)[:5]:
-                if bag.is_dir() and list(bag.glob("*.mcap")):
-                    recent.append({
-                        "experiment": slim_root.parent.name,
-                        "name": bag.name,
-                        "link": foxglove_link(base, slim_root.parent.name, bag.name),
-                    })
+        # Slim bags of the campaigns (bags_slim/) and slim copies of scratch flights
+        # (bags_scratch/*_slim, made by hand with slim_bag): a scratch flight is often
+        # the one worth looking at (#130).
+        for slim_root in sorted(root.glob("*/bags_slim")) + sorted(root.glob("*/bags_scratch")):
+            bags = [b for b in slim_root.iterdir() if b.is_dir() and list(b.glob("*.mcap"))
+                    and (slim_root.name == "bags_slim" or b.name.endswith("_slim"))]
+            for bag in sorted(bags, reverse=True)[:5]:
+                recent.append({
+                    "experiment": slim_root.parent.name,
+                    "name": bag.name,
+                    "link": foxglove_link(base, slim_root.parent.name, bag.name),
+                })
         # Per-experiment Foxglove layouts (experiments/<exp>/config/foxglove*.json): a
         # foxglove:// link cannot carry a layout, so the page offers the file to import
         # once (Layouts -> Import), next to the bags of its experiment.
