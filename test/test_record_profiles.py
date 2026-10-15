@@ -26,12 +26,12 @@ from pathlib import Path
 from declarative_robot_trials.record_profiles import (  # noqa: E402
     PROFILES,
     PROFILE_NOTES,
-    SPOT_NAME as SPOT,
     build_record_command,
     build_topics,
     is_heavy_topic,
 )
 from declarative_robot_trials.slim_bag import select_topics  # noqa: E402
+from declarative_robot_trials import record_profiles  # noqa: E402
 
 CF = "cf1"
 
@@ -239,6 +239,9 @@ def test_the_handcam_shadow_profile_still_has_no_watchdog():
 
 def test_route_profile_carries_replay_grade_pixels():
     """Outside the volume the camera is the only witness there is."""
+    # Looked up in the test, not at import: the project settings (and with them the robot's
+    # name) are the conftest fixture's example project only while a test runs.
+    SPOT = record_profiles.SPOT_NAME
     topics = build_topics("spot_route_replay", cf_name=CF)
     assert f"/{SPOT}/camera/hand/compressed" in topics
     assert f"/{SPOT}/depth_registered/hand/image" in topics
@@ -253,6 +256,7 @@ def test_spot_hand_pixels_are_heavy_but_their_intrinsics_are_not():
     heavy bag and got pulled over the lab Wi-Fi) and must keep camera_info,
     without which a recorded estimate cannot be re-projected.
     """
+    SPOT = record_profiles.SPOT_NAME
     assert is_heavy_topic(f"/{SPOT}/camera/hand/compressed")
     assert is_heavy_topic(f"/{SPOT}/depth_registered/hand/image")
     assert not is_heavy_topic(f"/{SPOT}/camera/hand/camera_info")

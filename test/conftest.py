@@ -11,8 +11,24 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_PROJECT = PACKAGE_ROOT / "example_project"
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
-os.environ.setdefault("TRIALS_EXPERIMENTS_ROOT", str(EXAMPLE_PROJECT / "experiments"))
-os.environ.setdefault("TRIALS_PROJECT_ROOT", str(EXAMPLE_PROJECT))
+#: The roots the caller set before pytest started, which the fixture below keeps.
+_CALLER_ROOTS = {name: os.environ.get(name) for name in ("TRIALS_EXPERIMENTS_ROOT", "TRIALS_PROJECT_ROOT")}
+
+
+@pytest.fixture(autouse=True)
+def _example_project_roots(monkeypatch):
+    """The package's tests run against the shipped example project, unless the caller set a root.
+
+    A fixture, not os.environ at import time (2026-10-15): pytest imports every conftest
+    before it runs a test, so in a project that collects this suite next to its own tests
+    (the lab repo's pytest.ini) the import-time variables pointed the project's tests at
+    the example project too. Its lint then checked one experiment instead of all of them,
+    and its settings tests failed, in the full run only."""
+    defaults = {"TRIALS_EXPERIMENTS_ROOT": str(EXAMPLE_PROJECT / "experiments"),
+                "TRIALS_PROJECT_ROOT": str(EXAMPLE_PROJECT)}
+    for name, value in defaults.items():
+        if not _CALLER_ROOTS[name]:
+            monkeypatch.setenv(name, value)
 
 
 def pytest_configure(config):
