@@ -169,8 +169,8 @@ DANGLING_GITDIR = "dangling-gitdir"
 
 
 def _dangling_gitdir_reason(gitdir: str) -> str:
-    return (f"the checkout's .git file names {gitdir}, which does not exist on this host "
-            f"(a git worktree made on another host or outside this container)")
+    return (f"the checkout's .git file names {gitdir}, which does not exist on this host, "
+            f"so it is a git worktree made on another host or outside this container")
 
 
 def unknown(reason: str, captured_on: str, workspace: Any) -> Dict[str, Any]:
@@ -190,8 +190,7 @@ def unknown(reason: str, captured_on: str, workspace: Any) -> Dict[str, Any]:
 
 def warning_for(reason: str, workspace: Any) -> str:
     """One sentence for the runner output and the metadata: what is unknown, why, what to do."""
-    line = (f"the code version of this trial is unknown, so its metadata records commit null "
-            f"({reason})")
+    line = f"the code version of this trial is unknown, so its metadata records commit null: {reason}"
     if reason.startswith("the checkout's .git file names "):
         line += (f". Run the trials from the main checkout, or make the worktree's .git file "
                  f"relative so the host and the container both resolve it, for example "
