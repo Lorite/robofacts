@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% block title %}Pre-flight · {{ experiment }} · Trials{% endblock %}
 {% block body %}
-<h1>Pre-flight — {{ experiment }} <small>on {{ host }}</small></h1>
-<p class="{{ 'ok' if ok else 'bad' }}" style="font-size:1.2rem">
-  {{ '✅ PASS — go' if ok else '❌ FAIL — no-go (fix the first failing check, re-run)' }}
-</p>
-<p style="font-size:.85rem">A pass is only meaningful seconds before the trial, from the
-   trial's own environment — re-run it at T-0, not once per morning.</p>
-<pre style="white-space:pre-wrap">{{ output }}</pre>
-<p><a href="javascript:history.back()">← back</a></p>
+<h1>Pre-flight: {{ experiment }} <small>on {{ host }}</small></h1>
+<div class="callout {{ '' if ok else 'badc' }}" style="font-size:1.15rem">
+  <span class="{{ 'ok' if ok else 'bad' }}"><b>{{ '✅ PASS: go' if ok else '❌ FAIL: no-go' }}</b></span>
+  {% if not ok %}<span class="small">Fix the first failing check, then run it again.</span>{% endif %}
+</div>
+<p class="small muted">A pass means something only seconds before the trial, from the trial's own environment: run it again at T-0, not once per morning. Every EXECUTE does.</p>
+<pre>{{ output }}</pre>
+<p><a href="{{ back }}">← back</a></p>
 {% endblock %}

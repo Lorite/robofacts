@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% set section = 'journal' %}
+{% block title %}Journal · Trials{% endblock %}
+{% block body %}
+<h1>Journal</h1>
+<p class="small muted">What this UI did since it started: runs, stops, operator steps, gate checks, quarantines. It lives in memory only, on purpose: the durable record of a trial is its bag, its <code>trial_metadata.json</code> and the attempt ledger (<code>runs/attempts.jsonl</code>).</p>
+
+<h2>Runs</h2>
+{% if runs %}
+<div class="tablewrap"><table>
+<thead><tr><th>run</th><th>experiment</th><th>campaign</th><th>kind</th><th>state</th><th class="num">trials</th><th>tally</th></tr></thead>
+<tbody>{% for run in runs %}{% set d = run.to_dict() %}
+<tr><td class="mono"><a href="{{ url_for('run_view', run_id=run.run_id) }}">{{ run.run_id }}</a></td>
+  <td><a href="{{ url_for('experiment_view', experiment=run.experiment) }}">{{ run.experiment }}</a></td>
+  <td>{{ run.campaign }}</td><td>{{ 'EXECUTE' if run.executed else 'dry run' }}</td>
+  <td><span class="badge {{ 'b-ok' if run.state == 'finished' else ('b-bad' if run.state in ('error','aborted') else 'b-warn') }}">{{ run.state }}</span></td>
+  <td class="num">{{ d.done }}/{{ d.wanted }}</td><td class="small">{{ d.tally.line if run.executed else '' }}</td></tr>
+{% endfor %}</tbody></table></div>
+{% else %}
+<p class="small muted">No run started from this UI since it came up.</p>
+{% endif %}
+
+<h2>Actions</h2>
+{% if journal %}
+<div class="tablewrap"><table>
+<thead><tr><th>time (UTC)</th><th>kind</th><th>what</th></tr></thead>
+<tbody>{% for e in journal %}<tr><td class="nowrap">{{ e.at }}</td><td>{{ e.kind }}</td><td>{{ e.summary }}{% if e.detail %}<details><summary class="small muted">output</summary><pre>{{ e.detail }}</pre></details>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% else %}
+<p class="small muted">Nothing yet.</p>
+{% endif %}
+{% endblock %}

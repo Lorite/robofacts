@@ -76,6 +76,7 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials lint` | every declaration against the rules (pytest), `--experiment <exp>` for one experiment |
 | `trials gate --checklist <json>` | a T-0 gate by hand, `--validate` and `--list` for the checklist |
 | `trials analyze <exp> <name>` | a named analysis over a cohort of usable bags |
+| `trials records <exp>` | every trial with its campaign, gate verdict, slim bag, run log, analyses and video; `--campaign`, `--status`, `--where`, `--json` |
 | `trials check <campaign>` | the expanded plan of one campaign, `--factors <exp>` the factor space |
 | `trials metadata` | audit the recorded metadata against the contract |
 | `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required) |

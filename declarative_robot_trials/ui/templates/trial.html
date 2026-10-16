@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge, gate_badge, replay, cell_chips with context %}
+{% set section = 'experiments' %}
+{% block title %}{{ r.name }} · Trials{% endblock %}
+{% block body %}
+<h1 class="mono" style="font-size:1.2rem">{{ r.name }}</h1>
+<p>{{ status_badge(r.status) }}
+  {% if r.kind == 'scratch' and r.status != 'scratch' %}<span class="badge b-scratch">scratch flight, never coverage</span>{% endif %}
+  
+  {% if r.counts %}<span class="small ok">counts as coverage{% if r.counts_for %} for {{ r.counts_for|join(', ') }}{% endif %}</span>
+  {% else %}<span class="small muted">{{ status_meaning.get(r.status, '') }}</span>{% endif %}</p>
+{% if r.reason and r.status != 'usable' %}
+<div class="callout {{ 'badc' if r.status in ('aborted','blocked','failed','interrupted') else 'warnc' }}"><b>Why:</b>
+  <pre style="background:transparent;border:0;padding:0;margin:.2rem 0 0">{{ r.reason }}</pre></div>
+{% endif %}
+
+<div class="cols">
+  <div class="panel">
+    <h3>Replay</h3>
+    {% if r.slim_name %}
+      <p class="cmdline" style="flex-wrap:wrap;align-items:center">
+        <a class="button btn-primary" href="{{ fox_link(base_url, experiment, r.slim_name) }}" title="opens the Foxglove app installed on this laptop">▶ Open in Foxglove</a>
+        <a class="button" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener" title="app.foxglove.dev, your default org">🌐 Foxglove web</a>
+        <a class="button" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇ slim .mcap</a>
+        {% for l in data.layouts %}<a class="button" href="{{ url_for('layout_file', experiment=experiment, name=l) }}" title="{{ l }}">⬇ layout</a>{% endfor %}
+      </p>
+      {% if data.layouts %}
+      <p class="small muted">First time: download the layout, then in Foxglove <i>Layouts → Import from file</i>. A <code>foxglove://</code> link cannot carry a layout, so it is a separate, one-time step.</p>
+      {% endif %}
+      <p class="small muted">▶ streams the slim copy ({{ size_slim if size_slim is not none else '?' }} MB) through this UI over your tunnel. It fails <b>silently</b> if Foxglove is not installed; use ⬇ then.</p>
+    {% elif r.bag_dir %}
+      <div class="empty"><b>No slim copy.</b> Foxglove opens slim copies only (a few MB, streamed through the tunnel). Make one:
+        <div class="cmdline"><code>trials slim --bag {{ r.bag_dir }}</code><button type="button" class="btn-small" data-copy="trials slim --bag {{ r.bag_dir }}">⧉</button></div></div>
+    {% else %}
+      <div class="empty">Nothing to replay: {{ 'the gate refused the attempt, so nothing was recorded' if r.status == 'blocked' else 'no recording of this attempt is on this machine' }}.</div>
+    {% endif %}
+    {% if r.videos %}
+    <h3>Video</h3>
+    {% for v in r.videos %}
+      {% set vrel = v|relpath(experiment) %}
+      {% if loop.first and 'h264' in v.name or loop.first and r.videos|length == 1 %}
+      <video controls preload="metadata" src="{{ url_for('files', experiment=experiment, rel=vrel) }}"></video>
+      {% endif %}
+      <p class="small"><a href="{{ url_for('files', experiment=experiment, rel=vrel) }}">🎬 {{ vrel }}</a></p>
+    {% endfor %}
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h3>Facts</h3>
+    <dl class="kv small">
+      <dt>started</dt><dd>{{ r.started|when or '—' }}</dd>
+      <dt>campaign</dt><dd>{% if r.campaign and r.campaign in data.campaigns %}<a href="{{ url_for('campaign_view', experiment=experiment, name=r.campaign) }}">{{ r.campaign }}</a>{% else %}{{ r.campaign or '—' }}{% endif %}
+        {%- set others = r.counts_for|reject('equalto', r.campaign)|list %}{% if others %} <span class="muted">(also counted by {{ others|join(', ') }})</span>{% endif %}</dd>
+      <dt>cell</dt><dd>{{ cell_chips(r.values, r.values.keys()|sort, data.defaults) or '—' }}</dd>
+      <dt>repetition</dt><dd>{{ r.repetition if r.repetition is not none else '—' }}</dd>
+      <dt>T-0 gate</dt><dd>{{ gate_badge(r.gate) }}{% if r.gate and r.gate.mode %} <span class="muted">{{ r.gate.mode }}{% if r.gate.n_checks %}, {{ r.gate.n_checks }} checks{% endif %}</span>{% endif %}
+        {% if r.gate and r.gate.failed %}<div class="bad">{{ r.gate.failed|join('; ') }}</div>{% endif %}</dd>
+      {% set c = code_cell(r.code_version) %}
+      <dt>code</dt><dd><span class="mono" title="{{ c.title }}">{{ c.short }}{{ '*' if c.dirty }}</span>{% if c.dirty %} <span class="muted">uncommitted changes: the commit alone does not describe what ran</span>{% endif %}</dd>
+      <dt>recording</dt><dd>{% if r.bag_dir %}<code>{{ r.bag_dir|relpath(experiment) }}</code> {{ size_full }} MB{% else %}<span class="muted">not on this machine</span>{% endif %}</dd>
+      <dt>slim copy</dt><dd>{% if r.slim_dir %}<code>{{ r.slim_dir|relpath(experiment) }}</code>{% else %}<span class="muted">none</span>{% endif %}</dd>
+    </dl>
+  </div>
+</div>
+
+<h2>Verify report</h2>
+{% if verify %}
+<div class="tablewrap"><table>
+<thead><tr><th>verify step</th><th>result</th><th class="num">seconds</th></tr></thead>
+<tbody>{% for v in verify %}<tr><td><code>{{ v.name }}</code></td><td>{% if v.ok %}<span class="badge b-ok">rc 0</span>{% else %}<span class="badge b-bad">rc {{ v.rc }}</span>{% endif %}</td><td class="num">{{ v.seconds or '—' }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% else %}
+<p class="small muted">No verify step ran{% if r.kind == 'scratch' %}: a scratch flight skips them, by design{% elif not r.run_log %}: there is no run log for this trial{% else %} (none declared, or the trial stopped before them){% endif %}.</p>
+{% endif %}
+{% if r.metadata.get('_schema_problems') or (r.status == 'unverified' and r.reason) %}
+<p class="small"><b>Contract problems:</b> {{ r.reason }}</p>
+{% endif %}
+
+<h2>Analyses that include it</h2>
+{% if r.analyses %}
+<div class="tablewrap"><table>
+<thead><tr><th>analysis</th><th>per</th><th>generated</th><th>result folder</th><th class="num">failed commands</th></tr></thead>
+<tbody>{% for a in r.analyses %}
+<tr><td><b>{{ a.analysis }}</b></td><td>{{ a.per }}{% if a.per == 'cohort' %} <span class="muted">({{ a.n_bags }} bags)</span>{% endif %}</td><td class="nowrap">{{ a.generated_at }}</td>
+  <td><a href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}"><code>{{ a.path|relpath(experiment) }}</code></a></td>
+  <td class="num">{{ a.failed_commands if a.failed_commands is not none else '—' }}</td></tr>
+{% endfor %}</tbody></table></div>
+{% else %}
+<p class="small muted">No result folder names this trial. <a href="{{ url_for('analyses_view', experiment=experiment) }}">Run an analysis</a> over a cohort that includes it.</p>
+{% endif %}
+
+<h2>Files</h2>
+<p class="small">
+  {% if r.metadata_path %}<a href="{{ url_for('files', experiment=experiment, rel=r.metadata_path|relpath(experiment)) }}">trial_metadata.json</a> · {% endif %}
+  {% if r.run_log %}<a href="{{ url_for('files', experiment=experiment, rel=r.run_log|relpath(experiment)) }}">run log</a> · {% endif %}
+  {% if r.bag_dir %}<a href="{{ url_for('files', experiment=experiment, rel=(r.bag_dir|relpath(experiment)) ~ '/') }}">bag directory</a> · {% endif %}
+  {% if r.slim_dir %}<a href="{{ url_for('files', experiment=experiment, rel=(r.slim_dir|relpath(experiment)) ~ '/') }}">slim directory</a>{% endif %}
+</p>
+{% if log_tail %}
+<details {{ 'open' if r.status != 'usable' }}>
+  <summary class="small">The end of the run log (last 60 lines)</summary>
+  <pre class="term">{{ log_tail }}</pre>
+</details>
+{% endif %}
+
+{% if quarantinable %}
+<h2>Quarantine</h2>
+<form method="post" action="{{ url_for('quarantine_bag', experiment=experiment, name=r.name) }}"
+      onsubmit="return confirm('Move {{ r.name }} to bags_issues? It stops counting as coverage but is NOT deleted.')">
+  <input type="hidden" name="back" value="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">
+  <p class="small"><button type="submit">🗑 Quarantine this trial</button>
+    <span class="muted">moves the bag (and its slim copy) to <code>bags_issues*</code>: excluded from coverage, never deleted. Moving it back is a plain <code>mv</code>.</span></p>
+</form>
+{% endif %}
+{% endblock %}

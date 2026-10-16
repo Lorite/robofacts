@@ -3,6 +3,7 @@
     trials plan    experiments/<exp>/campaigns/<c>.yaml   what the campaign still needs
     trials run     experiments/<exp>/campaigns/<c>.yaml   dry run; --execute runs the trials
     trials index   --experiment <exp> --summary            the coverage index
+    trials records <exp> [--campaign <c>] [--status <s>]   every trial with its bag, gate, analyses, video
     trials lint    [--experiment <exp>]                    the declarations against the rules
     trials validate <exp | campaign.yaml>                  is it ready: check, plan, gate, lint, tests, dry run
     trials gate    --checklist <path>                      the T-0 gate, by hand
@@ -38,6 +39,11 @@ def _run(argv):
 def _index(argv):
     from . import trial_index
     return trial_index.main(argv)
+
+
+def _records(argv):
+    from . import trial_records
+    return trial_records.main(argv)
 
 
 def _check(argv):
@@ -176,6 +182,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "plan": (_plan, "what a campaign still needs (the planner)"),
     "run": (_run, "run the trials a campaign still needs (dry run without --execute)"),
     "index": (_index, "the coverage index over the recorded trials"),
+    "records": (_records, "every trial of an experiment with its campaign, gate, slim bag, analyses, video"),
     "lint": (_lint, "check every declaration against the rules (pytest)"),
     "validate": (_validate, "is an experiment ready: check, plan, gate, lint, its tests, dry run"),
     "gate": (_gate, "run a T-0 gate checklist by hand"),

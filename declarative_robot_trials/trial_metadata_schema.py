@@ -78,7 +78,28 @@ class Schema:
 # --------------------------------------------------------------------------- #
 # Loading
 # --------------------------------------------------------------------------- #
+#: Parsed schema files by (path, mtime, size). ``trial_index.load_trials`` validates
+#: every trial against its experiment's schema, and parsing the YAML again for each
+#: one made the index of a 128-trial experiment take 6 s (2026-10-16, #131: the web
+#: UI's trials table). A changed file has a new mtime, so an edit is never missed.
+_PARSED: Dict[tuple, Dict[str, "FieldSpec"]] = {}
+
+
 def _load_file(path: Path) -> Dict[str, FieldSpec]:
+    try:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        key = None
+    if key is not None and key in _PARSED:
+        return dict(_PARSED[key])
+    out = _parse_file(path)
+    if key is not None:
+        _PARSED[key] = dict(out)
+    return out
+
+
+def _parse_file(path: Path) -> Dict[str, FieldSpec]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:

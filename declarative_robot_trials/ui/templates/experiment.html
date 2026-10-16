@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_macros.html" import trials_table, filter_bar, table_hint, status_badge, replay, gate_badge with context %}
+{% set section = 'experiments' %}
+{% block title %}{{ experiment }} · Trials{% endblock %}
+{% block body %}
+<h1>{{ experiment }}</h1>
+<nav class="tabs">
+  <a href="{{ url_for('experiment_view', experiment=experiment) }}" class="active">Campaigns and trials</a>
+  <a href="{{ url_for('analyses_view', experiment=experiment) }}">Analyses</a>
+  <a href="{{ url_for('files', experiment=experiment) }}">Files</a>
+</nav>
+
+<h2 id="campaigns">Campaigns <small>each one a plan: what it wants, what exists, what is still to fly</small></h2>
+{% if campaigns %}
+<div class="tablewrap">
+<table class="sortable">
+<thead><tr><th>campaign</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still to fly</th>
+  <th class="num" title="attempts the T-0 gate refused (attempt ledger)">blocked</th><th>last flown</th><th>what it is</th></tr></thead>
+<tbody>
+{% for c in campaigns %}
+{% if c.error %}
+<tr><td><a href="{{ url_for('campaign_view', experiment=experiment, name=c.name) }}">{{ c.name }}</a></td>
+  <td colspan="6" class="bad small">does not load: {{ c.error }}</td></tr>
+{% else %}
+<tr class="{{ 'todo' if c.plan.needed }}">
+  <td class="nowrap"><a href="{{ url_for('campaign_view', experiment=experiment, name=c.name) }}"><b>{{ c.name }}</b></a></td>
+  <td class="num">{{ c.plan.wanted }}</td><td class="num">{{ c.plan.covered }}</td>
+  <td class="num"><b>{{ c.plan.needed }}</b></td>
+  <td class="num">{{ c.blocked or '—' }}</td>
+  <td class="nowrap" data-sort="{{ c.last }}">{{ c.last|when or '—' }}</td>
+  <td class="small" style="min-width:20rem">{{ (c.describe or '')|truncate(180) }}</td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="empty"><b>No campaign declared.</b> A campaign is <code>campaigns/&lt;name&gt;.yaml</code>: what to sweep, what to fix, how many repetitions.
+  Copy one from a similar experiment, then <code>trials validate experiments/{{ experiment }}</code>.</div>
+{% endif %}
+
+<h2 id="trials">Trials <small>every recorded trial and every refused attempt, newest first</small></h2>
+{% if table.all_count %}
+{{ filter_bar(table, experiment, data, url_for('experiment_view', experiment=experiment) ~ '#trials') }}
+{{ table_hint(table, data) }}
+{% if table.rows %}
+{{ trials_table(table.rows, experiment, data, table.varying, data.layouts) }}
+{% else %}
+<div class="empty"><b>No trial matches these filters.</b> <a href="{{ url_for('experiment_view', experiment=experiment) }}#trials">Clear the filters</a> to see all {{ table.all_count }}.</div>
+{% endif %}
+{% else %}
+<div class="empty"><b>No trial recorded yet.</b> Open a campaign above and start with a dry run, or from a terminal:
+  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml</code> (add <code>--execute</code> to fly).</div>
+{% endif %}
+
+<h2 id="scratch">Scratch flights <small>diagnostics flown with <code>--scratch</code>: replayable, never coverage</small></h2>
+{% if scratch %}
+<div class="tablewrap">
+<table class="sortable">
+<thead><tr><th>started</th><th>flight</th><th>status</th><th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th><th data-nosort>files</th></tr></thead>
+<tbody>
+{% for r in scratch %}
+<tr>
+  <td class="nowrap" data-sort="{{ r.started }}">{{ r.started|when }}</td>
+  <td class="trial"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a></td>
+  <td>{{ status_badge(r.status, r.reason) }}{% if r.status in ('aborted','blocked','failed') and r.reason %}<div class="small muted" style="max-width:18rem" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:100] }}</div>{% endif %}</td>
+  <td class="actions">{{ replay(r, experiment, data.layouts) }}{% if not r.slim_name and r.bag_dir %}<div class="small muted">slim it: <code>trials slim --bag {{ r.bag_dir|relpath(experiment) }}</code></div>{% endif %}</td>
+  <td>{% for v in r.videos[:1] %}<a href="{{ url_for('files', experiment=experiment, rel=v|relpath(experiment)) }}">🎬 video</a>{% else %}<span class="muted">—</span>{% endfor %}</td>
+  <td>{% for a in r.analyses %}<a class="chip" href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}">{{ a.analysis }}</a>{% else %}<span class="muted">—</span>{% endfor %}</td>
+  <td>{{ gate_badge(r.gate) }}</td>
+  <td class="actions">{% if r.run_log %}<a href="{{ url_for('files', experiment=experiment, rel=r.run_log|relpath(experiment)) }}">log</a>{% endif %}{% if r.metadata_path %}<a href="{{ url_for('files', experiment=experiment, rel=r.metadata_path|relpath(experiment)) }}">metadata</a>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+<p class="small muted">A scratch flight lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what Foxglove opens.</p>
+{% else %}
+<div class="empty">No scratch flight. Fly one with the campaign's stack and gate, outside coverage:
+  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml --scratch --label &lt;what&gt; --execute</code> (scratch flights are CLI-only).</div>
+{% endif %}
+{% endblock %}

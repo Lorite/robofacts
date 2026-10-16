@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% set section = 'experiments' %}
+{% block title %}{{ rel or 'files' }} · {{ experiment }} · Trials{% endblock %}
+{% block body %}
+<h1>{{ experiment }}</h1>
+<nav class="tabs">
+  <a href="{{ url_for('experiment_view', experiment=experiment) }}">Campaigns and trials</a>
+  <a href="{{ url_for('analyses_view', experiment=experiment) }}">Analyses</a>
+  <a href="{{ url_for('files', experiment=experiment) }}" class="{{ 'active' if not rel }}">Files</a>
+</nav>
+<p class="mono small">{{ experiment }}/{{ rel }}</p>
+<p class="small muted">Read-only. Recordings are not served here: open a slim copy in Foxglove from its trial's page.</p>
+{% if listing %}
+<div class="tablewrap"><table class="sortable">
+<thead><tr><th>name</th><th class="num">size</th></tr></thead>
+<tbody>
+{% if parent is not none %}<tr><td><a href="{{ url_for('files', experiment=experiment, rel=(parent ~ '/') if parent != '.' else '') }}">../</a></td><td></td></tr>{% endif %}
+{% for e in listing %}
+<tr><td class="mono">{% if e.recording %}<span class="muted" title="a recording: not served here">{{ e.name }}</span>{% else %}<a href="{{ url_for('files', experiment=experiment, rel=e.rel) }}">{{ e.name }}</a>{% endif %}</td>
+  <td class="num" data-sort="{{ e.size or 0 }}">{% if e.size is not none %}{{ '%.1f'|format(e.size / 1e6) if e.size > 1e5 else e.size }}{{ ' MB' if e.size > 1e5 else ' B' }}{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="empty">Empty folder.</div>
+{% endif %}
+{% endblock %}

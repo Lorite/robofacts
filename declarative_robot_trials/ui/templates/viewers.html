@@ -1,41 +1,50 @@
 {% extends "base.html" %}
+{% from "_macros.html" import status_badge, replay with context %}
+{% set section = 'viewing' %}
+{% block title %}Viewing · Trials{% endblock %}
 {% block body %}
-<h1>Viewers</h1>
-<p style="font-size:.9rem">This page is served by the rig, but your browser runs on the laptop —
-which is what lets a <code>foxglove://</code> link open <em>your</em> Foxglove. RViz has no such
-scheme, so it gets a copy-paste command instead.</p>
+<h1>Viewing</h1>
+<p class="small muted">This page is served by the rig, but your browser runs on the laptop, which is what lets a <code>foxglove://</code> link open <em>your</em> Foxglove. RViz has no such scheme, so it gets a copy-paste command.</p>
 
+<div class="cols">
+<div class="panel">
 <h3>Live</h3>
-<p>On the rig: <code>ros2 launch <your_package> foxglove_bridge.launch.py</code><br>
-On the laptop: <code>ssh -N -L 8765:localhost:8765 &lt;trial-host&gt;</code><br>
-Then in Foxglove: <b>Open connection → Foxglove WebSocket → <code>ws://localhost:8765</code></b></p>
-<p style="font-size:.9rem">A TCP websocket, so it sidesteps the lab Wi-Fi's fragmented-UDP ceiling
-that makes cross-host DDS unreliable. The bridge is read-only: a browser cannot publish to the rig.</p>
-<p>RViz instead (needs working cross-host DDS):
-<code>rviz2 -d experiments/common/config/rviz/markerless_debug.rviz</code></p>
+<ol class="small" style="padding-left:1.2rem">
+  <li>On the rig: <code>ros2 launch &lt;your_package&gt; foxglove_bridge.launch.py</code></li>
+  <li>On the laptop: <code>ssh -N -L 8765:localhost:8765 &lt;trial-host&gt;</code></li>
+  <li>In Foxglove: <b>Open connection → Foxglove WebSocket → <code>ws://localhost:8765</code></b></li>
+</ol>
+<p class="small muted">A TCP websocket, so it avoids the lab Wi-Fi's fragmented-UDP ceiling that makes cross-host DDS unreliable. The bridge is read-only: a browser cannot publish to the rig.</p>
+<p class="small">RViz instead (needs working cross-host DDS): <code>rviz2 -d experiments/common/config/rviz/markerless_debug.rviz</code></p>
+</div>
+<div class="panel">
+<h3>Recorded</h3>
+<p class="small">Every trial with a slim copy, per experiment, newest first, with the experiment's Foxglove layout beside its bags.
+  <b>▶ Foxglove</b> streams the slim bag through this UI over your tunnel (nothing is copied). It fails <b>silently</b> if Foxglove is not installed; use ⬇ then.</p>
+<p class="small muted">A layout is imported once per Foxglove (<i>Layouts → Import from file</i>): a <code>foxglove://</code> link cannot carry one.
+  The full picture of a trial (video, analyses, run log) is on its page: click its name.</p>
+</div>
+</div>
 
-<h3>Recorded — open a slim bag in Foxglove</h3>
-{% if recent %}
-<table><tr><th>experiment</th><th>bag</th><th></th></tr>
-{% for r in recent %}
-<tr><td>{{ r.experiment }}</td><td><code>{{ r.name }}</code></td>
-    <td><a href="{{ r.link }}">open in Foxglove</a>
-        &nbsp;<a href="{{ base_url }}/bag/{{ r.experiment }}/{{ r.name }}.mcap">download</a></td></tr>
-{% endfor %}
-</table>
-<p style="font-size:.9rem">The link streams the bag through this UI over your SSH tunnel — no copy needed
-(slim bags are a few MB). It fails <b>silently</b> if Foxglove is not installed; use the download link then.</p>
+<h2>Replay a recorded trial</h2>
+{% for g in groups %}
+<details {{ 'open' if loop.first }} class="panel">
+  <summary><b>{{ g.experiment }}</b> <span class="muted small">{{ g.records|length }} replayable of {{ g.total }} · last {{ g.last|when or '—' }}</span>
+    {% for l in g.layouts %} <a class="chip" href="{{ url_for('layout_file', experiment=g.experiment, name=l) }}" title="download, then Layouts → Import from file">layout {{ l }} ⬇</a>{% else %} <span class="small muted">no layout</span>{% endfor %}</summary>
+  {% if g.records %}
+  <div class="tablewrap" style="max-height:24rem;overflow-y:auto"><table class="sortable">
+  <thead><tr><th>started</th><th>trial</th><th>status</th><th>campaign</th><th data-nosort>replay</th></tr></thead>
+  <tbody>{% for r in g.records %}
+  <tr><td class="nowrap" data-sort="{{ r.started }}">{{ r.started|when }}</td>
+    <td class="trial"><a href="{{ url_for('trial_view', experiment=g.experiment, name=r.name) }}">{{ r.slim_name }}</a>{% if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch">scratch</span>{% endif %}</td>
+    <td>{{ status_badge(r.status) }}</td><td>{{ r.campaign or '—' }}</td>
+    <td class="actions">{{ replay(r, g.experiment, g.layouts) }}</td></tr>
+  {% endfor %}</tbody></table></div>
+  {% else %}
+  <p class="small muted">No slim copy in this experiment. Slim copies are made after each recording by the runner; for older bags: <code>trials slim --experiment {{ g.experiment }} --all</code>.</p>
+  {% endif %}
+</details>
 {% else %}
-<p>No slim bags yet. They are produced automatically after each recording.</p>
-{% endif %}
-{% if layouts %}
-<h4>Layouts</h4>
-<p style="font-size:.9rem">An experiment that ships a Foxglove layout (<code>config/foxglove*.json</code>) lists it here:
-download it once and import it in Foxglove (<b>Layouts → Import from file</b>), then open any of its bags above.</p>
-<table><tr><th>experiment</th><th>layout</th></tr>
-{% for exp, files in layouts.items() %}{% for f in files %}
-<tr><td>{{ exp }}</td><td><a href="{{ base_url }}/layout/{{ exp }}/{{ f }}">{{ f }}</a></td></tr>
-{% endfor %}{% endfor %}
-</table>
-{% endif %}
+<div class="empty">No framework experiment.</div>
+{% endfor %}
 {% endblock %}

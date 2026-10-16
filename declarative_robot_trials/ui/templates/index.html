@@ -1,37 +1,74 @@
 {% extends "base.html" %}
+{% from "_macros.html" import status_badge with context %}
+{% set section = 'experiments' %}
+{% block title %}Experiments · Trials{% endblock %}
 {% block body %}
 <h1>Experiments</h1>
-{% for experiment, paths in campaigns.items() %}
-  <h2>{{ experiment }}</h2>
-  <p>
-    {% set c = counts.get(experiment, {}) %}
-    <b>{{ c.get('usable', 0) }}</b> usable ·
-    {{ c.get('unverified', 0) }} unverified ·
-    {{ c.get('excluded', 0) }} excluded
-    · <a href="{{ url_for('analyses_view', experiment=experiment) }}">analyses</a>
-  </p>
-  <ul>
-  {% for p in paths %}
-    <li><a href="{{ url_for('campaign_view', experiment=experiment, name=p.stem) }}">{{ p.stem }}</a></li>
-  {% endfor %}
-  </ul>
-{% else %}
-  <p>No campaigns declared yet.</p>
+<p class="muted small">Every framework experiment, the one flown most recently first. A row answers: how much does it still need, and what is on disk.
+  Open one for its campaigns (each one a plan) and its trials (one row per trial, every trial).</p>
+
+{% if rows %}
+<div class="tablewrap">
+<table class="sortable" id="experiments">
+<thead><tr>
+  <th>experiment</th><th class="num" title="sum over its campaigns of the trials still to fly">still to fly</th>
+  <th class="num">campaigns</th><th class="num" title="recorded trials plus attempts the gate refused; scratch flights apart">trials</th><th>by status</th>
+  <th class="num" title="trials with a slim copy, ready to open in Foxglove">replayable</th>
+  <th class="num" title="scratch flights: diagnostics, never coverage">scratch</th>
+  <th>last trial</th><th>layout</th>
+</tr></thead>
+<tbody>
+{% for e in rows %}
+<tr class="{{ 'todo' if e.to_fly }}">
+  <td><a href="{{ url_for('experiment_view', experiment=e.name) }}"><b>{{ e.name }}</b></a></td>
+  <td class="num" data-sort="{{ e.to_fly }}"><b>{{ e.to_fly }}</b></td>
+  <td class="num nowrap">{{ e.campaigns }}{% if e.broken %} <span class="bad" title="{{ e.broken }} campaign file(s) do not load">({{ e.broken }} broken)</span>{% endif %}</td>
+  <td class="num">{{ e.total }}</td>
+  <td class="statuses">{% for s, n in e.counts.items() %}<a class="badge b-{{ s }}" href="{{ url_for('experiment_view', experiment=e.name, status=s) }}#trials" title="{{ status_meaning.get(s, '') }}">{{ n }} {{ s }}</a> {% else %}<span class="muted">no trials yet</span>{% endfor %}</td>
+  <td class="num">{{ e.replayable or '—' }}</td>
+  <td class="num">{{ e.scratch or '—' }}</td>
+  <td class="nowrap" data-sort="{{ e.last }}">{{ e.last|when or '—' }}</td>
+  <td class="nowrap">{% for l in e.layouts %}<a class="chip" href="{{ url_for('layout_file', experiment=e.name, name=l) }}" title="Foxglove layout of this experiment: {{ l }}">⬇ layout</a> {% else %}<span class="muted">—</span>{% endfor %}</td>
+</tr>
 {% endfor %}
-{% if robots %}<p>Robots configured for stop: {{ robots|join(', ') }}</p>{% endif %}
+</tbody>
+</table>
+</div>
+{% else %}
+<div class="empty"><b>No framework experiment yet.</b> An experiment is a folder with <code>config/runner.yaml</code> or <code>campaigns/*.yaml</code>.
+  Start one from the nearest existing experiment: <code>trials new &lt;name&gt; --from &lt;existing&gt;</code>, then <code>trials validate experiments/&lt;name&gt;</code>.</div>
+{% endif %}
+
+<h2>Rig</h2>
+{% if robots %}<p class="small">Robots the stop bar reaches (<code>common/config/robots.yaml</code>): {{ robots|join(', ') }}.</p>
+{% else %}<p class="small muted">No <code>common/config/robots.yaml</code>: the stop bar has no robot to reach.</p>{% endif %}
 {% if robot_actions %}
-<h2>Robot actions</h2>
-<p>Declared operator actions (robots.yaml `actions:`) — posture and status, the same narrow allowlist as the stops. ⚠️ `ready`/`stand` claim Spot's body lease: use between trials, and keep the tablet app closed (it silently held the lease through four trials on 2026-08-10).</p>
+<h3>Robot actions</h3>
+<p class="small">Declared operator actions (<code>robots.yaml</code> <code>actions:</code>): posture and status, the same narrow allowlist as the stops.
+  ⚠️ <code>ready</code> and <code>stand</code> claim Spot's body lease: use them between trials, and keep the tablet app closed (it silently held the lease through four trials on 2026-08-10).</p>
+<div class="tablewrap"><table>
+<thead><tr><th>robot</th><th>actions</th></tr></thead>
+<tbody>
 {% for robot, actions in robot_actions.items() %}
-  <p><strong>{{ robot }}</strong>:
+<tr><td><b>{{ robot }}</b></td><td>
   {% for a in actions %}
     <form method="post" action="{{ url_for('robot_action') }}" style="display:inline" title="{{ a.description }}">
       <input type="hidden" name="robot" value="{{ robot }}">
       <input type="hidden" name="action" value="{{ a.name }}">
-      <button type="submit">{{ a.name }}</button>
+      <button type="submit" class="btn-small">{{ a.name }}</button>
     </form>
-  {% endfor %}
-  </p>
+  {% endfor %}</td></tr>
 {% endfor %}
+</tbody></table></div>
+{% endif %}
+
+<h2>Recent actions <small><a href="{{ url_for('journal_view') }}">the whole journal</a></small></h2>
+{% if journal %}
+<div class="tablewrap"><table>
+<thead><tr><th>time (UTC)</th><th>kind</th><th>what</th></tr></thead>
+<tbody>{% for e in journal %}<tr><td class="nowrap">{{ e.at }}</td><td>{{ e.kind }}</td><td>{{ e.summary }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% else %}
+<p class="muted small">Nothing yet in this session. The journal lists what this UI did (runs, stops, operator steps, quarantines) since it started; the durable record of a trial is its bag and its <code>trial_metadata.json</code>.</p>
 {% endif %}
 {% endblock %}

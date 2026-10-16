@@ -156,9 +156,25 @@ class Factor:
         return text
 
 
+#: Parsed YAML by (path, mtime, size), handed out as deep copies. A page that
+#: lists 27 campaigns parsed the shared factors.yaml 27 times on every request,
+#: which made the web UI's experiment page take seconds (2026-10-16, #131). A
+#: changed file has a new mtime, so an edit is never missed.
+_YAML_CACHE: Dict[tuple, Any] = {}
+
+
+def _yaml_file(path: Path) -> Any:
+    import copy
+    stat = Path(path).stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _YAML_CACHE:
+        _YAML_CACHE[key] = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return copy.deepcopy(_YAML_CACHE[key])
+
+
 def _load_factor_file(path: Path) -> Dict[str, Factor]:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = _yaml_file(path)
     except yaml.YAMLError as exc:
         raise SpecError(f"{path}: invalid YAML: {exc}") from exc
     factors = raw.get("factors")
@@ -654,7 +670,7 @@ def _build_campaign(path: Path, experiments_root: Optional[Path] = None,
                     overrides: Optional[List[str]] = None) -> Campaign:
     """Parse a campaign file WITHOUT validating it (see load_campaign)."""
     try:
-        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        raw = _yaml_file(Path(path))
     except FileNotFoundError as exc:
         raise SpecError(f"campaign not found: {path}") from exc
     except yaml.YAMLError as exc:

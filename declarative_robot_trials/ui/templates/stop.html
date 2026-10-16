@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% block title %}{{ action }} · Trials{% endblock %}
 {% block body %}
-<h1 class="{{ 'ok' if ok else 'bad' }}">{{ action }} {{ robot or 'ALL' }} — {{ 'confirmed' if ok else 'DID NOT CONFIRM' }}</h1>
-{% if not ok %}<p class="bad">Use the physical kill switch.</p>{% endif %}
+<h1 class="{{ 'ok' if ok else 'bad' }}">{{ action }} {{ robot or 'ALL' }}: {{ 'confirmed' if ok else 'DID NOT CONFIRM' }}</h1>
+{% if not ok %}<div class="callout badc" style="font-size:1.15rem"><b>Use the physical kill switch.</b></div>{% endif %}
 <pre>{{ output }}</pre>
+<p><a href="{{ url_for('index') }}">← experiments</a> · <a href="{{ url_for('journal_view') }}">journal</a></p>
 {% endblock %}

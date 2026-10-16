@@ -182,14 +182,14 @@ def test_index_lists_experiments_and_campaigns(client):
 
 
 def test_campaign_view_shows_the_coverage_and_the_shortfall(client):
-    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
-    assert "wanted 4" in body
-    assert "still to fly" in body.lower()
+    body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert '<div class="k">wanted</div><div class="v">4</div>' in body
+    assert '<div class="k">still to fly</div><div class="v">4</div>' in body
 
 
 def test_campaign_view_marks_non_defaults(client):
     """The UI requirement from the original ask: non-defaults clearly marked."""
-    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert 'class="nd"' in body
 
 
@@ -216,7 +216,7 @@ def test_the_bag_table_shows_the_code_version_of_each_trial(client, root):
         "trajectory": "circle",
     })
 
-    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert "abcdef12" in body, "the stamped trial should show its short commit"
     assert "remote:orin" in body, "the tooltip should name the host that answered"
     assert "recorded before code stamping" in body, "the legacy trial needs a reason, not a crash"
@@ -229,16 +229,16 @@ def test_code_version_is_not_offered_as_a_coverage_axis(client, root):
         "trial_id": "t1", "execution_host": "laptop", "aborted": False,
         "trajectory": "hover", "code_version": {"commit": "abc", "dirty": False},
     })
-    body = client.get("/campaign/expA/c", headers=auth()).get_data(as_text=True)
+    body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert "<th>code_version</th>" not in body
 
 
 def test_unknown_campaign_is_a_clean_404(client):
-    assert client.get("/campaign/expA/nope", headers=auth()).status_code == 404
+    assert client.get("/e/expA/c/nope", headers=auth()).status_code == 404
 
 
 def test_analyses_view_lists_declared_analyses(client):
-    body = client.get("/analyses/expA", headers=auth()).get_data(as_text=True)
+    body = client.get("/e/expA/analyses", headers=auth()).get_data(as_text=True)
     assert "quick_look" in body
 
 
@@ -523,6 +523,8 @@ def test_viewers_page_links_slim_bags_via_foxglove(client, root):
     bag = root / "expA" / "bags_slim" / "t1_slim"
     bag.mkdir(parents=True)
     (bag / "d_0.mcap").write_bytes(b"x")
+    (bag / "trial_metadata.json").write_text(json.dumps(
+        {"trial_id": "t1", "execution_host": "laptop", "aborted": False}), encoding="utf-8")
     body = client.get("/viewers", headers=auth()).get_data(as_text=True)
     assert "foxglove://open?ds=remote-file" in body and "t1_slim" in body
 
@@ -739,7 +741,7 @@ def test_proceed_when_nothing_waits_is_harmless(client):
 def test_campaign_page_shows_live_steps_with_the_cockpit_command(client):
     """The UI's live panel and the tmux handover panes come from the same
     extractor (campaign_live_steps.annotate), text plus a copyable one-liner."""
-    body = client.get("/campaign/expA/steps", headers=auth()).get_data(as_text=True)
+    body = client.get("/e/expA/c/steps", headers=auth()).get_data(as_text=True)
     assert "hand over to vision" in body
     assert "echo handover" in body
     assert "copystep" in body, "the one-liner must be copyable"
@@ -830,3 +832,170 @@ def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
     assert seen.get("extra_verify") == steps, (
         "the campaign's verify steps never reached run_plan — a campaign can ask for a "
         "check that silently does not run")
+
+
+# --------------------------------------------------------------------------- #
+# The rework (#131): one row per trial, every trial, everything about it
+# --------------------------------------------------------------------------- #
+def _slim(root: Path, name: str, folder: str = "bags_slim") -> None:
+    slim = root / "expA" / folder / f"{name}_slim"
+    slim.mkdir(parents=True)
+    (slim / f"{name}_slim_0.mcap").write_bytes(b"SLIM")
+
+
+def _meta(name: str, **extra) -> dict:
+    meta = {"trial_id": name, "execution_host": "laptop", "aborted": False, "trajectory": "hover"}
+    meta.update(extra)
+    return meta
+
+
+def test_the_experiment_page_lists_every_trial_with_no_cap(client, root):
+    """The Viewers page's cap of five per folder hid 20 of 24 trials (2026-10-15)."""
+    names = [f"20261015T09{i:02d}00_rep{i:02d}" for i in range(12)]
+    for i, name in enumerate(names):
+        _write_bag(root, name, _meta(name, trajectory="hover" if i % 2 else "circle"))
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert all(name in body for name in names)
+    assert body.count('<td class="trial">') == 12, "one row per trial"
+    assert "trials records expA" in body, "the page names the command that prints the same list"
+
+
+def test_the_trial_row_and_page_carry_replay_layout_video_analyses_and_logs(client, root):
+    name = "20261015T100000_rep01"
+    _write_bag(root, name, _meta(name))
+    _slim(root, name)
+    (root / "expA" / "config" / "foxglove_demo.json").write_text("{}", encoding="utf-8")
+    (root / "expA" / "runs").mkdir(parents=True, exist_ok=True)
+    (root / "expA" / "runs" / f"{name}.log").write_text(
+        "[verify] flew\n[verify] flew rc=0 in 1.2 s\n", encoding="utf-8")
+    res = root / "expA" / "results" / "20261015T110000_quick_look"
+    (res / name).mkdir(parents=True)
+    (res / name / "trial_video_h264.mp4").write_bytes(b"MP4")
+    (res / "analysis_metadata.json").write_text(json.dumps(
+        {"analysis": "quick_look", "bags": [name], "generated_at": "20261015T110000"}), encoding="utf-8")
+
+    row = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    page = client.get(f"/e/expA/t/{name}", headers=auth()).get_data(as_text=True)
+    for body in (row, page):
+        # The & is escaped in the attribute, as it must be; the browser decodes it.
+        assert f"foxglove://open?ds=remote-file&amp;ds.url=http://localhost/bag/expA/{name}_slim.mcap" in body
+        assert "/layout/expA/foxglove_demo.json" in body, "the layout sits beside the bag"
+        assert f"results/20261015T110000_quick_look/{name}/trial_video_h264.mp4" in body
+        assert "quick_look" in body
+        assert f"/files/expA/runs/{name}.log" in body
+        assert f"/files/expA/bags/{name}/trial_metadata.json" in body
+    assert "<video" in page and "<code>flew</code>" in page, "the video plays, the verify report lists the step"
+    assert client.get(f"/bag/expA/{name}_slim.mcap").get_data() == b"SLIM"
+
+
+def test_the_filters_are_the_cli_flags_and_the_page_prints_the_command(client, root):
+    _write_bag(root, "t_ok", _meta("t_ok"))
+    _write_bag(root, "t_circle", _meta("t_circle", trajectory="circle"))
+    _write_bag(root, "t_abort", _meta("t_abort", aborted=True, abort_reason="rc=2"))
+    body = client.get("/e/expA?status=aborted", headers=auth()).get_data(as_text=True)
+    assert "t_abort" in body and "t_ok<" not in body and "t_circle<" not in body
+    assert "trials records expA --status aborted" in body
+    body = client.get("/e/expA?cell=trajectory%3Dcircle", headers=auth()).get_data(as_text=True)
+    assert "t_circle" in body and "t_ok<" not in body
+    assert "--where trajectory=circle" in body
+
+
+def test_blocked_attempts_and_scratch_flights_are_listed(client, root):
+    (root / "expA" / "runs").mkdir(parents=True, exist_ok=True)
+    (root / "expA" / "runs" / "attempts.jsonl").write_text(json.dumps(
+        {"trial_label": "t_nogo", "campaign": "c", "status": "blocked", "values": {"trajectory": "hover"},
+         "detail": "pre-flight gate FAIL: topic_rate", "gate": {"verdict": "NO-GO", "failed_checks": ["topic_rate"]}})
+        + "\n", encoding="utf-8")
+    scratch = root / "expA" / "bags_scratch" / "20261015T120000_scratch_x"
+    scratch.mkdir(parents=True)
+    (scratch / "x_0.mcap").write_bytes(b"x")
+    _slim(root, "20261015T120000_scratch_x", folder="bags_scratch")
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert "t_nogo" in body and "b-blocked" in body
+    assert "20261015T120000_scratch_x" in body and "never coverage" in body
+    camp = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert '<div class="k">blocked attempts</div><div class="v">1</div>' in camp
+
+
+def test_the_campaign_page_shows_the_gate_outcomes(client, root):
+    (root / "expA" / "runs").mkdir(parents=True, exist_ok=True)
+    (root / "expA" / "runs" / "preflight_gate.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        {"ts": "2026-10-15T09:00:00", "campaign": "c", "trial_label": "t1", "verdict": "GO"},
+        {"ts": "2026-10-15T09:05:00", "campaign": "c", "trial_label": "t2", "verdict": "NO-GO",
+         "failed": [{"check": "disk_space", "detail": "1 GB free"}]},
+    ]) + "\n", encoding="utf-8")
+    body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert "1 GO" in body and "1 NO-GO" in body
+    assert "disk_space: 1 GB free" in body
+
+
+def test_the_files_route_is_read_only_inside_the_experiment(client, root):
+    res = root / "expA" / "results" / "r1"
+    res.mkdir(parents=True)
+    (res / "table.md").write_text("| a |", encoding="utf-8")
+    _write_bag(root, "t1", _meta("t1"))
+    assert client.get("/files/expA/results/r1/table.md", headers=auth()).get_data() == b"| a |"
+    assert "table.md" in client.get("/files/expA/results/r1/", headers=auth()).get_data(as_text=True)
+    assert client.get("/files/expA/results/r1/table.md").status_code == 401, "behind auth"
+    assert client.get("/files/expA/bags/t1/t1_0.mcap", headers=auth()).status_code == 403, \
+        "recordings go through /bag (slim only), never here"
+    assert client.get("/files/expA/config/runner.yaml", headers=auth()).status_code == 200
+    for attempt in ("/files/expA/..%2f..%2fsecret", "/files/expA/../common/config/robots.yaml",
+                    "/files/expA/scripts/x.sh"):
+        assert client.get(attempt, headers=auth()).status_code in (403, 404), attempt
+
+
+def test_the_records_api_is_the_package_function(client, root):
+    from declarative_robot_trials import trial_records as trec
+    _write_bag(root, "t1", _meta("t1"))
+    _write_bag(root, "t2", _meta("t2", aborted=True))
+    api = json.loads(client.get("/api/records/expA.json?status=aborted", headers=auth())
+                     .get_data(as_text=True))
+    expected = trec.filter_records(trec.load_records(root, "expA"), status="aborted")
+    assert [r["name"] for r in api["records"]] == [r.name for r in expected] == ["t2"]
+
+
+def test_the_old_addresses_redirect(client):
+    response = client.get("/campaign/expA/c?include_unverified=1", headers=auth())
+    assert response.status_code == 302 and response.headers["Location"].endswith(
+        "/e/expA/c/c?include_unverified=1")
+    assert client.get("/analyses/expA", headers=auth()).headers["Location"].endswith("/e/expA/analyses")
+
+
+def test_every_page_renders_with_no_trial_at_all(client):
+    for path in ("/", "/e/expA", "/e/expA/c/c", "/e/expA/c/steps", "/e/expA/analyses",
+                 "/files/expA/", "/viewers", "/journal"):
+        assert client.get(path, headers=auth()).status_code == 200, path
+    assert client.get("/e/expA/t/nope", headers=auth()).status_code == 404
+    assert client.get("/e/nope", headers=auth()).status_code == 404
+
+
+def test_the_cohort_preview_is_a_dry_run(client, root):
+    """`trials analyze` without --execute: the bags and commands, and no results folder."""
+    _write_bag(root, "t1", _meta("t1"))
+    _write_bag(root, "t2", _meta("t2", trajectory="circle"))
+    body = client.get("/e/expA/analyses?analysis=quick_look&cell=trajectory%3Dcircle",
+                      headers=auth()).get_data(as_text=True)
+    assert "<b>1</b> bag(s) selected" in body and "echo" in body
+    assert "trials analyze expA quick_look --where trajectory=circle --execute" in body
+    assert not (root / "expA" / "results").exists(), "a preview writes nothing"
+
+
+def test_quarantine_moves_the_slim_copy_with_its_bag(client, root):
+    _write_bag(root, "t1", _meta("t1"))
+    _slim(root, "t1")
+    response = client.post("/quarantine/expA/t1", headers=auth(), data={"back": "/e/expA"})
+    assert response.status_code == 302
+    assert (root / "expA" / "bags_issues" / "t1").is_dir()
+    assert (root / "expA" / "bags_issues_slim" / "t1_slim").is_dir()
+    assert not (root / "expA" / "bags_slim" / "t1_slim").exists()
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert "b-quarantined" in body, "the page shows it at once, not after the cache expires"
+
+
+def test_a_dry_run_of_a_covered_campaign_says_so(client, root):
+    _write_bag(root, "t1", _meta("t1"))   # the steps campaign wants one hover trial
+    final = _wait(client, _start_run(client, campaign="steps"))
+    assert final["wanted"] == 0
+    assert any("Nothing to run" in line["text"] for line in final["log"]), \
+        "the CLI's own line, so an empty run page says why"

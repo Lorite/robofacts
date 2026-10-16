@@ -1,14 +1,70 @@
 {% extends "base.html" %}
+{% from "_macros.html" import where_selects with context %}
+{% set section = 'experiments' %}
+{% block title %}Analyses · {{ experiment }} · Trials{% endblock %}
 {% block body %}
-<h1>Analyses — {{ experiment }}</h1>
-<table><tr><th>name</th><th>per</th><th>what it computes</th></tr>
-{% for name, a in analyses.items() %}
-<tr><td><code>{{ name }}</code></td><td>{{ a.per }}</td><td>{{ a.describe }}</td></tr>
-{% endfor %}
-</table>
-<p style="font-size:.9rem">Run one with:
-<code>python3 experiments/common/scripts/analysis_runner.py {{ experiment }} &lt;name&gt; --where factor=value --execute</code></p>
+<h1>{{ experiment }}</h1>
+<nav class="tabs">
+  <a href="{{ url_for('experiment_view', experiment=experiment) }}">Campaigns and trials</a>
+  <a href="{{ url_for('analyses_view', experiment=experiment) }}" class="active">Analyses</a>
+  <a href="{{ url_for('files', experiment=experiment) }}">Files</a>
+</nav>
 
-<h3>Recent results</h3>
-<ul>{% for r in results %}<li><code>{{ r.parent.name }}</code></li>{% else %}<li>none yet</li>{% endfor %}</ul>
+<h2>Declared analyses <small><code>config/analyses.yaml</code></small></h2>
+{% if analyses_error %}
+<div class="empty">{{ analyses_error }}. Declare named analyses there, then run them with <code>trials analyze {{ experiment }} &lt;name&gt; --execute</code>.</div>
+{% elif analyses %}
+<div class="tablewrap"><table>
+<thead><tr><th>name</th><th>per</th><th>what it computes</th><th data-nosort></th></tr></thead>
+<tbody>{% for name, a in analyses.items() %}
+<tr><td class="nowrap"><code>{{ name }}</code></td><td>{{ a.per }}</td><td class="small" style="min-width:24rem">{{ a.describe }}</td>
+  <td><a class="button btn-small" href="?analysis={{ name }}#cohort">preview a cohort</a></td></tr>
+{% endfor %}</tbody></table></div>
+{% else %}
+<div class="empty">This experiment declares no analysis yet (<code>analyses: {}</code>).</div>
+{% endif %}
+
+{% if analyses %}
+<h2 id="cohort">Cohort preview <small>what <code>trials analyze</code> would run, without <code>--execute</code></small></h2>
+<p class="small muted">Pick the analysis and narrow the cohort factor by factor (each one is a <code>--where</code>); "any" leaves a factor open.</p>
+<form method="get" action="{{ url_for('analyses_view', experiment=experiment) }}#cohort" class="filters">
+  <label>analysis
+    <select name="analysis">{% for name in analyses %}<option value="{{ name }}" {{ 'selected' if chosen == name }}>{{ name }}</option>{% endfor %}</select></label>
+  {{ where_selects(levels, where) }}
+  <label style="flex-direction:row;align-items:center;gap:.3rem"><input type="checkbox" name="include_unverified" value="1" {{ 'checked' if include_unverified }}> include unverified</label>
+  <button type="submit" class="btn-primary">Preview</button>
+</form>
+{% if preview %}
+  {% if preview.error %}
+  <div class="callout warnc">{{ preview.error }}</div>
+  {% else %}
+  <p><b>{{ preview.bags|length }}</b> bag(s) selected (usable{{ ' and unverified' if include_unverified }} only: an aborted bag never enters a cohort).
+    The results would go to <code>{{ preview.results_dir|relpath(experiment) }}</code> with an <code>analysis_metadata.json</code> naming exactly these bags.</p>
+  <details><summary class="small">the bags</summary><ul class="small mono">{% for b in preview.bags %}<li><a href="{{ url_for('trial_view', experiment=experiment, name=b[:-5] if b.endswith('_slim') else b) }}">{{ b }}</a></li>{% endfor %}</ul></details>
+  <details><summary class="small">the commands ({{ preview.commands|length }})</summary><pre>{% for c in preview.commands %}$ {{ c }}
+{% endfor %}</pre></details>
+  {% endif %}
+  {% if preview.cli %}
+  <div class="cmdline"><span class="small muted">Run it:</span><code>{{ preview.cli }} --execute</code>
+    <button type="button" class="btn-small" data-copy="{{ preview.cli }} --execute">⧉</button></div>
+  <p class="small muted">Analyses run from the command line, so a long one does not hold this page (and a closed browser does not stop it).</p>
+  {% endif %}
+{% endif %}
+{% endif %}
+
+<h2 id="results">Results <small>every folder under <code>results/</code>, newest first</small></h2>
+{% if folders %}
+<div class="tablewrap tall"><table class="sortable">
+<thead><tr><th>folder</th><th>analysis</th><th class="num">bags</th><th>cohort</th><th class="num">failed</th><th>provenance</th></tr></thead>
+<tbody>{% for f in folders %}
+<tr><td class="trial"><a href="{{ url_for('files', experiment=experiment, rel='results/' ~ f.name ~ '/') }}">{{ f.name }}</a></td>
+  <td><b>{{ f.analysis }}</b></td>
+  <td class="num">{{ f.bags|length if f.has_metadata else '—' }}</td>
+  <td class="small">{% for k, v in f.where.items() %}<span class="chip">{{ k }}={{ v }}</span>{% else %}{{ 'every usable trial' if f.has_metadata else '' }}{% endfor %}</td>
+  <td class="num">{% if f.failed_commands %}<span class="bad">{{ f.failed_commands }}</span>{% elif f.has_metadata %}0{% else %}—{% endif %}</td>
+  <td class="small">{% if f.has_metadata %}<a href="{{ url_for('files', experiment=experiment, rel='results/' ~ f.name ~ '/analysis_metadata.json') }}">analysis_metadata.json</a>{% else %}<span class="warn" title="made by hand: no analysis_metadata.json names its bags">no metadata</span>{% endif %}</td></tr>
+{% endfor %}</tbody></table></div>
+{% else %}
+<div class="empty">No result yet. Preview a cohort above, then run it with <code>--execute</code>.</div>
+{% endif %}
 {% endblock %}

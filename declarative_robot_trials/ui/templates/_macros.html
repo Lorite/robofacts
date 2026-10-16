@@ -1,0 +1,149 @@
+{#- Shared pieces: one trials table, one status badge, one replay cell, one step list,
+    so every page says the same thing the same way (#131). -#}
+
+{%- macro status_badge(status, title='') -%}
+<span class="badge b-{{ status }}" title="{{ title or status_meaning.get(status, '') }}">{{ status }}</span>
+{%- endmacro -%}
+
+{%- macro gate_badge(gate) -%}
+{%- if gate -%}
+<span class="badge b-{{ 'GO' if gate.verdict == 'GO' else 'NO-GO' }}"
+      title="T-0 gate {{ gate.verdict }}{% if gate.mode %} ({{ gate.mode }}){% endif %}{% if gate.n_checks %}, {{ gate.n_checks }} checks{% endif %}{% if gate.failed %}&#10;failed: {{ gate.failed|join('; ') }}{% endif %}{% if gate.overridden %}&#10;OVERRIDDEN{% endif %}">{{ gate.verdict }}{% if gate.overridden %}*{% endif %}</span>
+{%- else -%}<span class="muted" title="no gate verdict recorded">—</span>{%- endif -%}
+{%- endmacro -%}
+
+{%- macro replay(r, experiment, layouts, compact=True) -%}
+{%- if r.slim_name -%}
+<a class="iconlink" title="open in Foxglove DESKTOP (installed on this laptop)" href="{{ fox_link(base_url, experiment, r.slim_name) }}">▶ Foxglove</a>
+<a class="iconlink" title="open in Foxglove WEB (app.foxglove.dev, your default org)" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener">🌐</a>
+<a class="iconlink" title="download the slim .mcap" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇</a>
+{%- for l in layouts %}<br><a class="chip" title="this experiment's Foxglove layout: download, then Layouts → Import from file (once)" href="{{ url_for('layout_file', experiment=experiment, name=l) }}">layout ⬇</a>{% endfor -%}
+{%- elif r.bag_dir -%}
+<span class="muted" title="no slim copy yet. Make one: trials slim --bag {{ r.bag_dir }}">no slim copy</span>
+{%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro -%}
+
+{%- macro cell_chips(values, factors, defaults) -%}
+{%- for f in factors if f in values -%}
+<span class="chip {{ 'nd' if defaults.get(f) is not none and values[f] != defaults.get(f) }}"
+      title="{{ f }}={{ values[f] }}{% if defaults.get(f) is not none and values[f] != defaults.get(f) %} (default {{ defaults.get(f) }}){% endif %}">{{ f }}={{ values[f] }}</span>
+{%- endfor -%}
+{%- endmacro -%}
+
+{%- macro trials_table(rows, experiment, data, varying, layouts, table_id='trials', show_campaign=True) -%}
+<div class="tablewrap tall">
+<table class="sortable" id="{{ table_id }}">
+<thead><tr>
+  <th>started</th><th>trial</th><th>status</th>
+  {% if show_campaign %}<th>campaign</th>{% endif %}
+  <th>cell</th>
+  <th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th>
+  <th data-nosort>files</th><th>code</th>
+</tr></thead>
+<tbody>
+{% for r in rows %}
+<tr>
+  <td class="nowrap" data-sort="{{ r.started }}">{{ r.started|when }}</td>
+  <td class="trial"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a>
+    {%- if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch" title="a scratch flight: a diagnostic, never coverage">scratch</span>{% endif %}</td>
+  <td class="statuscol" data-sort="{{ r.status }}">{{ status_badge(r.status) }}
+    {%- if r.reason and r.status != 'usable' %}<div class="small muted why" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:110] }}{{ '…' if r.reason|length > 110 }}</div>{% endif %}</td>
+  {% if show_campaign %}<td class="nowrap">
+    {%- if r.campaign and r.campaign in data.campaigns -%}<a href="{{ url_for('campaign_view', experiment=experiment, name=r.campaign) }}">{{ r.campaign }}</a>
+    {%- elif r.campaign %}{{ r.campaign }}{% else %}<span class="muted" title="no attempt-ledger line names its campaign (flown before the ledger, 2026-10-01, or by hand)">—</span>{% endif %}
+    {%- set others = r.counts_for|reject('equalto', r.campaign)|list -%}
+    {%- if others %}<div class="small muted" title="its cell is also in these campaigns' plans, so it counts as their coverage too">also counts for {{ others|join(', ') }}</div>{% endif %}</td>{% endif %}
+  <td class="cellcol">{{ cell_chips(r.values, varying, data.defaults) }}</td>
+  <td class="replaycell">{{ replay(r, experiment, layouts) }}</td>
+  <td data-sort="{{ r.videos|length }}">
+    {%- for v in r.videos[:2] %}<a href="{{ url_for('files', experiment=experiment, rel=v|relpath(experiment)) }}" title="{{ v|relpath(experiment) }}">🎬 {{ 'video' if loop.first else 'alt' }}</a> {% endfor -%}
+    {%- if not r.videos %}<span class="muted">—</span>{% endif %}</td>
+  <td data-sort="{{ r.analyses|length }}">
+    {%- for a in r.analyses %}<a class="chip" href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}"
+       title="{{ a.analysis }} ({{ a.per }}{% if a.per == 'cohort' %} of {{ a.n_bags }} bags{% endif %}), {{ a.generated_at }}: {{ a.folder.name }}">{{ a.analysis }}</a>{% endfor -%}
+    {%- if not r.analyses %}<span class="muted">—</span>{% endif %}</td>
+  <td data-sort="{{ r.gate.verdict if r.gate else '' }}">{{ gate_badge(r.gate) }}</td>
+  <td class="actions">
+    {%- if r.run_log %}<a href="{{ url_for('files', experiment=experiment, rel=r.run_log|relpath(experiment)) }}" title="the run log, with the verify steps' lines">log</a>{% endif -%}
+    {%- if r.metadata_path %}<a href="{{ url_for('files', experiment=experiment, rel=r.metadata_path|relpath(experiment)) }}" title="trial_metadata.json">metadata</a>{% endif -%}
+    {%- if not r.run_log and not r.metadata_path %}<span class="muted">—</span>{% endif %}</td>
+  {%- set c = code_cell(r.code_version) %}
+  <td class="mono nowrap" title="{{ c.title }}">{{ c.short }}{% if c.dirty %}<span title="uncommitted changes: the commit alone does not describe what ran">*</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{%- endmacro -%}
+
+{%- macro where_selects(levels, where) -%}
+{%- for f, values in levels.items() %}
+  <label title="--where {{ f }}=…">{{ f }}
+    <select name="cell">
+      <option value="">any</option>
+      {% for v in values %}<option value="{{ f }}={{ v }}" {{ 'selected' if where.get(f) == v }}>{{ v }}</option>{% endfor %}
+    </select></label>
+{%- endfor %}
+{%- endmacro -%}
+
+{%- macro filter_bar(table, experiment, data, action, show_campaign=True, table_id='trials') -%}
+<form class="filters autosubmit" method="get" action="{{ action }}">
+  {% if show_campaign %}
+  <label>campaign (flew it or counts it)
+    <select name="campaign">
+      <option value="">all campaigns</option>
+      {% for c in data.campaigns %}<option value="{{ c }}" {{ 'selected' if table.f_campaign == c }}>{{ c }}</option>{% endfor %}
+    </select></label>
+  {% endif %}
+  <label>status
+    <select name="status">
+      <option value="">every status</option>
+      <option value="excluded-any" {{ 'selected' if table.f_status == 'excluded-any' }}>not counted (any reason)</option>
+      {% for s, n in table.counts.items() %}<option value="{{ s }}" {{ 'selected' if table.f_status == s }}>{{ s }} ({{ n }})</option>{% endfor %}
+    </select></label>
+  {% if table.levels|length > 6 %}
+  <details class="wherebox" {{ 'open' if table.where }}>
+    <summary class="small">cell: {{ table.where|length }} of {{ table.levels|length }} factors set{% if table.where %} ({{ where_string(table.where) }}){% endif %}</summary>
+    <div class="filters">{{ where_selects(table.levels, table.where) }}</div>
+  </details>
+  {% else %}{{ where_selects(table.levels, table.where) }}{% endif %}
+  <label>find in the rows shown
+    <input type="search" data-find="{{ table_id }}" placeholder="trial name, analysis…" size="22"></label>
+  <button type="submit" class="applybtn">apply</button>
+  {% if (table.f_campaign and show_campaign) or table.f_status or table.f_cell %}<a class="small" href="{{ action }}">clear filters</a>{% endif %}
+</form>
+<div class="statusbar">
+  <span class="muted">{{ table.rows|length }} of {{ table.all_count }} shown{% if table.f_status or table.f_cell or (table.f_campaign and show_campaign) %} (filtered){% endif %} ·</span>
+  {% for s, n in table.counts.items() %}
+    <a class="badge b-{{ s }}" href="?{% if table.f_campaign and show_campaign %}campaign={{ table.f_campaign }}&{% endif %}status={{ s }}" title="{{ status_meaning.get(s, '') }}">{{ n }} {{ s }}</a>
+  {% endfor %}
+  <span class="muted small" id="{{ table_id }}-count"></span>
+</div>
+<div class="cmdline small"><span class="muted">same list:</span><code>{{ table.cli }}</code>
+  <button type="button" class="btn-small" data-copy="{{ table.cli }}" title="copy the command">⧉</button></div>
+{%- endmacro -%}
+
+{%- macro table_hint(table, data) -%}
+<p class="small muted">
+  {%- if table.shared|length > 6 %}<details style="display:inline"><summary style="display:inline">The rows shown share {{ table.shared|length }} factor values</summary> {% for k, v in table.shared.items() %}<span class="chip">{{ k }}={{ v }}</span>{% endfor %}</details>; the cell column shows what differs. {% elif table.shared %}Every row shown shares {% for k, v in table.shared.items() %}<span class="chip">{{ k }}={{ v }}</span>{% endfor %}; the cell column shows what differs. {% endif -%}
+  {%- if data.layouts %}Replay with this experiment's Foxglove layout: download it once (<b>layout ⬇</b>), import it in Foxglove (<i>Layouts → Import from file</i>), then use <b>▶ Foxglove</b> on any row.
+  {%- else %}This experiment ships no Foxglove layout; export one from Foxglove to <code>config/foxglove_&lt;name&gt;.json</code> and it appears beside every bag.{% endif %}
+  <span class="nd">Orange</span> values are not the factor's default.</p>
+{%- endmacro -%}
+
+{%- macro step_cell(step, kind, index, experiment, campaign) -%}
+<li style="margin:.45rem 0">
+  <span style="white-space:pre-wrap">{{ step.text }}</span>
+  {%- if step.run %}
+  <div class="cmdline">
+    <button type="button" class="runstep btn-small" title="run on the trial host"
+            data-experiment="{{ experiment }}" data-campaign="{{ campaign }}"
+            data-kind="{{ kind }}" data-index="{{ index }}" data-url="{{ url_for('operator_step') }}">▶ run</button>
+    <button type="button" class="copystep btn-small" data-copy="{{ step.cmd or step.run }}"
+            title="copy the one-liner (exactly what a cockpit pane pre-types)">⧉</button>
+    <code>{{ step.cmd or step.run }}</code>
+  </div>
+  <pre class="stepout" style="display:none;font-size:.8rem"></pre>
+  {%- endif %}
+</li>
+{%- endmacro -%}

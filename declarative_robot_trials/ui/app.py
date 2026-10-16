@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""Experiments control surface — the web UI (#96 Phase 5).
+"""Experiments control surface — the web UI (#96 Phase 5, redrawn from scratch in #131).
 
 Pick a combination, see how many bags it already has, run it, watch it, and open
 the result — from the laptop browser, while the trial runs wherever it runs.
+
+One information architecture on every page (#131): an experiment, its campaigns
+(each one a plan: wanted, covered, still to fly, the gate's verdicts) and its
+trials (one row per trial, every trial, with the slim bag to replay, the layout,
+the video, the analyses that used it, the run log and the verify report). The
+per-trial join is the package's ``trial_records`` (``trials records``), so the
+table shows what the command line prints.
 
 Deliberate design constraints
 -----------------------------
@@ -37,11 +44,12 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, Response, redirect, render_template, request, send_file, url_for
 
@@ -52,6 +60,7 @@ from .. import code_version as cv
 from .. import campaign_plan as cp
 from .. import campaign_spec as cs
 from .. import trial_index as ti
+from .. import trial_records as trec
 from .. import trial_runner as tr
 from .. import roots, tools
 
@@ -215,6 +224,11 @@ class RunManager:
         with self._lock:
             return self._runs.get(run_id)
 
+    def all(self) -> List[ActiveRun]:
+        """Every run this UI started since it came up, newest first."""
+        with self._lock:
+            return sorted(self._runs.values(), key=lambda r: r.run_id, reverse=True)
+
     def busy(self) -> bool:
         run = self.current()
         return run is not None and run.state in ("running", "aborting")
@@ -329,6 +343,10 @@ class RunManager:
                                 confirm_pose=confirm_pose,
                                 pause_before_action=pause_before_action,
                                 should_continue=lambda: not run._abort)
+                    if not run.results and not plan.needed:
+                        # The CLI's own line for this case (trial_runner.main), so an
+                        # empty run page says why instead of looking broken.
+                        print("Nothing to run — the campaign is already covered.", flush=True)
                 run.state = "aborted" if run._abort else "finished"
             except Exception as exc:  # noqa: BLE001 - surface it, never hang "running"
                 run.state = "error"
@@ -369,8 +387,10 @@ def summarize_gate_failure(output: str) -> str:
 
 class _GatePass:
     def as_metadata(self):
-        return {"gate": "preflight.sh", "result": "pass",
-                "at": datetime.now(timezone.utc).isoformat()}
+        # verdict/status/mode in the gate's own words, so `trials records` and the
+        # trials table read a UI-gated trial like a CLI-gated one (#131).
+        return {"gate": "preflight.sh", "result": "pass", "verdict": "GO", "status": "pass",
+                "mode": "binding", "at": datetime.now(timezone.utc).isoformat()}
 
 
 class ShellPreflightGate:
@@ -489,18 +509,9 @@ def discover_campaigns(experiments_root: Path) -> Dict[str, List[Path]]:
     return out
 
 
-def foxglove_layouts(root: Path) -> Dict[str, List[Path]]:
-    """The Foxglove layouts each experiment ships: ``experiments/<exp>/config/foxglove*.json``.
-
-    A convention, not a schema: any JSON exported from Foxglove (Layouts -> Export)
-    whose name starts with ``foxglove`` (case does not matter) is listed on the Viewers
-    page for its experiment.
-    """
-    out: Dict[str, List[Path]] = {}
-    for f in sorted(root.glob("*/config/*.json")):
-        if f.name.lower().startswith("foxglove"):
-            out.setdefault(f.parents[1].name, []).append(f)
-    return out
+#: The layouts convention lives in the package now (``trial_records``), so
+#: ``trials records`` and the UI name the same files. Kept under the old name.
+foxglove_layouts = trec.foxglove_layouts
 
 
 def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
@@ -511,6 +522,197 @@ def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
     """
     return (f"foxglove://open?ds=remote-file&ds.url="
             f"{base_url}/bag/{experiment}/{bag_name}.mcap")
+
+
+def foxglove_web_link(base_url: str, experiment: str, bag_name: str) -> str:
+    """The same bag in Foxglove's web app (app.foxglove.dev, the default org)."""
+    return (f"https://app.foxglove.dev/~/view?ds=remote-file&ds.url="
+            f"{base_url}/bag/{experiment}/{bag_name}.mcap")
+
+
+def code_cell(version: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """{short, dirty, title} for a trial's code version (stamped since 2026-08-04)."""
+    if not version or not version.get("commit"):
+        why = (version or {}).get("error") or "recorded before code stamping"
+        return {"short": "—", "dirty": False, "title": f"no code version: {why}"}
+    title = cv.summary(version)
+    if version.get("dirty"):
+        shown = version.get("dirty_files", [])
+        title += "\nuncommitted: " + ", ".join(shown)
+        if version.get("dirty_file_count", 0) > len(shown):
+            title += f", +{version['dirty_file_count'] - len(shown)} more"
+    return {"short": version["commit"][:8], "dirty": bool(version.get("dirty")), "title": title}
+
+
+def dir_mb(d: Optional[Path]) -> Optional[float]:
+    if d is None:
+        return None
+    try:
+        return round(sum(f.stat().st_size for f in d.iterdir() if f.is_file()) / 1e6, 1)
+    except OSError:
+        return None
+
+
+def parse_where_args(values: List[str]) -> Dict[str, str]:
+    """``k=v`` tokens (a select's value may carry several, space-separated) as a dict."""
+    out: Dict[str, str] = {}
+    for value in values:
+        for token in str(value).split():
+            if "=" in token:
+                key, _, val = token.partition("=")
+                if key.strip():
+                    out[key.strip()] = val.strip()
+    return out
+
+
+def where_string(where: Dict[str, Any]) -> str:
+    return " ".join(f"{k}={where[k]}" for k in sorted(where))
+
+
+#: Files the /files route may serve from an experiment: its results, its run logs
+#: and ledgers, its declarations, and the small sidecars of its bags. Recordings
+#: themselves go through the public /bag route (slim only), never through here.
+FILE_ROOTS = ("results", "runs", "config", "campaigns", "bags", "bags_slim", "bags_issues",
+              "bags_issues_slim", "bags_scratch", "bags_scratch_slim")
+RECORDING_SUFFIXES = (".mcap", ".db3", ".zstd")
+
+
+class ExperimentData:
+    """What one experiment's pages need, built from the package's functions.
+
+    Built per request but memoized on a cheap signature (the modification times
+    of the experiment's data directories) and a short time to live: an index of
+    250 trials is joined with the ledgers and the results once, not on every
+    click, and a new bag, ledger line or result folder invalidates it at once.
+    """
+
+    TTL_S = 15.0
+
+    def __init__(self, root: Path, experiment: str):
+        self.root, self.experiment = root, experiment
+        self.campaigns: Dict[str, Any] = {}
+        self.campaign_errors: Dict[str, str] = {}
+        for path in sorted((root / experiment / "campaigns").glob("*.yaml")):
+            try:
+                self.campaigns[path.stem] = cs.load_campaign(path, root)
+            except cs.SpecError as exc:
+                self.campaign_errors[path.stem] = str(exc)
+        self.records = trec.load_records(root, experiment, campaigns=self.campaigns)
+        self.trials = ti.load_trials(root, experiment)
+        self.layouts = [f.name for f in trec.foxglove_layouts(root).get(experiment, [])]
+        # Factor defaults, so a cell can mark its non-default values like the grid does.
+        self.defaults: Dict[str, str] = {}
+        for campaign in self.campaigns.values():
+            for name, factor in campaign.factors.items():
+                if getattr(factor, "default", None) is not None:
+                    self.defaults.setdefault(name, str(factor.default))
+        self._plans: Dict[Tuple[str, bool], Any] = {}
+
+    def plan(self, campaign: str, include_unverified: bool = False):
+        key = (campaign, include_unverified)
+        if key not in self._plans:
+            self._plans[key] = cp.build_plan(self.campaigns[campaign], self.trials,
+                                             include_unverified)
+        return self._plans[key]
+
+    @property
+    def campaign_records(self) -> List[trec.TrialRecord]:
+        return [r for r in self.records if r.kind == "campaign"]
+
+    @property
+    def scratch_records(self) -> List[trec.TrialRecord]:
+        return [r for r in self.records if r.kind == "scratch"]
+
+    def varying_factors(self, records: Optional[List[trec.TrialRecord]] = None) -> Tuple[List[str], Dict[str, str]]:
+        """(factors whose value differs between the trials, factors shared by all of them).
+
+        The cell column shows only what varies; what every trial shares is said
+        once above the table, so 180 rows do not repeat ``execution_host=laptop``.
+        """
+        records = self.campaign_records if records is None else records
+        seen: Dict[str, set] = {}
+        for r in records:
+            for k, v in r.values.items():
+                seen.setdefault(k, set()).add(v)
+        factors = sorted(seen)
+        varying = [f for f in factors if len(seen[f]) > 1
+                   or any(f not in r.values for r in records)]
+        shared = {f: next(iter(seen[f])) for f in factors if f not in varying}
+        return varying, shared
+
+    def factor_levels(self, records: Optional[List[trec.TrialRecord]] = None) -> Dict[str, List[str]]:
+        """The levels each varying factor takes among the trials: one select per factor,
+        so a filter is any subset of ``--where`` pairs, as on the command line."""
+        records = self.campaign_records if records is None else records
+        varying, _ = self.varying_factors(records)
+        levels: Dict[str, set] = {f: set() for f in varying}
+        for r in records:
+            for f in varying:
+                if f in r.values:
+                    levels[f].add(r.values[f])
+        def order(v: str):
+            try:
+                return (0, float(v), v)
+            except ValueError:
+                return (1, 0.0, v)
+        return {f: sorted(vals, key=order) for f, vals in levels.items() if vals}
+
+    @staticmethod
+    def status_counts(records: List[trec.TrialRecord]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for r in records:
+            counts[r.status] = counts.get(r.status, 0) + 1
+        return {s: counts[s] for s in trec.STATUSES if s in counts}
+
+    def record(self, name: str) -> Optional[trec.TrialRecord]:
+        return next((r for r in self.records if r.name == name), None)
+
+
+class ExperimentCache:
+    def __init__(self, root: Path):
+        self.root = root
+        self._lock = threading.Lock()
+        self._entries: Dict[str, Tuple[tuple, float, ExperimentData]] = {}
+
+    def _signature(self, experiment: str) -> tuple:
+        sig = []
+        base = self.root / experiment
+        for sub in ("campaigns", "config", "runs", "results") + trec.RECORD_DIRS + trec.SCRATCH_DIRS:
+            try:
+                sig.append((sub, (base / sub).stat().st_mtime_ns))
+            except OSError:
+                sig.append((sub, 0))
+        for ledger in ("runs/attempts.jsonl", "runs/preflight_gate.jsonl"):
+            try:
+                st = (base / ledger).stat()
+                sig.append((ledger, st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append((ledger, 0, 0))
+        return tuple(sig)
+
+    def get(self, experiment: str) -> ExperimentData:
+        sig = self._signature(experiment)
+        now = time.monotonic()
+        with self._lock:
+            entry = self._entries.get(experiment)
+            if entry and entry[0] == sig and now - entry[1] < ExperimentData.TTL_S:
+                return entry[2]
+        data = ExperimentData(self.root, experiment)
+        with self._lock:
+            self._entries[experiment] = (sig, now, data)
+        return data
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+def experiment_names(root: Path) -> List[str]:
+    """Framework experiments: a folder with campaigns or a runner.yaml (offline studies have neither)."""
+    names = {p.parents[1].name for p in root.glob("*/campaigns/*.yaml")}
+    names |= {p.parents[1].name for p in root.glob("*/config/runner.yaml")}
+    names.discard("common")
+    return sorted(names)
 
 
 # --------------------------------------------------------------------------- #
@@ -529,7 +731,8 @@ def create_app(experiments_root: Optional[Path] = None,
     app.config["JOURNAL"] = journal
     runs = RunManager()
     app.config["RUNS"] = runs  # main() checks this for a safe Ctrl-C message
-    app.config["RUNS"] = runs
+    cache = ExperimentCache(Path(experiments_root))
+    app.config["CACHE"] = cache
 
     def requires_auth(view):
         @wraps(view)
@@ -548,116 +751,358 @@ def create_app(experiments_root: Optional[Path] = None,
             return view(*args, **kwargs)
         return wrapper
 
-    # ---------------------------------------------------------------- views --
+    def root() -> Path:
+        return app.config["EXPERIMENTS_ROOT"]
+
+    def base_url() -> str:
+        return request.host_url.rstrip("/")
+
+    def known_experiment(experiment: str) -> bool:
+        return experiment in experiment_names(root())
+
+    def error(message: str, status: int = 400, crumbs=None, title: str = ""):
+        return render_template("error.html", message=message, crumbs=crumbs or [],
+                               title=title), status
+
+    @app.context_processor
+    def inject_globals():
+        # The chrome every page shares: the run in progress (so a campaign
+        # running in the background is one click away from any page), the stop
+        # bar's robots, and the helpers the shared macros need.
+        current = runs.current()
+        return {
+            "active_run": current if current is not None and current.state in
+            ("running", "aborting") else None,
+            "status_meaning": trec.STATUS_MEANING,
+            "fox_link": foxglove_link, "fox_web_link": foxglove_web_link,
+            "base_url": base_url(), "code_cell": code_cell,
+            "where_string": where_string,
+        }
+
+    @app.template_filter("when")
+    def _when(value: str) -> str:
+        return (value or "").replace("T", " ")[:16]
+
+    @app.template_filter("relpath")
+    def _relpath(path: Optional[Path], experiment: str) -> str:
+        if path is None:
+            return ""
+        try:
+            return str(Path(path).relative_to(root() / experiment))
+        except ValueError:
+            return str(path)
+
+    # ------------------------------------------------------------ overview --
     @app.route("/")
     @requires_auth
     def index():
-        root = app.config["EXPERIMENTS_ROOT"]
-        campaigns = discover_campaigns(root)
-        trials = ti.load_trials(root)
-        by_experiment: Dict[str, Dict[str, int]] = {}
-        for trial in trials:
-            counts = by_experiment.setdefault(trial.experiment, {})
-            counts[trial.status] = counts.get(trial.status, 0) + 1
-        return render_template("index.html", campaigns=campaigns,
-                               counts=by_experiment, robots=load_robots(app),
+        rows = []
+        for name in experiment_names(root()):
+            data = cache.get(name)
+            to_fly = 0
+            for cname in data.campaigns:
+                to_fly += data.plan(cname).needed
+            records = data.campaign_records
+            rows.append({
+                "name": name, "campaigns": len(data.campaigns) + len(data.campaign_errors),
+                "broken": len(data.campaign_errors), "to_fly": to_fly,
+                "counts": data.status_counts(records), "total": len(records),
+                "scratch": len(data.scratch_records),
+                "replayable": sum(1 for r in data.records if r.slim_dir is not None),
+                "last": records[0].started if records else "",
+                "layouts": data.layouts,
+            })
+        rows.sort(key=lambda r: r["last"], reverse=True)
+        return render_template("index.html", rows=rows, robots=load_robots(app),
                                robot_actions=load_robot_actions(app),
-                               journal=journal.snapshot())
+                               journal=journal.snapshot()[:8], crumbs=[])
 
-    @app.route("/campaign/<experiment>/<name>")
+    # ---------------------------------------------------------- experiment --
+    def trials_view_args(data: ExperimentData, records: List[trec.TrialRecord],
+                         *, fixed_campaign: Optional[str] = None) -> Dict[str, Any]:
+        """The filter state and the filtered rows of a trials table, from the query string.
+
+        The filters are `trials records`' own flags (--campaign, --status,
+        --where), applied by its own function, and the page prints the
+        equivalent command so a filtered view can be reproduced in a terminal.
+        """
+        campaign = fixed_campaign or request.args.get("campaign") or None
+        status = request.args.get("status") or None
+        where = parse_where_args(request.args.getlist("cell"))
+        shown = trec.filter_records(records, campaign=campaign, status=status, where=where)
+        # The cell column shows what differs between the rows SHOWN, so a campaign
+        # filter on an experiment with 35 factors leaves only that campaign's axes.
+        varying, shared = data.varying_factors(shown or records)
+        cmd = [f"trials records {data.experiment}"]
+        if campaign:
+            cmd.append(f"--campaign {campaign}")
+        if status:
+            cmd.append(f"--status {status}")
+        cmd += [f"--where {k}={v}" for k, v in sorted(where.items())]
+        if not fixed_campaign and records is data.campaign_records:
+            cmd.append("--no-scratch")
+        return {"rows": shown, "all_count": len(records), "f_campaign": campaign or "",
+                "f_status": status or "", "f_cell": where_string(where), "where": where,
+                "varying": varying, "shared": shared, "levels": data.factor_levels(records),
+                # Counted over the rows the campaign and cell filters keep, so the
+                # status badges answer "of these, how many are usable".
+                "counts": data.status_counts(trec.filter_records(records, campaign=campaign,
+                                                                 where=where)),
+                "cli": " ".join(cmd)}
+
+    @app.route("/e/<experiment>")
+    @requires_auth
+    def experiment_view(experiment: str):
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404)
+        data = cache.get(experiment)
+        campaigns = []
+        for name, campaign in data.campaigns.items():
+            plan = data.plan(name)
+            flown = [r for r in data.campaign_records if r.campaign == name]
+            # Last flown: the ledger names the campaign only since 2026-10-01, so an
+            # older campaign falls back to the newest trial its plan counts.
+            counted = [r for r in data.campaign_records
+                       if r.campaign == name or name in r.counts_for]
+            campaigns.append({"name": name, "describe": campaign.describe, "plan": plan,
+                              "blocked": sum(1 for r in flown if r.status == "blocked"),
+                              "last": counted[0].started if counted else ""})
+        for name, why in data.campaign_errors.items():
+            campaigns.append({"name": name, "error": why})
+        table = trials_view_args(data, data.campaign_records)
+        return render_template(
+            "experiment.html", experiment=experiment, data=data, campaigns=campaigns,
+            table=table, scratch=data.scratch_records,
+            crumbs=[(experiment, None)], tab="trials")
+
+    @app.route("/e/<experiment>/c/<name>")
     @requires_auth
     def campaign_view(experiment: str, name: str):
-        root = app.config["EXPERIMENTS_ROOT"]
-        path = root / experiment / "campaigns" / f"{name}.yaml"
+        path = root() / experiment / "campaigns" / f"{name}.yaml"
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
         if not path.is_file():
-            return render_template("error.html", message=f"No campaign {name!r} in {experiment}"), 404
+            return error(f"No campaign {name!r} in {experiment}", 404, crumbs)
         include_unverified = request.args.get("include_unverified") == "1"
         try:
-            campaign = cs.load_campaign(path, root)
+            campaign = cs.load_campaign(path, root())
         except cs.SpecError as exc:
-            return render_template("error.html", message=str(exc)), 400
-        all_trials = ti.load_trials(root, experiment)
-        plan = cp.build_plan(campaign, all_trials, include_unverified)
-        warnings = cs.validate_against_metadata_contract(campaign, root)
-        checklist, checklist_vars = load_preflight_checklist(root, experiment)
+            return error(str(exc), 400, crumbs, title=f"Campaign {name} does not load. "
+                         f"`trials plan` refuses it for the same reason:")
+        data = cache.get(experiment)
+        plan = cp.build_plan(campaign, data.trials, include_unverified)
+        warnings = cs.validate_against_metadata_contract(campaign, root())
+        checklist, checklist_vars = load_preflight_checklist(root(), experiment)
         try:
-            auto_seq = automatic_sequence(tr.RunnerConfig.load(experiment, root))
-        except tr.RunnerError:
-            auto_seq = []
-        # The bags themselves, newest first. A coverage count answers "how
-        # many"; an operator also needs "which ones, and are they any good" —
-        # the page showed the former only, so a flown trial was a number with
-        # no way to reach the recording behind it.
-        swept = set(campaign.sweep) | set(campaign.fixed)
+            auto_seq = automatic_sequence(tr.RunnerConfig.load(experiment, root()))
+            runner_error = ""
+        except tr.RunnerError as exc:
+            auto_seq, runner_error = [], str(exc)
+        gates = trec.campaign_gate_outcomes(root(), experiment, name)
+        records = trec.filter_records(data.campaign_records, campaign=name)
+        table = trials_view_args(data, records, fixed_campaign=name)
+        unverified = sum(c.unverified for c in plan.cells)
+        # The grid shows the factors that differ between its cells; the ones every
+        # cell shares are stated once above it, so the columns are the experiment.
+        all_names = sorted(plan.cells[0].values) if plan.cells else []
+        factor_names = [f for f in all_names
+                        if len({str(c.values.get(f)) for c in plan.cells}) > 1] or all_names
+        fixed_values = {f: plan.cells[0].values[f] for f in all_names if f not in factor_names}
+        fixed_nd = {f for f in fixed_values if f in plan.cells[0].non_defaults}
+        # Per cell, the attempts the T-0 gate refused (attempt ledger): a cell the
+        # gate blocks every time by design reads differently from one nobody flew.
+        refused = [r for r in data.campaign_records if r.campaign == name and r.status == "blocked"]
+        cell_blocked = [sum(1 for r in refused
+                            if all(r.values.get(k) == str(v) for k, v in cell.values.items()
+                                   if k in r.values))
+                        for cell in plan.cells]
+        return render_template(
+            "campaign.html", experiment=experiment, name=name, campaign=campaign, plan=plan,
+            warnings=warnings, checklist=checklist, checklist_vars=checklist_vars,
+            operator_steps=annotate_steps(campaign.operator_steps),
+            live_steps=annotate_steps(campaign.operator_live_steps),
+            auto_seq=auto_seq, runner_error=runner_error, gates=gates, table=table,
+            data=data, unverified=unverified, factor_names=factor_names,
+            fixed_values=fixed_values, fixed_nd=fixed_nd, cell_blocked=cell_blocked,
+            include_unverified=include_unverified,
+            has_gate=(root() / experiment / "scripts" / "preflight.sh").is_file(),
+            crumbs=crumbs)
 
-        def _code_cell(version):
-            """{short, dirty, title} for the code-version column."""
-            if not version or not version.get("commit"):
-                why = (version or {}).get("error") or "recorded before code stamping"
-                return {"short": "—", "dirty": False, "title": f"no code version: {why}"}
-            title = cv.summary(version)
-            if version.get("dirty"):
-                shown = version.get("dirty_files", [])
-                title += "\nuncommitted: " + ", ".join(shown)
-                if version.get("dirty_file_count", 0) > len(shown):
-                    title += f", +{version['dirty_file_count'] - len(shown)} more"
-            return {"short": version["commit"][:8],
-                    "dirty": bool(version.get("dirty")), "title": title}
-
-        def _dir_mb(d):
+    @app.route("/e/<experiment>/t/<name>")
+    @requires_auth
+    def trial_view(experiment: str, name: str):
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment))]
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404, crumbs)
+        data = cache.get(experiment)
+        record = data.record(name)
+        if record is None:
+            return error(f"No trial {name!r} in {experiment}. It may have been moved or "
+                         f"deleted; the experiment page lists every trial that exists.",
+                         404, crumbs)
+        if record.campaign and record.campaign in data.campaigns:
+            crumbs.append((record.campaign, url_for("campaign_view", experiment=experiment,
+                                                    name=record.campaign)))
+        crumbs.append((name, None))
+        log_tail = ""
+        if record.run_log is not None:
             try:
-                return round(sum(f.stat().st_size for f in d.iterdir() if f.is_file()) / 1e6, 1)
+                lines = record.run_log.read_text(encoding="utf-8", errors="replace").splitlines()
+                log_tail = "\n".join(lines[-60:])
             except OSError:
-                return None
+                log_tail = ""
+        quarantinable = (record.bag_dir is not None and record.kind == "campaign"
+                         and record.bag_dir.parent.name == "bags")
+        return render_template(
+            "trial.html", experiment=experiment, r=record, data=data,
+            verify=trec.verify_report(record.run_log), log_tail=log_tail,
+            size_full=dir_mb(record.bag_dir), size_slim=dir_mb(record.slim_dir),
+            quarantinable=quarantinable, crumbs=crumbs)
 
-        bags = sorted(
-            ({"trial_id": t.metadata.get("trial_id", t.bag_dir.name),
-              "status": t.status,
-              "aborted": t.aborted,
-              "notes": str(t.metadata.get("notes", "")),
-              "problems": t.problems,
-              "dir_name": t.bag_dir.name,
-              "is_issue": t.is_issue_bag,
-              "size_mb": _dir_mb(t.bag_dir),
-              # Provenance, shown short with the full story in the tooltip: an
-              # operator comparing two odd trials wants "same commit or not?"
-              # at a glance, and the dirty marker warns that the hash alone
-              # does not describe what ran.
-              "code": _code_cell(t.metadata.get("code_version")),
-              # NOT "values": Jinja resolves `b.values` to dict.values().
-              "factors": {k: v for k, v in sorted(t.metadata.items())
-                         if k in swept and not isinstance(v, (dict, list))}}
-             for t in all_trials),
-            key=lambda b: b["trial_id"], reverse=True)
-        return render_template("campaign.html", experiment=experiment, name=name,
-                               checklist=checklist, checklist_vars=checklist_vars,
-                               campaign=campaign, plan=plan, warnings=warnings,
-                               operator_steps=annotate_steps(campaign.operator_steps),
-                               live_steps=annotate_steps(campaign.operator_live_steps),
-                               bags=bags, base_url=request.host_url.rstrip("/"),
-                               auto_seq=auto_seq,
-                               include_unverified=include_unverified,
-                               journal=journal.snapshot())
+    @app.route("/e/<experiment>/analyses")
+    @requires_auth
+    def analyses_view(experiment: str):
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), ("analyses", None)]
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404, crumbs)
+        try:
+            analyses = ar.load_analyses(experiment, root())
+            analyses_error = ""
+        except ar.AnalysisError as exc:
+            analyses, analyses_error = {}, str(exc)
+        data = cache.get(experiment)
+        folders = trec.result_folders(root(), experiment)
+        # The cohort preview: `trials analyze <exp> <name> --where ...` WITHOUT
+        # --execute, through the same two functions, so the bags and commands
+        # shown are the ones the command line would use.
+        preview = None
+        chosen = request.args.get("analysis", "")
+        where = parse_where_args(request.args.getlist("cell"))
+        include_unverified = request.args.get("include_unverified") == "1"
+        if chosen:
+            if chosen not in analyses:
+                preview = {"error": f"no analysis named {chosen!r} in {experiment}"}
+            else:
+                bags = ar.select_bags(experiment, root(), where=where,
+                                      include_unverified=include_unverified)
+                cmd = f"trials analyze {experiment} {chosen}" + "".join(
+                    f" --where {k}={v}" for k, v in sorted(where.items())) + (
+                    " --include-unverified" if include_unverified else "")
+                try:
+                    result = ar.run_analysis(analyses[chosen], bags, experiment, root(),
+                                             where=where, dry_run=True)
+                    preview = {"bags": [t.bag_dir.name for t in bags],
+                               "commands": [shlex.join(c) for c in result.commands],
+                               "results_dir": result.results_dir, "cli": cmd}
+                except ar.AnalysisError as exc:
+                    preview = {"error": str(exc), "cli": cmd}
+        return render_template(
+            "analyses.html", experiment=experiment, analyses=analyses,
+            analyses_error=analyses_error, folders=folders, data=data, preview=preview,
+            chosen=chosen, where=where, include_unverified=include_unverified,
+            levels=data.factor_levels(), crumbs=crumbs, tab="analyses")
+
+    @app.route("/files/<experiment>/")
+    @app.route("/files/<experiment>/<path:rel>")
+    @requires_auth
+    def files(experiment: str, rel: str = ""):
+        """Read-only view of an experiment's results, run logs, declarations and bag sidecars.
+
+        Resolved, then checked to stay inside one of FILE_ROOTS of this
+        experiment, so ``..`` cannot leave it. Recordings are refused here: the
+        slim ones are served by /bag, the heavy ones never.
+        """
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r}", 404)
+        base = (root() / experiment).resolve()
+        target = (base / rel).resolve()
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (rel or "files", None)]
+        try:
+            inside = target.relative_to(base)
+        except ValueError:
+            return error("outside the experiment", 403, crumbs)
+        if not inside.parts or inside.parts[0] not in FILE_ROOTS:
+            if inside.parts:
+                return error(f"{inside.parts[0]}/ is not served (only {', '.join(FILE_ROOTS)})",
+                             403, crumbs)
+        if target.is_dir():
+            entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name))
+            listing = [{"name": p.name + ("/" if p.is_dir() else ""),
+                        "rel": str(p.relative_to(base)) + ("/" if p.is_dir() else ""),
+                        "size": (p.stat().st_size if p.is_file() else None),
+                        "recording": p.suffix in RECORDING_SUFFIXES}
+                       for p in entries]
+            if not inside.parts:
+                listing = [e for e in listing if e["name"].rstrip("/") in FILE_ROOTS]
+            parent = str(inside.parent) if inside.parts else None
+            return render_template("files.html", experiment=experiment, rel=str(inside) if inside.parts else "",
+                                   listing=listing, parent=parent, crumbs=crumbs)
+        if not target.is_file():
+            return error(f"no file {rel!r} in {experiment}", 404, crumbs)
+        if target.suffix in RECORDING_SUFFIXES:
+            return error("recordings are not served here: open the slim copy in Foxglove "
+                         "from the trial's page", 403, crumbs)
+        text_types = {".log": "text/plain", ".txt": "text/plain", ".md": "text/plain",
+                      ".yaml": "text/plain", ".yml": "text/plain", ".jsonl": "text/plain",
+                      ".csv": "text/plain", ".json": "application/json"}
+        mimetype = text_types.get(target.suffix)
+        resp = send_file(target, mimetype=mimetype, conditional=True)
+        if mimetype and mimetype.startswith("text/"):
+            resp.headers["Content-Type"] = mimetype + "; charset=utf-8"
+        return resp
+
+    # -------------------------------------------------------------- viewing --
+    @app.route("/viewers")
+    @requires_auth
+    def viewers():
+        """How to open the live and recorded views ON THE LAPTOP.
+
+        A page served by the rig cannot spawn RViz on the operator's machine, so
+        this hands over a foxglove:// deep link (which the laptop's browser
+        resolves to the laptop's Foxglove) and a copy-paste command for RViz.
+        Every replayable trial is listed, grouped by experiment with its layout
+        beside it: the cap of five per folder hid 20 of 24 trials (2026-10-15).
+        """
+        groups = []
+        for name in experiment_names(root()):
+            data = cache.get(name)
+            replayable = [r for r in data.records if r.slim_dir is not None]
+            groups.append({"experiment": name, "records": replayable, "layouts": data.layouts,
+                           "total": len(data.records),
+                           "last": replayable[0].started if replayable else ""})
+        groups.sort(key=lambda g: g["last"], reverse=True)
+        return render_template("viewers.html", groups=groups, crumbs=[("viewing", None)])
+
+    @app.route("/layout/<experiment>/<path:name>")
+    @requires_auth
+    def layout_file(experiment: str, name: str):
+        """A per-experiment Foxglove layout, as a download for Layouts -> Import."""
+        for f in trec.foxglove_layouts(root()).get(experiment, []):
+            if f.name == name:
+                return send_file(f, mimetype="application/json", as_attachment=True, download_name=f.name)
+        return {"error": f"no Foxglove layout named {name!r} in {experiment}"}, 404
+
+    @app.route("/journal")
+    @requires_auth
+    def journal_view():
+        return render_template("journal.html", journal=journal.snapshot(),
+                               runs=runs.all(), crumbs=[("journal", None)])
+
+    # Old addresses, kept so bookmarks and the docs of before #131 still land.
+    @app.route("/campaign/<experiment>/<name>")
+    @requires_auth
+    def legacy_campaign(experiment: str, name: str):
+        return redirect(url_for("campaign_view", experiment=experiment, name=name, **request.args))
 
     @app.route("/analyses/<experiment>")
     @requires_auth
-    def analyses_view(experiment: str):
-        root = app.config["EXPERIMENTS_ROOT"]
-        try:
-            analyses = ar.load_analyses(experiment, root)
-        except ar.AnalysisError as exc:
-            return render_template("error.html", message=str(exc)), 404
-        results = sorted((root / experiment / "results").glob("*/analysis_metadata.json"),
-                         reverse=True)[:15]
-        return render_template("analyses.html", experiment=experiment,
-                               analyses=analyses, results=results, journal=journal.snapshot())
+    def legacy_analyses(experiment: str):
+        return redirect(url_for("analyses_view", experiment=experiment))
 
     # -------------------------------------------------------------- actions --
     @app.route("/run", methods=["POST"])
     @requires_auth
     def run():
         """Plan first, execute only on an explicit confirm; then show progress."""
-        root = app.config["EXPERIMENTS_ROOT"]
         experiment = request.form["experiment"]
         name = request.form["campaign"]
         # Two explicit buttons (go=dry|execute); the checkbox is the arming
@@ -666,11 +1111,14 @@ def create_app(experiments_root: Optional[Path] = None,
         go = request.form.get("go", "dry")
         armed = request.form.get("confirm") == "yes"
         if go == "execute" and not armed:
-            return render_template("error.html", message=(
+            return error(
                 "Execute requested but the arm checkbox was not ticked. "
-                "Tick “arm” next to the EXECUTE button, or use Dry run.")), 400
+                "Tick “arm” next to the EXECUTE button, or use Dry run.", 400)
         confirm = go == "execute" and armed
-        limit = int(request.form.get("limit", 1))
+        try:
+            limit = max(1, int(request.form.get("limit", 1)))
+        except ValueError:
+            return error("trials must be a whole number", 400)
         include_unverified = request.form.get("include_unverified") == "1"
         skip_gate = request.form.get("skip_gate") == "yes"
         keep_stack = request.form.get("keep_stack") == "yes"
@@ -693,19 +1141,19 @@ def create_app(experiments_root: Optional[Path] = None,
         overrides = pin.split() if pin else []
 
         if confirm and runs.busy():
-            return render_template("error.html", message=(
+            return error(
                 "A campaign is already running. Two campaigns sharing one rig would "
                 "fight over the radio, the recorder and the airspace — wait for it, "
-                "or abort it first.")), 409
+                "or abort it first.", 409)
 
         try:
-            campaign = cs.load_campaign(root / experiment / "campaigns" / f"{name}.yaml", root,
+            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
                                         overrides)
-            config = tr.RunnerConfig.load(experiment, root)
+            config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
-            return render_template("error.html", message=str(exc)), 400
+            return error(str(exc), 400)
 
-        plan = cp.build_plan(campaign, ti.load_trials(root, experiment), include_unverified)
+        plan = cp.build_plan(campaign, ti.load_trials(root(), experiment), include_unverified)
 
         # T-0 gate on executed runs, when the experiment ships a preflight.sh.
         # The skip is operator-explicit and travels in the run's shown name so
@@ -713,7 +1161,7 @@ def create_app(experiments_root: Optional[Path] = None,
         gate = None
         suffix = f" [{pin}]" if pin else ""
         if confirm:
-            script = root / experiment / "scripts" / "preflight.sh"
+            script = root() / experiment / "scripts" / "preflight.sh"
             if skip_gate:
                 suffix += " ⚠GATE-SKIPPED"
             elif script.is_file():
@@ -737,13 +1185,13 @@ def create_app(experiments_root: Optional[Path] = None,
         # dry|execute (same arm rule as execute, plus optional label/action
         # fields), calling tr.run_scratch through the same wait_in_browser
         # confirmation surface. Same client-of-the-CLI rule: no UI-side
-        # reimplementation of what scratch means. Not wired yet on purpose —
-        # the CLI flag should get a rig day first.
+        # reimplementation of what scratch means. Until then the campaign
+        # page shows the CLI command with a copy button.
         operator_steps = annotate_steps(campaign.operator_steps)
         live_steps = annotate_steps(campaign.operator_live_steps)
         active = runs.start(experiment=experiment, campaign_name=f"{name}{suffix}",
                             campaign_file=name, plan=plan,
-                            config=config, bags_dir=root / experiment / "bags",
+                            config=config, bags_dir=root() / experiment / "bags",
                             executed=confirm, limit=limit, journal=journal,
                             gate=gate, steps=steps, hold_s=hold_s, keep_stack=keep_stack,
                             pause_before_action=pose_pause,
@@ -759,19 +1207,18 @@ def create_app(experiments_root: Optional[Path] = None,
         Same client-of-the-CLI rule: this invokes the experiment's own
         scripts/preflight.sh through the same remote wrapper the runner uses.
         """
-        root = app.config["EXPERIMENTS_ROOT"]
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), ("gate", None)]
         if runs.busy():
-            return render_template("error.html", message=(
+            return error(
                 "A campaign is running — the gate bounces the ros2 daemon and "
-                "must not run mid-trial. Wait or abort first.")), 409
-        script = root / experiment / "scripts" / "preflight.sh"
+                "must not run mid-trial. Wait or abort first.", 409, crumbs)
+        script = root() / experiment / "scripts" / "preflight.sh"
         if not script.is_file():
-            return render_template("error.html",
-                                   message=f"{experiment} has no scripts/preflight.sh"), 404
+            return error(f"{experiment} has no scripts/preflight.sh", 404, crumbs)
         try:
-            config = tr.RunnerConfig.load(experiment, root)
+            config = tr.RunnerConfig.load(experiment, root())
         except tr.RunnerError as exc:
-            return render_template("error.html", message=str(exc)), 400
+            return error(str(exc), 400, crumbs)
         host_level = request.form.get("host", "").strip() or None
         target = config.remote_target(host_level)
         cmd = ["bash", f"experiments/{experiment}/scripts/preflight.sh"]
@@ -786,8 +1233,10 @@ def create_app(experiments_root: Optional[Path] = None,
             ok, output = False, "preflight timed out after 360 s"
         journal.add("preflight", f"{experiment} on {host_level or 'local'}: "
                                  f"{'PASS — go' if ok else 'FAIL — no-go'}")
+        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
         return render_template("preflight.html", experiment=experiment,
-                               host=host_level or "local", ok=ok, output=output)
+                               host=host_level or "local", ok=ok, output=output,
+                               back=back, crumbs=crumbs)
 
     @app.route("/operator_step", methods=["POST"])
     @requires_auth
@@ -804,7 +1253,6 @@ def create_app(experiments_root: Optional[Path] = None,
         the handover is one of them — and a mistyped host, container or
         service name at that moment is worth more than the convenience.
         """
-        root = app.config["EXPERIMENTS_ROOT"]
         experiment = request.form["experiment"]
         name = request.form["campaign"]
         kind = request.form.get("kind", "live")
@@ -813,8 +1261,8 @@ def create_app(experiments_root: Optional[Path] = None,
         except (KeyError, ValueError):
             return Response("bad step index", status=400, mimetype="text/plain")
         try:
-            campaign = cs.load_campaign(root / experiment / "campaigns" / f"{name}.yaml", root)
-            config = tr.RunnerConfig.load(experiment, root)
+            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root())
+            config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
             return Response(str(exc), status=400, mimetype="text/plain")
 
@@ -851,9 +1299,14 @@ def create_app(experiments_root: Optional[Path] = None,
     def run_view(run_id: str):
         run = runs.get(run_id)
         if run is None:
-            return render_template("error.html", message=f"No run {run_id}"), 404
-        return render_template("run.html", run=run, journal=journal.snapshot(),
-                               base_url=request.host_url.rstrip("/"))
+            return error(f"No run {run_id}. Runs live in this UI's memory only, so a "
+                         f"restart forgets them; the trials themselves are on disk.", 404,
+                         [("journal", url_for("journal_view"))])
+        crumbs = [(run.experiment, url_for("experiment_view", experiment=run.experiment)),
+                  (run.campaign_file, url_for("campaign_view", experiment=run.experiment,
+                                              name=run.campaign_file)),
+                  ("run " + run.run_id, None)]
+        return render_template("run.html", run=run, crumbs=crumbs)
 
     @app.route("/api/run/<run_id>.json")
     @requires_auth
@@ -882,7 +1335,7 @@ def create_app(experiments_root: Optional[Path] = None,
         """
         run = runs.get(run_id)
         if run is None:
-            return render_template("error.html", message=f"No run {run_id}"), 404
+            return error(f"No run {run_id}", 404)
         if run.awaiting_kind:
             journal.add("operator-confirm",
                         f"{run_id}: {run.awaiting_kind} confirmed — {run.awaiting_what}")
@@ -923,7 +1376,7 @@ def create_app(experiments_root: Optional[Path] = None,
                     (completed.stdout or "") + (completed.stderr or ""))
         return render_template("stop.html", action=action, robot=robot, ok=ok,
                                output=(completed.stdout or "") + (completed.stderr or "") + extra,
-                               journal=journal.snapshot())
+                               crumbs=[("stop", None)])
 
     @app.route("/robot_action", methods=["POST"])
     @requires_auth
@@ -939,8 +1392,7 @@ def create_app(experiments_root: Optional[Path] = None,
         declared = load_robot_actions(app)
         if robot not in declared or action not in {a["name"] for a in declared[robot]}:
             journal.add("robot_action", f"REFUSED undeclared {robot}.{action}")
-            return render_template("error.html",
-                                   message=f"{robot!r}.{action!r} is not a declared action"), 400
+            return error(f"{robot!r}.{action!r} is not a declared action", 400)
         cmd = [str(tools.path("robot_action.sh")), robot, action]
         completed = subprocess.run(cmd, capture_output=True, text=True)
         ok = completed.returncode == 0
@@ -949,7 +1401,7 @@ def create_app(experiments_root: Optional[Path] = None,
         return render_template("robot_action.html", robot=robot, action=action, ok=ok,
                                output=(completed.stdout or "") + (completed.stderr or ""),
                                lease_owners=lease_owners(completed.stdout or ""),
-                               journal=journal.snapshot())
+                               crumbs=[("robot action", None)])
 
     @app.route("/kill_ros", methods=["POST"])
     @requires_auth
@@ -963,11 +1415,11 @@ def create_app(experiments_root: Optional[Path] = None,
         overrides, and the page says which one to reach for.
         """
         if runs.busy() and request.form.get("force") != "yes":
-            return render_template("error.html", message=(
+            return error(
                 "A trial is running. Killing ROS now would remove the drone's commander "
                 "and position feed mid-flight — that is not a stop, it is an abandonment. "
                 "Use E-STOP to stop the aircraft, or Abort to end the campaign after this "
-                "trial; then clean the slate.")), 409
+                "trial; then clean the slate.", 409)
         results = []
         for spec in robot_hosts(app):
             workspace = app.config["REPO_ROOT"]
@@ -992,20 +1444,66 @@ def create_app(experiments_root: Optional[Path] = None,
         output = "\n\n".join(f"=== {host} ===\n{text}" for host, _, text in results) \
             or "no hosts in robots.yaml"
         return render_template("stop.html", action="kill ROS", robot="all rig hosts",
-                               ok=ok, output=output, journal=journal.snapshot())
+                               ok=ok, output=output, crumbs=[("kill ROS", None)])
+
+    @app.route("/quarantine/<experiment>/<name>", methods=["POST"])
+    @requires_auth
+    def quarantine_bag(experiment: str, name: str):
+        """Move a recorded bag out of coverage, into its `_issues` sibling.
+
+        Quarantine, not deletion: the index excludes `bags_issues*` from
+        coverage while the recording stays inspectable — deleting data from a
+        web button is how a mis-click erases a flight. Resolved the same
+        traversal-safe way as serve_bag: by matching existing directory names,
+        never joining user input onto a path. The slim copy moves with its bag.
+        """
+        pairs = (("bags", "bags_issues"), ("bags_slim", "bags_issues_slim"))
+        moved = []
+        for src_name, dst_name in pairs:
+            src_root = root() / experiment / src_name
+            if not src_root.is_dir():
+                continue
+            wanted = {name, f"{name}_slim"} if src_name == "bags_slim" else {name}
+            for candidate in src_root.iterdir():
+                if candidate.name not in wanted or not candidate.is_dir():
+                    continue
+                dst_root = root() / experiment / dst_name
+                dst_root.mkdir(exist_ok=True)
+                if (dst_root / candidate.name).exists():
+                    return {"error": f"{dst_name}/{candidate.name} already exists"}, 409
+                candidate.rename(dst_root / candidate.name)
+                moved.append(f"{src_name}/{candidate.name} -> {dst_name}/")
+        if not moved:
+            return {"error": f"no bag directory named {name!r} in {experiment}"}, 404
+        for line in moved:
+            journal.add("quarantine", line)
+        cache.clear()
+        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
+        return redirect(back)
 
     # ------------------------------------------------------------------ api --
     @app.route("/api/plan/<experiment>/<name>.json")
     @requires_auth
     def api_plan(experiment: str, name: str):
-        root = app.config["EXPERIMENTS_ROOT"]
         try:
-            campaign = cs.load_campaign(root / experiment / "campaigns" / f"{name}.yaml", root)
+            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root())
         except cs.SpecError as exc:
             return {"error": str(exc)}, 400
-        plan = cp.build_plan(campaign, ti.load_trials(root, experiment),
+        plan = cp.build_plan(campaign, ti.load_trials(root(), experiment),
                              request.args.get("include_unverified") == "1")
         return plan.to_dict()
+
+    @app.route("/api/records/<experiment>.json")
+    @requires_auth
+    def api_records(experiment: str):
+        """`trials records <exp> --json`, with the same filters as query parameters."""
+        if not known_experiment(experiment):
+            return {"error": f"no experiment {experiment!r}"}, 404
+        data = cache.get(experiment)
+        rows = trec.filter_records(data.records, campaign=request.args.get("campaign") or None,
+                                   status=request.args.get("status") or None,
+                                   where=parse_where_args(request.args.getlist("where")))
+        return {"experiment": experiment, "records": [r.to_dict(root()) for r in rows]}
 
     @app.route("/bag/<experiment>/<name>.mcap")
     def serve_bag(experiment: str, name: str):
@@ -1022,10 +1520,10 @@ def create_app(experiments_root: Optional[Path] = None,
         opened from the viewer. Read-only data on a localhost/tunnel service;
         every state-changing route stays authed.
         """
-        root = app.config["EXPERIMENTS_ROOT"]
-        for slim_root in (root / experiment / "bags_slim",
-                          root / experiment / "bags_issues_slim",
-                          root / experiment / "bags_scratch"):
+        for slim_root in (root() / experiment / "bags_slim",
+                          root() / experiment / "bags_issues_slim",
+                          root() / experiment / "bags_scratch",
+                          root() / experiment / "bags_scratch_slim"):
             if not slim_root.is_dir():
                 continue
             for candidate in slim_root.iterdir():
@@ -1033,7 +1531,7 @@ def create_app(experiments_root: Optional[Path] = None,
                     continue
                 # Only slim copies are served from bags_scratch: a fat scratch bag is
                 # hundreds of MB, and a viewer streaming it through the UI is a mistake.
-                if slim_root.name == "bags_scratch" and not name.endswith("_slim"):
+                if slim_root.name.startswith("bags_scratch") and not name.endswith("_slim"):
                     continue
                 splits = sorted(candidate.glob("*.mcap"))
                 if splits:
@@ -1042,78 +1540,6 @@ def create_app(experiments_root: Optional[Path] = None,
                     resp.headers["Access-Control-Allow-Origin"] = "*"
                     return resp
         return {"error": f"no slim bag named {name!r} in {experiment}"}, 404
-
-    @app.route("/quarantine/<experiment>/<name>", methods=["POST"])
-    @requires_auth
-    def quarantine_bag(experiment: str, name: str):
-        """Move a recorded bag out of coverage, into its `_issues` sibling.
-
-        Quarantine, not deletion: the index excludes `bags_issues*` from
-        coverage while the recording stays inspectable — deleting data from a
-        web button is how a mis-click erases a flight. Resolved the same
-        traversal-safe way as serve_bag: by matching existing directory names,
-        never joining user input onto a path.
-        """
-        root = app.config["EXPERIMENTS_ROOT"]
-        pairs = (("bags", "bags_issues"), ("bags_slim", "bags_issues_slim"))
-        for src_name, dst_name in pairs:
-            src_root = root / experiment / src_name
-            if not src_root.is_dir():
-                continue
-            for candidate in src_root.iterdir():
-                if candidate.name != name or not candidate.is_dir():
-                    continue
-                dst_root = root / experiment / dst_name
-                dst_root.mkdir(exist_ok=True)
-                if (dst_root / candidate.name).exists():
-                    return {"error": f"{dst_name}/{candidate.name} already exists"}, 409
-                candidate.rename(dst_root / candidate.name)
-                journal.add("quarantine",
-                            f"{src_name}/{candidate.name} -> {dst_name}/")
-                back = request.form.get("back") or url_for("index")
-                return redirect(back)
-        return {"error": f"no bag directory named {name!r} in {experiment}"}, 404
-
-    @app.route("/viewers")
-    @requires_auth
-    def viewers():
-        """How to open the live and recorded views ON THE LAPTOP.
-
-        A page served by the rig cannot spawn RViz on the operator's machine, so
-        this hands over a foxglove:// deep link (which the laptop's browser
-        resolves to the laptop's Foxglove) and a copy-paste command for RViz.
-        """
-        root = app.config["EXPERIMENTS_ROOT"]
-        base = request.host_url.rstrip("/")
-        recent = []
-        # Slim bags of the campaigns (bags_slim/) and slim copies of scratch flights
-        # (bags_scratch/*_slim, made by hand with slim_bag): a scratch flight is often
-        # the one worth looking at (#130).
-        for slim_root in sorted(root.glob("*/bags_slim")) + sorted(root.glob("*/bags_scratch")):
-            bags = [b for b in slim_root.iterdir() if b.is_dir() and list(b.glob("*.mcap"))
-                    and (slim_root.name == "bags_slim" or b.name.endswith("_slim"))]
-            for bag in sorted(bags, reverse=True)[:5]:
-                recent.append({
-                    "experiment": slim_root.parent.name,
-                    "name": bag.name,
-                    "link": foxglove_link(base, slim_root.parent.name, bag.name),
-                })
-        # Per-experiment Foxglove layouts (experiments/<exp>/config/foxglove*.json): a
-        # foxglove:// link cannot carry a layout, so the page offers the file to import
-        # once (Layouts -> Import), next to the bags of its experiment.
-        layouts = {exp: [f.name for f in files] for exp, files in foxglove_layouts(root).items()}
-        return render_template("viewers.html", recent=recent, base_url=base, layouts=layouts,
-                               journal=journal.snapshot())
-
-    @app.route("/layout/<experiment>/<path:name>")
-    @requires_auth
-    def layout_file(experiment: str, name: str):
-        """A per-experiment Foxglove layout, as a download for Layouts -> Import."""
-        root = app.config["EXPERIMENTS_ROOT"]
-        for f in foxglove_layouts(root).get(experiment, []):
-            if f.name == name:
-                return send_file(f, mimetype="application/json", as_attachment=True, download_name=f.name)
-        return {"error": f"no Foxglove layout named {name!r} in {experiment}"}, 404
 
     @app.route("/healthz")
     def healthz():
