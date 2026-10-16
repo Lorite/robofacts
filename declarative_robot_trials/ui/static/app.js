@@ -19,6 +19,27 @@
   });
   renderPin();
 
+  // ----------------------------------------------------------------- theme --
+  // Auto -> Dark -> Light -> Auto. Auto removes the attribute, so the CSS follows
+  // the OS; the choice is remembered per browser (a convenience, never required).
+  const themeBtn = document.getElementById('themetoggle');
+  const themes = ['auto', 'dark', 'light'];
+  const label = { auto: '◐ Auto', dark: '☾ Dark', light: '☀ Light' };
+  const currentTheme = () => document.documentElement.getAttribute('data-theme') || 'auto';
+  const renderTheme = () => {
+    if (!themeBtn) return;
+    themeBtn.textContent = label[currentTheme()];
+    themeBtn.title = 'theme: ' + currentTheme() + ' (click to change; Auto follows the OS)';
+  };
+  if (themeBtn) themeBtn.addEventListener('click', () => {
+    const next = themes[(themes.indexOf(currentTheme()) + 1) % themes.length];
+    if (next === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('trialsTheme', next); } catch (e) { /* not remembered */ }
+    renderTheme();
+  });
+  renderTheme();
+
   // ------------------------------------------------------------ sort tables --
   // Click a header to sort; a cell may carry data-sort for a value other than its text.
   document.querySelectorAll('table.sortable').forEach((table) => {

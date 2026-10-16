@@ -999,3 +999,14 @@ def test_a_dry_run_of_a_covered_campaign_says_so(client, root):
     assert final["wanted"] == 0
     assert any("Nothing to run" in line["text"] for line in final["log"]), \
         "the CLI's own line, so an empty run page says why"
+
+
+def test_every_page_has_the_theme_switch_and_both_themes(client):
+    """Dark mode (2026-10-16): Auto follows the OS, the switch stores dark or light, and
+    the stored choice is applied before the first paint (no white flash)."""
+    body = client.get("/", headers=auth()).get_data(as_text=True)
+    assert 'id="themetoggle"' in body
+    assert body.index("trialsTheme") < body.index("app.css"), "the theme is set before the CSS loads"
+    css = client.get("/static/app.css").get_data(as_text=True)
+    assert ':root[data-theme="dark"]' in css and ':root:not([data-theme="light"])' in css
+    assert "--solid-bad" in css, "buttons keep white text on a solid fill in both themes"

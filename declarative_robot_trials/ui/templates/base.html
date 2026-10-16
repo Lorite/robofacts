@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}Trials{% endblock %}</title>
+<script>
+  // The theme before the first paint, so a dark-mode user never sees a white flash.
+  // "auto" (no attribute) follows the OS; the top-bar switch stores dark or light.
+  (function () {
+    try {
+      var t = localStorage.getItem('trialsTheme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch (e) { /* private window: follow the OS */ }
+  })();
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
@@ -21,6 +31,7 @@
     {{ '⏸ waiting for you' if active_run.awaiting_kind else ('▶ EXECUTING' if active_run.executed else '🔍 dry run') }}:
     {{ active_run.experiment }} / {{ active_run.campaign }} ({{ active_run.results|length }}/{{ active_run.wanted }})</a>
   {% endif %}
+  <button type="button" class="themetoggle" id="themetoggle" title="theme: Auto follows the OS">◐ Auto</button>
 </header>
 
 <div class="stopbar pinned" id="stopbar">

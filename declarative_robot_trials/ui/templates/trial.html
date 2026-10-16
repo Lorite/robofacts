@@ -90,12 +90,12 @@
 {% endif %}
 
 <h2>Files</h2>
-<p class="small">
-  {% if r.metadata_path %}<a href="{{ url_for('files', experiment=experiment, rel=r.metadata_path|relpath(experiment)) }}">trial_metadata.json</a> · {% endif %}
-  {% if r.run_log %}<a href="{{ url_for('files', experiment=experiment, rel=r.run_log|relpath(experiment)) }}">run log</a> · {% endif %}
-  {% if r.bag_dir %}<a href="{{ url_for('files', experiment=experiment, rel=(r.bag_dir|relpath(experiment)) ~ '/') }}">bag directory</a> · {% endif %}
-  {% if r.slim_dir %}<a href="{{ url_for('files', experiment=experiment, rel=(r.slim_dir|relpath(experiment)) ~ '/') }}">slim directory</a>{% endif %}
-</p>
+{% set links = [] %}
+{% if r.metadata_path %}{% set _ = links.append((url_for('files', experiment=experiment, rel=r.metadata_path|relpath(experiment)), 'trial_metadata.json')) %}{% endif %}
+{% if r.run_log %}{% set _ = links.append((url_for('files', experiment=experiment, rel=r.run_log|relpath(experiment)), 'run log')) %}{% endif %}
+{% if r.bag_dir %}{% set _ = links.append((url_for('files', experiment=experiment, rel=(r.bag_dir|relpath(experiment)) ~ '/'), 'bag directory')) %}{% endif %}
+{% if r.slim_dir %}{% set _ = links.append((url_for('files', experiment=experiment, rel=(r.slim_dir|relpath(experiment)) ~ '/'), 'slim directory')) %}{% endif %}
+<p class="small">{% for href, label in links %}<a href="{{ href }}">{{ label }}</a>{{ ' · ' if not loop.last }}{% else %}<span class="muted">no file on this machine</span>{% endfor %}</p>
 {% if log_tail %}
 <details {{ 'open' if r.status != 'usable' }}>
   <summary class="small">The end of the run log (last 60 lines)</summary>
