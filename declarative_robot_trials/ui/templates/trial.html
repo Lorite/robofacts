@@ -5,7 +5,7 @@
 {% block body %}
 <h1 class="mono" style="font-size:1.2rem">{{ r.name }}</h1>
 <p>{{ status_badge(r.status) }}
-  {% if r.kind == 'scratch' and r.status != 'scratch' %}<span class="badge b-scratch">scratch flight, never coverage</span>{% endif %}
+  {% if r.kind == 'scratch' and r.status != 'scratch' %}<span class="badge b-scratch">scratch recording, never coverage</span>{% endif %}
   
   {% if r.counts %}<span class="small ok">counts as coverage{% if r.counts_for %} for {{ r.counts_for|join(', ') }}{% endif %}</span>
   {% else %}<span class="small muted">{{ status_meaning.get(r.status, '') }}</span>{% endif %}</p>
@@ -70,7 +70,7 @@
 <tbody>{% for v in verify %}<tr><td><code>{{ v.name }}</code></td><td>{% if v.ok %}<span class="badge b-ok">rc 0</span>{% else %}<span class="badge b-bad">rc {{ v.rc }}</span>{% endif %}</td><td class="num">{{ v.seconds or '—' }}</td></tr>{% endfor %}</tbody>
 </table></div>
 {% else %}
-<p class="small muted">No verify step ran{% if r.kind == 'scratch' %}: a scratch flight skips them, by design{% elif not r.run_log %}: there is no run log for this trial{% else %} (none declared, or the trial stopped before them){% endif %}.</p>
+<p class="small muted">No verify step ran{% if r.kind == 'scratch' %}: a scratch recording skips them, by design{% elif not r.run_log %}: there is no run log for this trial{% else %} (none declared, or the trial stopped before them){% endif %}.</p>
 {% endif %}
 {% if r.metadata.get('_schema_problems') or (r.status == 'unverified' and r.reason) %}
 <p class="small"><b>Contract problems:</b> {{ r.reason }}</p>

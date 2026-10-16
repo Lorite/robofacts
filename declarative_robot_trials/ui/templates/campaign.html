@@ -13,7 +13,7 @@
 <div class="cards">
   <div class="card"><div class="k">wanted</div><div class="v">{{ plan.wanted }}</div><div class="small muted">{{ plan.cells|length }} cell(s) × repetitions</div></div>
   <div class="card {{ 'good' if plan.covered == plan.wanted }}"><div class="k">covered</div><div class="v">{{ plan.covered }}</div><div class="small muted">usable{{ ' + unverified' if include_unverified }} trials</div></div>
-  <div class="card {{ 'attn' if plan.needed else 'good' }}"><div class="k">still to fly</div><div class="v">{{ plan.needed }}</div><div class="small muted">{{ 'campaign complete' if not plan.needed else 'see the highlighted cells' }}</div></div>
+  <div class="card {{ 'attn' if plan.needed else 'good' }}"><div class="k">still missing</div><div class="v">{{ plan.needed }}</div><div class="small muted">{{ 'campaign complete' if not plan.needed else 'see the highlighted cells' }}</div></div>
   <div class="card"><div class="k">unverified</div><div class="v">{{ unverified }}</div><div class="small muted">{{ 'counted (opted in)' if include_unverified else 'not counted' }}</div></div>
   <div class="card {{ 'badc' if gates.blocked_attempts }}"><div class="k">blocked attempts</div><div class="v">{{ gates.blocked_attempts }}</div><div class="small muted">refused by the T-0 gate</div></div>
   <div class="card"><div class="k">gate verdicts</div><div class="v">{% for v, n in gates.counts.items() %}<span class="badge b-{{ 'GO' if v == 'GO' else 'NO-GO' }}">{{ n }} {{ v }}</span> {% else %}—{% endfor %}</div><div class="small muted">{{ gates.total }} gate run(s) logged</div></div>
@@ -28,10 +28,10 @@
 <table>
 <thead><tr><th>run</th>{% for f in factor_names %}<th>{{ f }}</th>{% endfor %}
   <th class="num">usable</th><th class="num">unverif.</th><th class="num">excl.</th>
-  <th class="num" title="attempts the T-0 gate refused (nothing recorded)">blocked</th><th class="num">to fly</th><th>trials</th></tr></thead>
+  <th class="num" title="attempts the T-0 gate refused (nothing recorded)">blocked</th><th class="num">missing</th><th>trials</th></tr></thead>
 <tbody>
 <tr><td><input type="radio" name="pin" value="" checked form="runform" id="pin-any"></td>
-  <td colspan="{{ factor_names|length + 6 }}"><label for="pin-any"><i>any: fly the next missing combination(s), in campaign order</i></label></td></tr>
+  <td colspan="{{ factor_names|length + 6 }}"><label for="pin-any"><i>any: run the next missing cell(s), in campaign order</i></label></td></tr>
 {% for cell in plan.cells %}
 {% set pin = where_string(cell.values) %}
 <tr class="{{ 'todo' if cell.needed(plan.include_unverified) }}">
@@ -59,10 +59,10 @@
       </ol>
       <p class="small muted">The runner cannot do these: they are physical setup, or deliberately manual. An executed run <b>waits for your confirmation</b> of them on its run page before anything launches, the same Enter the CLI runner waits for.</p>
     {% else %}
-      <p class="small muted">Nothing beyond the pre-flight checklist below.</p>
+      <p class="small muted">Nothing beyond the gate checklist below.</p>
     {% endif %}
     {% if live_steps %}
-      <h3>⏱ …and this WHILE it flies</h3>
+      <h3>⏱ …and this WHILE it runs</h3>
       <ol class="small" style="padding-left:1.2rem">
         {% for step in live_steps %}{{ step_cell(step, 'live', loop.index0, experiment, name) }}{% endfor %}
       </ol>
@@ -98,13 +98,13 @@
 <form method="post" action="{{ url_for('preflight', experiment=experiment) }}" class="cmdline">
   <input type="hidden" name="host" value="{{ plan.cells[0].values.get('execution_host', '') if plan.cells else '' }}">
   <input type="hidden" name="back" value="{{ url_for('campaign_view', experiment=experiment, name=name) }}">
-  <button type="submit">🧪 Run the pre-flight checks only</button>
+  <button type="submit">🧪 Run the gate only</button>
   <span class="small muted">runs <code>scripts/preflight.sh</code> on <b>{{ (plan.cells[0].values.get('execution_host') if plan.cells else '') or 'local' }}</b>: no launch, no flight. Every EXECUTE re-runs it at T-0 unless you skip it below.</span>
 </form>
 {% endif %}
 {% if checklist %}
 <details>
-  <summary class="small">Checklist ({{ checklist|selectattr('check')|list|length }} automated · {{ checklist|rejectattr('check')|list|length }} operator confirmations)</summary>
+  <summary class="small">Gate checklist ({{ checklist|selectattr('check')|list|length }} automated · {{ checklist|rejectattr('check')|list|length }} operator confirmations)</summary>
   <p class="small muted">⚙ machine-checked by the gate · 👤 yours to confirm before arming (the gate lists these but cannot verify them).</p>
   <ul class="small">
   {% for item in checklist if item.text %}
@@ -127,15 +127,15 @@
     <label><input type="checkbox" name="step_setup" value="1" checked> stop stale processes</label> ·
     <label><input type="checkbox" name="step_launch" value="1" checked> launch stack</label> ·
     <label><input type="checkbox" name="step_record" value="1" checked> record bag</label> ·
-    <label><input type="checkbox" name="step_action" value="1" checked> fly action</label> ·
+    <label><input type="checkbox" name="step_action" value="1" checked> run the action</label> ·
     <label><input type="checkbox" name="step_livestream" value="1"> livestream</label>
-    <br><i class="muted">no record ⇒ the trial can never count as coverage; no fly action ⇒ the stack holds for
+    <br><i class="muted">no record ⇒ the trial can never count as coverage; no action ⇒ the stack holds for
     <input type="text" name="hold_s" value="60" size="3"> s (a manual window)</i></p>
   <p class="small"><label><input type="checkbox" name="pose_pause" value="1" checked> ⏸ pause before recording</label>
     <span class="muted">after the T-0 gate, wait for a confirm on the run page so you can pose the rig (stand Spot, set the gripper) without racing the dwell</span></p>
   <p class="small"><label><input type="checkbox" name="keep_stack" value="yes"> ⏩ continuous session: keep the stack up between trials</label>
-    <br><i class="muted">launch once, then per trial only record → fly → stop recorder. Saves the settle and the camera, mocap and radio re-init each time; the gate still runs before every trial but skips the ros2 daemon bounce. The stack comes down when the batch ends, aborts or fails.</i></p>
-  {% if not plan.needed %}<div class="callout small">This campaign is complete: a run has nothing to fly. To fly more, raise its <code>repetitions</code>, or fly a scratch flight (below).</div>{% endif %}
+    <br><i class="muted">launch once, then per trial only record → action → stop recorder. Saves the settle and the camera, mocap and radio re-init each time; the gate still runs before every trial but skips the ros2 daemon bounce. The stack comes down when the batch ends, aborts or fails.</i></p>
+  {% if not plan.needed %}<div class="callout small">This campaign is complete: no cell is still missing. To run more, raise its <code>repetitions</code>, or make a scratch recording (below).</div>{% endif %}
   <div class="cmdline" style="align-items:center;flex-wrap:wrap">
     <button type="submit" name="go" value="dry" class="btn-primary">🔍 Dry run: show the plan</button>
     <span class="small muted">nothing launches, ever</span>
@@ -147,16 +147,16 @@
      app.py. Until then the command below is the way. #}
   <div class="cmdline" style="align-items:center;flex-wrap:wrap;margin-top:.6rem">
     <label><input type="checkbox" name="confirm" value="yes"> arm</label>
-    <button type="submit" name="go" value="execute" class="btn-exec">🚁 EXECUTE: fly the trial(s)</button>
-    <label class="small"><input type="checkbox" name="skip_gate" value="yes"> ⚠ skip the pre-flight gate</label>
+    <button type="submit" name="go" value="execute" class="btn-exec">▶ EXECUTE: run the trial(s)</button>
+    <label class="small"><input type="checkbox" name="skip_gate" value="yes"> ⚠ skip the gate</label>
     <span class="small muted">refuses unless armed; a skipped gate is written into the run's name in the journal</span>
   </div>
   {% set scratch_cli = 'trials run experiments/' ~ experiment ~ '/campaigns/' ~ name ~ '.yaml --scratch --label <what> --execute' %}
-  <div class="cmdline small" style="margin-top:.8rem"><span class="muted">A scratch flight (a diagnostic, never coverage) is CLI-only:</span>
+  <div class="cmdline small" style="margin-top:.8rem"><span class="muted">A scratch recording (a diagnostic, never coverage) is CLI-only:</span>
     <code>{{ scratch_cli }}</code><button type="button" class="btn-small" data-copy="{{ scratch_cli }}">⧉</button></div>
 </form>
 
-<h2 id="trials">Trials of this campaign <small>flown by it, or counted by its plan</small></h2>
+<h2 id="trials">Trials of this campaign <small>run by it, or counted by its plan</small></h2>
 {% if table.all_count %}
 {{ filter_bar(table, experiment, data, url_for('campaign_view', experiment=experiment, name=name) ~ '#trials', show_campaign=False) }}
 {{ table_hint(table, data) }}
@@ -166,6 +166,6 @@
 <div class="empty"><b>No trial matches these filters.</b> <a href="{{ url_for('campaign_view', experiment=experiment, name=name) }}#trials">Clear the filters</a>.</div>
 {% endif %}
 {% else %}
-<div class="empty"><b>No trial of this campaign yet.</b> A dry run above shows the exact commands; EXECUTE flies them.</div>
+<div class="empty"><b>No trial of this campaign yet.</b> A dry run above shows the exact commands; EXECUTE runs them.</div>
 {% endif %}
 {% endblock %}

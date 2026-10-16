@@ -133,7 +133,7 @@ def load_schema(experiment: Optional[str] = None,
     root = roots.experiments_root(experiments_root)
     core_path = root / "common" / "config" / "trial_metadata_core.yaml"
     if not core_path.is_file():
-        raise SchemaError(f"core schema not found: {core_path}")
+        raise SchemaError(f"core metadata contract not found: {core_path}")
 
     fields = _load_file(core_path)
     sources = [core_path]
@@ -199,7 +199,7 @@ def annotate(metadata: Dict[str, Any], experiment: Optional[str] = None,
     problems = validate(metadata, experiment, experiments_root=experiments_root)
     if problems:
         metadata["_schema_problems"] = problems
-        print(f"[trial-metadata] {len(problems)} schema problem(s) — recorded in the bag:")
+        print(f"[trial-metadata] {len(problems)} contract problem(s) — recorded in the bag:")
         for problem in problems:
             print(f"[trial-metadata]   - {problem}")
     else:
@@ -244,7 +244,7 @@ def main(argv=None) -> int:
         schema = load_schema(args.experiment, args.experiments_root)
         print("sources: " + ", ".join(str(s) for s in schema.sources))
         print(f"required ({len(schema.required)}): {', '.join(schema.required)}")
-        print(f"factors  ({len(schema.factors)}): {', '.join(schema.factors)}")
+        print(f"coverage axes ({len(schema.factors)}): {', '.join(schema.factors)}  (fields with factor: true)")
         return 0
 
     results = audit(args.experiments_root, args.experiment)

@@ -5,7 +5,7 @@ Pick a combination, see how many bags it already has, run it, watch it, and open
 the result — from the laptop browser, while the trial runs wherever it runs.
 
 One information architecture on every page (#131): an experiment, its campaigns
-(each one a plan: wanted, covered, still to fly, the gate's verdicts) and its
+(each one a plan: wanted, covered, still missing, the gate's verdicts) and its
 trials (one row per trial, every trial, with the slim bag to replay, the layout,
 the video, the analyses that used it, the run log and the verify report). The
 per-trial join is the package's ``trial_records`` (``trials records``), so the
@@ -170,7 +170,8 @@ class ActiveRun:
             # verdicts, and classifying those as "other" would hide the most
             # important lines behind an unrelated filter.
             head = line.lstrip()
-            if head.startswith(("[runner]", "[setup]", "[aux]", "PREFLIGHT", "PASS", "FAIL",
+            if head.startswith(("[runner]", "[setup]", "[aux]", "[gate]", "[preflight]", "=== T-0",
+                                "PREFLIGHT", "PASS", "FAIL",
                                 "SKIP", "✓")) \
                     or "CHECK(S)" in line or "MACHINE CHECKS" in line:
                 src = "runner"
@@ -329,7 +330,7 @@ class RunManager:
             return wait_in_browser(
                 "pose", trial.describe(),
                 "[runner] T-0 gate done — waiting in the browser: pose the "
-                "rig, then confirm to record and fly")
+                "rig, then confirm to record and run the action")
 
         def worker() -> None:
             import contextlib
@@ -436,7 +437,7 @@ class ShellPreflightGate:
         # (as this did at first) hid the passing context of a failure.
         print(proc.stdout.rstrip() or proc.stderr.rstrip(), flush=True)
         if proc.returncode != 0:
-            raise RuntimeError("PRE-FLIGHT NO-GO — " + summarize_gate_failure(
+            raise RuntimeError("T-0 GATE NO-GO — " + summarize_gate_failure(
                 proc.stdout + "\n" + proc.stderr))
         return _GatePass()
 
@@ -458,13 +459,13 @@ def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None) -> List[
         seq += [f"start aux: {a['name']}" for a in config.aux_launches]
     if steps["livestream"] and config.livestream:
         seq.append("start the livestream bridge")
-    seq.append("run the T-0 pre-flight gate (blocks the trial if it fails)")
+    seq.append("run the T-0 gate (blocks the trial if it fails)")
     if steps["record"]:
         seq.append("start the bag recorder")
     if steps["action"]:
-        seq.append("fly the trajectory")
+        seq.append("run the action")
     else:
-        seq.append("HOLD the stack open for the manual window (no automatic flight)")
+        seq.append("HOLD the stack open for the manual window (no automatic action)")
     seq.append("stop the recorder first, then tear the stack down")
     seq += [f"verify: {v['name']}" for v in config.verify_steps]
     if steps["record"]:
@@ -664,6 +665,31 @@ class ExperimentData:
             counts[r.status] = counts.get(r.status, 0) + 1
         return {s: counts[s] for s in trec.STATUSES if s in counts}
 
+    @staticmethod
+    def class_summary(records: List[trec.TrialRecord]) -> List[Dict[str, Any]]:
+        """The paper's three classes, then the attempts that left no trial: one badge each.
+
+        Each entry is {filter, label, css, n, title}; ``filter`` is the --status value
+        that lists exactly those rows, and an excluded entry says why in its title.
+        """
+        by = ExperimentData.status_counts(records)
+        out: List[Dict[str, Any]] = []
+        for c in ("usable", "unverified"):
+            if by.get(c):
+                out.append({"filter": c, "label": c, "css": c, "n": by[c],
+                            "title": trec.STATUS_MEANING[c]})
+        excluded = [(s, n) for s, n in by.items() if trec.CLASS_OF[s] == "excluded"]
+        if excluded:
+            out.append({"filter": "excluded", "label": "excluded", "css": "excluded",
+                        "n": sum(n for _, n in excluded),
+                        "title": "never counts: " + ", ".join(f"{n} {s.replace('-', ' ')}"
+                                                              for s, n in excluded)})
+        for s, n in by.items():
+            if trec.CLASS_OF[s] is None:
+                out.append({"filter": s, "label": f"{s} attempt" + ("s" if n > 1 else ""),
+                            "css": s, "n": n, "title": trec.STATUS_MEANING[s]})
+        return out
+
     def record(self, name: str) -> Optional[trec.TrialRecord]:
         return next((r for r in self.records if r.name == name), None)
 
@@ -773,7 +799,7 @@ def create_app(experiments_root: Optional[Path] = None,
         return {
             "active_run": current if current is not None and current.state in
             ("running", "aborting") else None,
-            "status_meaning": trec.STATUS_MEANING,
+            "status_meaning": trec.STATUS_MEANING, "class_of": trec.CLASS_OF,
             "fox_link": foxglove_link, "fox_web_link": foxglove_web_link,
             "base_url": base_url(), "code_cell": code_cell,
             "where_string": where_string,
@@ -799,14 +825,14 @@ def create_app(experiments_root: Optional[Path] = None,
         rows = []
         for name in experiment_names(root()):
             data = cache.get(name)
-            to_fly = 0
+            missing = 0
             for cname in data.campaigns:
-                to_fly += data.plan(cname).needed
+                missing += data.plan(cname).needed
             records = data.campaign_records
             rows.append({
                 "name": name, "campaigns": len(data.campaigns) + len(data.campaign_errors),
-                "broken": len(data.campaign_errors), "to_fly": to_fly,
-                "counts": data.status_counts(records), "total": len(records),
+                "broken": len(data.campaign_errors), "missing": missing,
+                "classes": data.class_summary(records), "total": len(records),
                 "scratch": len(data.scratch_records),
                 "replayable": sum(1 for r in data.records if r.slim_dir is not None),
                 "last": records[0].started if records else "",
@@ -848,6 +874,8 @@ def create_app(experiments_root: Optional[Path] = None,
                 # status badges answer "of these, how many are usable".
                 "counts": data.status_counts(trec.filter_records(records, campaign=campaign,
                                                                  where=where)),
+                "classes": data.class_summary(trec.filter_records(records, campaign=campaign,
+                                                                  where=where)),
                 "cli": " ".join(cmd)}
 
     @app.route("/e/<experiment>")
@@ -1202,7 +1230,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @app.route("/preflight/<experiment>", methods=["POST"])
     @requires_auth
     def preflight(experiment: str):
-        """Run the #87 gate on the trial host, WITHOUT flying anything.
+        """Run the #87 gate on the trial host, WITHOUT running anything else.
 
         Same client-of-the-CLI rule: this invokes the experiment's own
         scripts/preflight.sh through the same remote wrapper the runner uses.
@@ -1230,7 +1258,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                   cwd=None if target else str(app.config["REPO_ROOT"]))
             ok, output = proc.returncode == 0, (proc.stdout + "\n" + proc.stderr).strip()
         except subprocess.TimeoutExpired:
-            ok, output = False, "preflight timed out after 360 s"
+            ok, output = False, "the gate timed out after 360 s"
         journal.add("preflight", f"{experiment} on {host_level or 'local'}: "
                                  f"{'PASS — go' if ok else 'FAIL — no-go'}")
         back = request.form.get("back") or url_for("experiment_view", experiment=experiment)

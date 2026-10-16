@@ -580,7 +580,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.no_daemon_bounce:
         bounce_daemon()
 
-    print("=== T-0 PRE-FLIGHT GATE ===")
+    print("=== T-0 GATE ===")
     if not machine:
         print("  (no machine checks configured for this experiment)")
 
@@ -624,7 +624,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if failures:
         print(f"{failures} CHECK(S) FAILED ({passes} passed, {skips} skipped) - NO-GO")
         return RC_FAIL
-    print(f"ALL {passes} MACHINE CHECKS PASS ({skips} skipped) - CLEAR TO ARM "
+    print(f"ALL {passes} MACHINE CHECKS PASS ({skips} skipped) - CLEAR TO START "
           f"once the {len(manual)} operator confirmation(s) above are done")
     return RC_PASS
 

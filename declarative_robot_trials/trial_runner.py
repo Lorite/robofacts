@@ -601,7 +601,7 @@ DEFAULT_VOICE_ANNOUNCE: Dict[str, Optional[str]] = {
     "before_launch": None,
     "record_start": "Recording.",
     "record_end": "Recording stopped.",
-    "gate_blocked": "Pre-flight gate says no go. Nothing was recorded.",
+    "gate_blocked": "The gate says no go. Nothing was recorded.",
 }
 
 
@@ -897,7 +897,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # Blocked rather than failed: a destination that cannot be resolved will
         # not resolve for the next trial either, and grinding through a campaign
         # writing bags to the wrong disk is the outcome this refuses to have.
-        print(f"[runner] RECORD DESTINATION UNUSABLE - not recording, not flying")
+        print(f"[runner] RECORD DESTINATION UNUSABLE - not recording, the action does not run")
         return TrialResult(trial, None, "blocked", str(exc), [])
     if scratch_label is None:
         bag_dir = record_dir / bag_name(trial, factors, stamp)
@@ -1153,7 +1153,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 last = getattr(trial_gate, "last_result", None)
                 if last is not None and hasattr(last, "as_metadata"):
                     _ctx["gate"] = last.as_metadata()
-                print(_c("31;1", "[runner] PRE-FLIGHT NO-GO - not recording, not flying"))
+                print(_c("31;1", "[runner] GATE NO-GO - not recording, the action does not run"))
                 announce("gate_blocked")
                 _note_gate_refusal(bag_dir, _ctx.get("gate"), str(exc))
                 return TrialResult(trial, None, "blocked", str(exc), commands)
@@ -1264,7 +1264,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 # non-flight that counts as coverage would satisfy a cell of
                 # the grid forever and silently shrink the campaign.
                 tail = (getattr(completed, "stdout", "") or "").strip().splitlines()
-                detail = f"action returned rc={rc} — the trial did not fly"
+                detail = f"action returned rc={rc} — the action did not complete"
                 if timed_out["yes"]:
                     detail += f" (action_timeout_s={config.action_timeout_s:.0f} expired)"
                 if tail:
@@ -1385,7 +1385,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # as coverage anyway, so there is no cell for a false pass to poison.
     all_verify = list(config.verify_steps) + list(extra_verify or [])
     if scratch_label is not None and all_verify:
-        print("[runner] verify steps SKIPPED - scratch flights answer ad-hoc "
+        print("[runner] verify steps SKIPPED - scratch recordings answer ad-hoc "
               "questions, not campaign cells")
         all_verify = []
     _t_verify = time.monotonic()
@@ -1877,7 +1877,7 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
                        voice_announce=getattr(campaign, "voice_announce", None))
 
     colour = {"blocked": "31;1", "failed": "31", "dry-run": "33"}.get(result.status, "32")
-    print(f"\n[{_c(colour, result.status)}] scratch flight  {result.trial.describe()}")
+    print(f"\n[{_c(colour, result.status)}] scratch recording  {result.trial.describe()}")
     if result.detail:
         print(f"    {result.detail}")
     for cmd in result.commands:
@@ -1888,13 +1888,13 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
     if result.status == "dry-run":
         tally = "SCRATCH dry run - nothing was launched, nothing recorded"
     elif result.status == "blocked":
-        tally = "1 scratch flight BLOCKED by the T-0 gate - nothing recorded, nothing flew"
+        tally = "1 scratch recording BLOCKED by the T-0 gate - nothing recorded, the action did not run"
     elif result.bag_dir is not None:
         where = f"{config.experiment}/{bags_dir.name}/{result.bag_dir.name}"
-        verb = "recorded to" if result.status == "ran" else "FAILED - bag at"
-        tally = f"1 scratch flight {verb} {where} - counts for nothing (never coverage)"
+        verb = "saved to" if result.status == "ran" else "FAILED - bag at"
+        tally = f"1 scratch recording {verb} {where} - counts for nothing (never coverage)"
     else:
-        tally = f"1 scratch flight {result.status} - nothing recorded"
+        tally = f"1 scratch recording {result.status} - nothing recorded"
     print("\n" + _c("31;1" if result.status in ("blocked", "failed") else "32;1", tally))
     return result
 
@@ -1920,7 +1920,7 @@ def build_gate(campaign: "cs.Campaign", experiments_root: Path, *,
     rel = campaign.preflight_checklist or "config/preflight_checklist.json"
     checklist = experiments_root / campaign.experiment / rel
     if not checklist.is_file():
-        print(f"[runner] ⚠ UNGATED: no pre-flight checklist at "
+        print(f"[runner] ⚠ UNGATED: no gate checklist at "
               f"{campaign.experiment}/{rel} — every trial will run without a T-0 gate")
         return None
     gate = PreflightGate(checklist=checklist,
@@ -1974,7 +1974,7 @@ def main(argv=None) -> int:
     ap.add_argument("--execute", action="store_true",
                     help="actually run. Without this the runner only prints commands.")
     ap.add_argument("--scratch", action="store_true",
-                    help="fly ONE ad-hoc diagnostic flight through the campaign's "
+                    help="run ONE ad-hoc diagnostic trial (a scratch recording) through the campaign's "
                          "stack, T-0 gate and operator steps. Records to "
                          "experiments/<name>/bags_scratch/ (never counted as "
                          "coverage), skips the verify steps, and takes the "
@@ -1991,7 +1991,7 @@ def main(argv=None) -> int:
     ap.add_argument("--slim", action="store_true",
                     help="(--scratch only) also leave a slim copy, in "
                          "bags_scratch_slim/. Campaign trials always slim; scratch "
-                         "flights default to not bothering.")
+                         "recordings default to not bothering.")
     ap.add_argument("--no-pause", action="store_true",
                     help="do not wait for Enter between the T-0 gate and the "
                          "recorder (the pause exists so the operator can pose "
@@ -2004,7 +2004,7 @@ def main(argv=None) -> int:
                          "results. Made for the tmux cockpit, whose log pane "
                          "already follows the full run log.")
     ap.add_argument("--gate-override", metavar="REASON",
-                    help="proceed past a FAILED pre-flight gate. The reason and the "
+                    help="proceed past a FAILED T-0 gate. The reason and the "
                          "failed checks are stamped into trial_metadata.json forever "
                          "(#87's escape hatch — visible, never silent).")
     ap.add_argument("--no-voice", action="store_true",
@@ -2014,7 +2014,7 @@ def main(argv=None) -> int:
                          "127.0.0.1:47900. See the framework guide.")
     ap.add_argument("--keep-going", action="store_true",
                     help="continue the campaign after a blocked trial (the default stops, "
-                         "because a stack that fails pre-flight usually fails it again). "
+                         "because a stack that fails the gate usually fails it again). "
                          "Automatic for a campaign that names a `gate` factor.")
     args = ap.parse_args(argv)
     roots.resolve_root_arguments(args)

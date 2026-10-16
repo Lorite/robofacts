@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Pre-flight · {{ experiment }} · Trials{% endblock %}
+{% block title %}Gate · {{ experiment }} · Trials{% endblock %}
 {% block body %}
-<h1>Pre-flight: {{ experiment }} <small>on {{ host }}</small></h1>
+<h1>T-0 gate: {{ experiment }} <small>on {{ host }}</small></h1>
 <div class="callout {{ '' if ok else 'badc' }}" style="font-size:1.15rem">
   <span class="{{ 'ok' if ok else 'bad' }}"><b>{{ '✅ PASS: go' if ok else '❌ FAIL: no-go' }}</b></span>
   {% if not ok %}<span class="small">Fix the first failing check, then run it again.</span>{% endif %}

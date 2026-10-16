@@ -196,8 +196,8 @@ def test_render_separates_todo_from_covered(root):
     for i in range(3):
         add_trial(root, "expA", f"t{i}", dict(GOOD, trial_id=str(i), trajectory="hover"))
     text = cp.render(plan_for(root))
-    assert "TO FLY" in text and "ALREADY COVERED" in text
-    assert "STILL TO FLY 3" in text
+    assert "STILL MISSING (" in text and "COVERED (" in text
+    assert "STILL MISSING 3" in text, "the paper's words: wanted, covered, still missing"
 
 
 def test_render_warns_that_unverified_were_not_counted(root):

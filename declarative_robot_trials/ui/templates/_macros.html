@@ -2,7 +2,16 @@
     so every page says the same thing the same way (#131). -#}
 
 {%- macro status_badge(status, title='') -%}
+{#- The paper's class (usable, unverified, excluded) first; an excluded trial adds its
+    reason, and an attempt that left no trial says so instead of claiming a class. -#}
+{%- set cls = class_of.get(status) -%}
+{%- if cls is none -%}
+<span class="badge b-{{ status }}" title="{{ title or status_meaning.get(status, '') }}">{{ status }} attempt</span>
+{%- elif cls == 'excluded' -%}
+<span class="badge b-excluded" title="{{ status_meaning.get('excluded') }}">excluded</span> <span class="badge b-{{ status }}" title="{{ title or status_meaning.get(status, '') }}">{{ status|replace('-', ' ') }}</span>
+{%- else -%}
 <span class="badge b-{{ status }}" title="{{ title or status_meaning.get(status, '') }}">{{ status }}</span>
+{%- endif -%}
 {%- endmacro -%}
 
 {%- macro gate_badge(gate) -%}
@@ -34,7 +43,7 @@
 <div class="tablewrap tall">
 <table class="sortable" id="{{ table_id }}">
 <thead><tr>
-  <th>started</th><th>trial</th><th>status</th>
+  <th>started</th><th>trial</th><th title="the paper's class: usable, unverified or excluded; or an attempt that left no trial">class</th>
   {% if show_campaign %}<th>campaign</th>{% endif %}
   <th>cell</th>
   <th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th>
@@ -45,12 +54,12 @@
 <tr>
   <td class="nowrap" data-sort="{{ r.started }}">{{ r.started|when }}</td>
   <td class="trial"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a>
-    {%- if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch" title="a scratch flight: a diagnostic, never coverage">scratch</span>{% endif %}</td>
+    {%- if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch" title="a scratch recording: a diagnostic, never coverage">scratch</span>{% endif %}</td>
   <td class="statuscol" data-sort="{{ r.status }}">{{ status_badge(r.status) }}
     {%- if r.reason and r.status != 'usable' %}<div class="small muted why" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:110] }}{{ '…' if r.reason|length > 110 }}</div>{% endif %}</td>
   {% if show_campaign %}<td class="nowrap">
     {%- if r.campaign and r.campaign in data.campaigns -%}<a href="{{ url_for('campaign_view', experiment=experiment, name=r.campaign) }}">{{ r.campaign }}</a>
-    {%- elif r.campaign %}{{ r.campaign }}{% else %}<span class="muted" title="no attempt-ledger line names its campaign (flown before the ledger, 2026-10-01, or by hand)">—</span>{% endif %}
+    {%- elif r.campaign %}{{ r.campaign }}{% else %}<span class="muted" title="no attempt-ledger line names its campaign (run before the ledger, 2026-10-01, or by hand)">—</span>{% endif %}
     {%- set others = r.counts_for|reject('equalto', r.campaign)|list -%}
     {%- if others %}<div class="small muted" title="its cell is also in these campaigns' plans, so it counts as their coverage too">also counts for {{ others|join(', ') }}</div>{% endif %}</td>{% endif %}
   <td class="cellcol">{{ cell_chips(r.values, varying, data.defaults) }}</td>
@@ -89,17 +98,28 @@
 {%- macro filter_bar(table, experiment, data, action, show_campaign=True, table_id='trials') -%}
 <form class="filters autosubmit" method="get" action="{{ action }}">
   {% if show_campaign %}
-  <label>campaign (flew it or counts it)
+  <label>campaign (ran it or counts it)
     <select name="campaign">
       <option value="">all campaigns</option>
       {% for c in data.campaigns %}<option value="{{ c }}" {{ 'selected' if table.f_campaign == c }}>{{ c }}</option>{% endfor %}
     </select></label>
   {% endif %}
-  <label>status
+  <label>class
     <select name="status">
-      <option value="">every status</option>
-      <option value="excluded-any" {{ 'selected' if table.f_status == 'excluded-any' }}>not counted (any reason)</option>
-      {% for s, n in table.counts.items() %}<option value="{{ s }}" {{ 'selected' if table.f_status == s }}>{{ s }} ({{ n }})</option>{% endfor %}
+      <option value="">every class and attempt</option>
+      <optgroup label="class">
+        {% for c in table.classes if c.filter in ('usable', 'unverified', 'excluded') %}<option value="{{ c.filter }}" {{ 'selected' if table.f_status == c.filter }}>{{ c.label }} ({{ c.n }})</option>{% endfor %}
+      </optgroup>
+      {% set reasons = table.counts.items()|selectattr(0, 'in', ['aborted', 'quarantined', 'no-data', 'scratch'])|list %}
+      {% if reasons %}<optgroup label="excluded because">
+        {% for s, n in reasons %}<option value="{{ s }}" {{ 'selected' if table.f_status == s }}>{{ s|replace('-', ' ') }} ({{ n }})</option>{% endfor %}
+      </optgroup>{% endif %}
+      {% set attempts = table.counts.items()|selectattr(0, 'in', ['blocked', 'failed', 'interrupted'])|list %}
+      {% if attempts %}<optgroup label="attempts that left no trial">
+        <option value="attempt" {{ 'selected' if table.f_status == 'attempt' }}>every attempt</option>
+        {% for s, n in attempts %}<option value="{{ s }}" {{ 'selected' if table.f_status == s }}>{{ s }} ({{ n }})</option>{% endfor %}
+      </optgroup>{% endif %}
+      <option value="excluded-any" {{ 'selected' if table.f_status == 'excluded-any' }}>everything not counted</option>
     </select></label>
   {% if table.levels|length > 6 %}
   <details class="wherebox" {{ 'open' if table.where }}>
@@ -114,8 +134,8 @@
 </form>
 <div class="statusbar">
   <span class="muted">{{ table.rows|length }} of {{ table.all_count }} shown{% if table.f_status or table.f_cell or (table.f_campaign and show_campaign) %} (filtered){% endif %} ·</span>
-  {% for s, n in table.counts.items() %}
-    <a class="badge b-{{ s }}" href="?{% if table.f_campaign and show_campaign %}campaign={{ table.f_campaign }}&{% endif %}status={{ s }}" title="{{ status_meaning.get(s, '') }}">{{ n }} {{ s }}</a>
+  {% for c in table.classes %}
+    <a class="badge b-{{ c.css }}" href="?{% if table.f_campaign and show_campaign %}campaign={{ table.f_campaign }}&{% endif %}status={{ c.filter }}" title="{{ c.title }}">{{ c.n }} {{ c.label }}</a>
   {% endfor %}
   <span class="muted small" id="{{ table_id }}-count"></span>
 </div>

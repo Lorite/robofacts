@@ -83,7 +83,7 @@ def _console_confirm(checklist: Sequence[str]) -> bool:
 def show_preflight_dialog(
     checklist: Optional[Sequence[str]] = None,
     checklist_path: Optional[Path] = None,
-    title: str = "Preflight Safety Checklist",
+    title: str = "Gate checklist",
 ) -> bool:
     """Show a simple checklist dialog. Return True if user confirms.
 
@@ -122,7 +122,7 @@ def show_preflight_dialog(
         lbl = ttk.Label(
             frm,
             text=(
-                "Please confirm the preflight checklist before starting real-hardware "
+                "Please confirm the gate checklist before starting real-hardware "
                 "operations:"),
             wraplength=520,
         )

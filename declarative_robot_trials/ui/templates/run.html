@@ -8,7 +8,7 @@
 <div class="cards">
   <div class="card"><div class="k">state</div><div class="v" id="state">{{ run.state }}</div></div>
   <div class="card"><div class="k">trials</div><div class="v" id="count">{{ run.results|length }} / {{ run.wanted }}</div></div>
-  <div class="card"><div class="k">kind</div><div class="v" style="font-size:1rem">{{ 'EXECUTE: flies and records' if run.executed else 'dry run: nothing launches' }}</div></div>
+  <div class="card"><div class="k">kind</div><div class="v" style="font-size:1rem">{{ 'EXECUTE: runs and records' if run.executed else 'dry run: nothing launches' }}</div></div>
 </div>
 <p id="phase" class="small"></p>
 <p id="tally" style="font-weight:700"></p>
@@ -18,7 +18,7 @@
 {% if run.state in ('running', 'aborting') %}
 <form method="post" action="{{ url_for('abort_run', run_id=run.run_id) }}" id="abortform">
   <button class="btn-soft" type="submit">Abort after the current trial</button>
-  <span class="small muted">Aborting never interrupts a trial in flight: use E-STOP for that.</span>
+  <span class="small muted">Aborting never interrupts a running trial: use E-STOP for that.</span>
 </form>
 {% endif %}
 
@@ -36,7 +36,7 @@
 
 {% if run.live_steps %}
 <div class="panel livep">
-  <b>⏱ DO THIS WHILE IT FLIES</b>: the runner cannot, and a missed live step means reflying.
+  <b>⏱ DO THIS WHILE IT RUNS</b>: the runner cannot, and a missed live step means running the trial again.
   <ol class="small" style="padding-left:1.2rem">
     {% for step in run.live_steps %}{{ step_cell(step, 'live', loop.index0, run.experiment, run.campaign_file) }}{% endfor %}
   </ol>
@@ -120,8 +120,8 @@ async function poll() {
   }
   const icons = {ran: '✅', 'dry-run': '🔍', blocked: '🚫', failed: '❌', interrupted: '⏹'};
   const meaning = {
-    ran: 'flew and recorded', 'dry-run': 'preview only, nothing launched',
-    blocked: 'pre-flight said no-go: nothing recorded, nothing flew',
+    ran: 'ran and recorded', 'dry-run': 'preview only, nothing launched',
+    blocked: 'the gate said NO-GO: nothing recorded, the action did not run',
     failed: 'started but did not produce a usable trial', interrupted: 'stopped before it finished',
   };
   document.getElementById('state').textContent = d.state;
@@ -135,13 +135,13 @@ async function poll() {
       : 'paused AFTER the T-0 gate: pose the rig, then confirm; nothing is recording yet.';
   } else if (d.state === 'running') {
     phase.textContent = d.executed
-      ? `trial ${d.done + 1} of ${d.wanted} in progress: kill stale rig → launch → settle → PRE-FLIGHT GATE → record → fly → stop recorder. Takes a few minutes; this page updates itself.`
+      ? `trial ${d.done + 1} of ${d.wanted} in progress: kill stale rig → launch → settle → T-0 GATE → record → action → stop recorder. Takes a few minutes; this page updates itself.`
       : 'building the plan…';
   } else if (d.state === 'aborting') {
-    phase.textContent = 'finishing the trial in flight, then stopping (E-STOP is the only thing that interrupts a flight).';
+    phase.textContent = 'finishing the running trial, then stopping (E-STOP is the only thing that interrupts a trial).';
   } else {
     phase.textContent = (d.state === 'finished' && d.wanted === 0)
-      ? 'Nothing to run: the campaign is already covered. To fly more, raise its repetitions, or fly a scratch flight from the command line.'
+      ? 'Nothing to run: the campaign is already covered. To run more, raise its repetitions, or make a scratch recording from the command line.'
       : '';
     const a = document.getElementById('abortform'); if (a) a.remove();
   }
@@ -157,8 +157,8 @@ async function poll() {
       document.getElementById('waitmsg').textContent = 'do the 👤 manual steps below, then confirm. Nothing has launched yet; the T-0 gate runs right after this.';
       document.getElementById('waitbtn').textContent = '✔ Steps done: launch the trial';
     } else if (d.awaiting_kind === 'pose') {
-      document.getElementById('waitmsg').textContent = 'T-0 gate PASSED: pose the rig now (stand Spot, set the gripper). Recording and the flight start on your confirm.';
-      document.getElementById('waitbtn').textContent = '✔ Posed: record and fly';
+      document.getElementById('waitmsg').textContent = 'T-0 gate PASSED: pose the rig now (stand Spot, set the gripper). Recording and the action start on your confirm.';
+      document.getElementById('waitbtn').textContent = '✔ Posed: record and run';
     }
   }
   // The CLI's own closing tally (same function server-side), successes first.
@@ -177,7 +177,7 @@ async function poll() {
       const bagline = !t.bag ? '' : (recorded
         ? `<p class="small">bag <code>${esc(t.bag)}</code>: ${page}${fox}</p>`
         : `<p class="small muted">would record <code>${esc(t.bag)}</code></p>`);
-      // The reason a trial did not fly is the most important thing here: first, in full.
+      // The reason a trial did not run is the most important thing here: first, in full.
       const detail = t.detail ? `<pre class="${t.status === 'dry-run' ? 'muted' : 'bad'}">${esc(t.detail)}</pre>` : '';
       return `<div class="panel"><h3 class="${cls}">${icons[t.status] || ''} ${esc(t.status)} <small>${meaning[t.status] || ''}</small></h3>`
            + detail + `<p class="small">${esc(t.describe)}</p>`

@@ -827,7 +827,7 @@ def test_scratch_skips_the_verify_steps(root, pieces):
     assert result.status == "ran", result.detail
     flat = [" ".join(c) for c in fake.foreground]
     assert not any("verify.py" in c or "campaign_verify.py" in c for c in flat), \
-        "scratch flights answer ad-hoc questions; the campaign's verify contract does not apply"
+        "scratch recordings answer ad-hoc questions; the campaign's verify contract does not apply"
 
 
 def test_consecutive_scratch_flights_never_collide(root, pieces):
@@ -882,7 +882,7 @@ def test_scratch_tally_says_scratch_and_counts_for_nothing(root, pieces, capsys)
     tr.run_scratch(_scratch_campaign(root), config, root / "expA" / "bags_scratch",
                    dry_run=False, hooks=FakeHooks().hooks(), label="fixcheck")
     out = capsys.readouterr().out
-    assert "1 scratch flight recorded to" in out
+    assert "1 scratch recording saved to" in out
     assert "bags_scratch" in out
     assert "counts for nothing" in out
 

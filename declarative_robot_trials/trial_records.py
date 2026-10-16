@@ -2,12 +2,12 @@
 """Every trial of an experiment as one record: the join behind ``trials records`` and the web UI (#131).
 
 The coverage index (``trial_index``) answers "which bags count". The operator who
-just flew a trial and the analyst who reads a cohort also ask "where is everything
+just ran a trial and the analyst who reads a cohort also ask "where is everything
 about this trial", and the answer is spread over six places on disk:
 
 * the bag and its ``trial_metadata.json`` (``bags/``, ``bags_issues/``),
 * the slim copy to replay (``bags_slim/``, ``bags_issues_slim/``),
-* the campaign that flew it and the gate's verdict (``runs/attempts.jsonl``, the
+* the campaign that ran it and the gate's verdict (``runs/attempts.jsonl``, the
   attempt ledger, and ``runs/preflight_gate.jsonl``),
 * the run log with the verify steps' lines (``runs/<bag>.log``),
 * the analyses that included it (``results/*/analysis_metadata.json``, whose
@@ -18,10 +18,10 @@ This module joins them once. ``trials records <exp>`` prints the result, and the
 web UI renders the same records, so the UI never computes an answer the command
 line cannot give (the rule of the whole package).
 
-Scratch flights (``bags_scratch/``) are records too, with ``kind == "scratch"``:
-listed with their slim copies so a diagnostic flight can be replayed, and never
-coverage. Blocked attempts (a NO-GO gate records no bag) are records with status
-``blocked``, so "what happened to the trial I just tried to fly" has an answer.
+Scratch recordings (``bags_scratch/``) are records too, with ``kind == "scratch"``
+and the class excluded: listed with their slim copies so a diagnostic trial can be
+replayed, and never coverage. Blocked attempts (a NO-GO gate records no bag) are records with status
+``blocked``, so "what happened to the trial I just tried to run" has an answer.
 
     trials records <exp>                                  every trial, newest first
     trials records <exp> --campaign <c> --status usable   one campaign's usable trials
@@ -42,25 +42,35 @@ from . import roots
 from . import trial_index as ti
 
 
-#: Every status a record can have, in the order filters list them. The first
-#: six are the coverage index's own (``Trial.status``) with ``excluded`` split
-#: by its cause; blocked, failed and interrupted come from the attempt ledger for
-#: attempts that left no trial behind; scratch is a finished scratch flight.
-STATUSES = ("usable", "unverified", "aborted", "quarantined", "no-data", "excluded",
-            "blocked", "failed", "interrupted", "scratch")
+#: The three classes of a trial, the words of the SAC 2027 paper (Equation 4 there,
+#: ``trial_index.Trial.status`` here): only a usable trial counts as coverage.
+CLASSES = ("usable", "unverified", "excluded")
 
-#: What each status means, one sentence each, shared by the CLI legend and the UI.
+#: Every status a record can have, in the order filters list them: the class of a
+#: usable or unverified trial; the reason of an excluded one (the paper's aborted,
+#: quarantined or no data, plus scratch for a scratch recording); and the outcome
+#: of an *attempt* that left no trial behind (blocked by the gate, failed before
+#: its metadata, interrupted), from the attempt ledger.
+STATUSES = ("usable", "unverified", "aborted", "quarantined", "no-data", "scratch",
+            "blocked", "failed", "interrupted")
+
+#: The class each status belongs to; None for an attempt that left no trial.
+CLASS_OF = {"usable": "usable", "unverified": "unverified", "aborted": "excluded",
+            "quarantined": "excluded", "no-data": "excluded", "scratch": "excluded",
+            "blocked": None, "failed": None, "interrupted": None}
+
+#: What each class and status means, one sentence each, shared by the CLI and the UI.
 STATUS_MEANING = {
     "usable": "counts as coverage: the metadata proves the cell",
-    "unverified": "a bag exists but its metadata cannot prove the cell",
-    "aborted": "the trial did not finish (aborted: true), never counted",
-    "quarantined": "moved to bags_issues by hand, never counted",
-    "no-data": "the directory holds no .mcap or .db3, never counted",
-    "excluded": "excluded for another reason (for example a scratch bag moved into bags/)",
-    "blocked": "the T-0 gate said NO-GO: nothing was recorded or flown",
-    "failed": "the attempt failed before a trial_metadata.json was written",
-    "interrupted": "the operator interrupted the attempt before it finished",
-    "scratch": "a scratch flight (--scratch): a diagnostic, recorded and replayable, never coverage",
+    "unverified": "a bag exists but its metadata cannot prove the cell (breaks the contract)",
+    "excluded": "never counts: aborted, quarantined, no data, or a scratch recording",
+    "aborted": "excluded: the trial did not finish (aborted: true)",
+    "quarantined": "excluded: moved to bags_issues by hand",
+    "no-data": "excluded: the directory holds no .mcap or .db3",
+    "scratch": "excluded: a scratch recording (--scratch), a diagnostic, replayable, never coverage",
+    "blocked": "an attempt the gate refused (NO-GO): no trial, nothing recorded",
+    "failed": "an attempt that failed before a trial_metadata.json was written: no trial",
+    "interrupted": "an attempt the operator interrupted before it finished: no trial",
 }
 
 RECORD_DIRS = ("bags", "bags_issues", "bags_slim", "bags_issues_slim")
@@ -79,7 +89,7 @@ class TrialRecord:
     status: str = "usable"
     reason: str = ""
     started: str = ""                       # ISO time, from the ledger or the name
-    campaign: Optional[str] = None          # the campaign that flew it (ledger)
+    campaign: Optional[str] = None          # the campaign that ran it (ledger)
     counts_for: List[str] = field(default_factory=list)   # campaigns whose plan counts it
     values: Dict[str, str] = field(default_factory=dict)  # declared factor values
     repetition: Optional[int] = None
@@ -102,6 +112,11 @@ class TrialRecord:
     def counts(self) -> bool:
         return self.status == "usable" and self.kind == "campaign"
 
+    @property
+    def trial_class(self) -> Optional[str]:
+        """usable, unverified or excluded; None for an attempt that left no trial."""
+        return CLASS_OF.get(self.status)
+
     def cell(self, factors: Optional[Iterable[str]] = None) -> str:
         """``k=v`` pairs of the factor values, the CLI's ``--where`` spelling."""
         keys = list(factors) if factors is not None else sorted(self.values)
@@ -119,7 +134,8 @@ class TrialRecord:
             return str(p)
         return {
             "experiment": self.experiment, "name": self.name, "kind": self.kind,
-            "status": self.status, "reason": self.reason, "started": self.started,
+            "status": self.status, "class": self.trial_class, "reason": self.reason,
+            "started": self.started,
             "campaign": self.campaign, "counts_for": list(self.counts_for),
             "values": dict(self.values), "repetition": self.repetition,
             "bag_dir": rel(self.bag_dir), "slim_dir": rel(self.slim_dir),
@@ -215,7 +231,7 @@ def verify_report(run_log: Optional[Path]) -> List[Dict[str, Any]]:
 
     The runner prints one such line per step (``trial_runner._run_trial``) and
     writes no other record of them, so the run log is the report. An empty list
-    means no step ran (none declared, a scratch flight, or no run log).
+    means no step ran (none declared, a scratch recording, or no run log).
     """
     if run_log is None or not run_log.is_file():
         return []
@@ -282,7 +298,7 @@ def _associate_results(folders: List[Dict[str, Any]], names: Iterable[str]
     Three ways, most explicit first: the folder's ``analysis_metadata.json``
     lists the bag; the folder has a subfolder named after the bag (a per-bag
     analysis); or the folder is named after the bag (``<bag>_<what>``, the shape
-    of a video made by hand for one scratch flight).
+    of a video made by hand for one scratch recording).
     """
     known = set(names)
     out: Dict[str, List[Dict[str, Any]]] = {}
@@ -364,7 +380,7 @@ def _status_of(trial: ti.Trial) -> Tuple[str, str]:
         return "quarantined", "in bags_issues: excluded from coverage by hand, not deleted"
     if not trial.has_bag_data:
         return "no-data", "no .mcap or .db3 in the bag directory: nothing to analyse"
-    return "excluded", "carries scratch: true, so it never counts"
+    return "scratch", "carries scratch: true, so it never counts"
 
 
 def _values(metadata: Dict[str, Any], factors: List[str]) -> Dict[str, str]:
@@ -485,7 +501,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
 def _scratch_records(root: Path, experiment: str, factors: List[str],
                      by_label: Dict[str, Dict[str, Any]], gates: Dict[str, Dict[str, Any]],
                      seen: set) -> List[TrialRecord]:
-    """Scratch flights with their slim copies: replayable, never coverage."""
+    """Scratch recordings with their slim copies: replayable, never coverage."""
     exp_dir = root / experiment
     names: Dict[str, Dict[str, Optional[Path]]] = {}
     for dir_name in SCRATCH_DIRS:
@@ -534,15 +550,31 @@ def _scratch_records(root: Path, experiment: str, factors: List[str],
     return out
 
 
+#: What ``--status`` accepts beyond the statuses themselves.
+STATUS_FILTERS = STATUSES + ("excluded", "attempt", "excluded-any")
+
+
+def _status_matches(r: "TrialRecord", status: str) -> bool:
+    if status == "excluded-any":
+        return r.status not in ("usable", "unverified")
+    if status == "attempt":
+        return r.trial_class is None
+    if status in CLASSES:
+        return r.trial_class == status
+    return r.status == status
+
+
 def filter_records(records: Iterable[TrialRecord], *, campaign: Optional[str] = None,
                    status: Optional[str] = None, where: Optional[Dict[str, str]] = None,
                    kind: Optional[str] = None) -> List[TrialRecord]:
     """The records that match every given filter (the CLI flags and the UI's filter bar).
 
-    ``campaign`` matches the campaign that flew a trial OR a campaign whose plan
-    counts it, because a trial flown by an older campaign still covers a newer
-    one's cell. ``status`` may be ``excluded-any`` for every status that never
-    counts. ``where`` is ``analysis_runner``'s spelling: factor=value pairs.
+    ``campaign`` matches the campaign that ran a trial OR a campaign whose plan
+    counts it, because a trial run by an older campaign still covers a newer
+    one's cell. ``status`` is one of STATUSES, or a class (``excluded`` is every
+    excluded trial, whatever the reason), or ``attempt`` (every attempt that left
+    no trial), or ``excluded-any`` (everything that does not count, attempts
+    included). ``where`` is ``analysis_runner``'s spelling: factor=value pairs.
     """
     out = []
     for r in records:
@@ -550,12 +582,8 @@ def filter_records(records: Iterable[TrialRecord], *, campaign: Optional[str] = 
             continue
         if campaign and r.campaign != campaign and campaign not in r.counts_for:
             continue
-        if status:
-            if status == "excluded-any":
-                if r.status in ("usable", "unverified"):
-                    continue
-            elif r.status != status:
-                continue
+        if status and not _status_matches(r, status):
+            continue
         if where and any(r.values.get(k) != str(v) for k, v in where.items()):
             continue
         out.append(r)
@@ -605,14 +633,41 @@ def _load_campaigns(root: Path, experiment: str) -> Dict[str, Any]:
     return out
 
 
+def class_label(r: "TrialRecord") -> str:
+    """``usable``, ``excluded (aborted)``, or ``attempt: blocked``: the paper's words."""
+    if r.trial_class is None:
+        return f"attempt: {r.status}"
+    if r.trial_class == "excluded":
+        return f"excluded ({r.status.replace('-', ' ')})"
+    return r.trial_class
+
+
+def summary_line(records: List["TrialRecord"]) -> str:
+    """``32 record(s): 24 usable, 5 excluded (2 aborted, 3 scratch), 3 attempt(s) ...``"""
+    by_status: Dict[str, int] = {}
+    for r in records:
+        by_status[r.status] = by_status.get(r.status, 0) + 1
+    parts = [f"{by_status[c]} {c}" for c in ("usable", "unverified") if c in by_status]
+    excluded = [(s, by_status[s]) for s in STATUSES if CLASS_OF[s] == "excluded" and s in by_status]
+    if excluded:
+        parts.append(f"{sum(n for _, n in excluded)} excluded ("
+                     + ", ".join(f"{n} {s.replace('-', ' ')}" for s, n in excluded) + ")")
+    attempts = [(s, by_status[s]) for s in STATUSES if CLASS_OF[s] is None and s in by_status]
+    if attempts:
+        parts.append(f"{sum(n for _, n in attempts)} attempt(s) without a trial ("
+                     + ", ".join(f"{n} {s}" for s, n in attempts) + ")")
+    return f"{len(records)} record(s): " + ", ".join(parts)
+
+
 def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> str:
     if not records:
         return "no trials match"
+    width = max(len(class_label(r)) for r in records)
     lines = []
     for r in records:
-        bits = [r.started.replace("T", " ") or "-", f"{r.status:<11}", r.name]
-        if r.kind == "scratch":
-            bits.append("[scratch, not coverage]")
+        bits = [r.started.replace("T", " ") or "-", f"{class_label(r):<{width}}", r.name]
+        if r.kind == "scratch" and r.status != "scratch":
+            bits.append("[scratch recording, never coverage]")
         if r.campaign:
             bits.append(f"campaign={r.campaign}")
         if r.slim_name:
@@ -626,27 +681,27 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
         lines.append("  ".join(bits))
         if r.reason and r.status != "usable":
             lines.append(f"      why: {r.reason.splitlines()[0][:160]}")
-    counts: Dict[str, int] = {}
-    for r in records:
-        counts[r.status] = counts.get(r.status, 0) + 1
-    lines.append(f"{len(records)} record(s): " + ", ".join(
-        f"{counts[s]} {s}" for s in STATUSES if s in counts))
+    lines.append(summary_line(records))
     return "\n".join(lines)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="trials records",
-        description="every trial of an experiment, joined with its campaign, gate verdict, "
-                    "slim bag, run log, analyses and videos (newest first)")
+        description="every trial of an experiment, joined with its campaign, class, gate "
+                    "verdict, slim bag, run log, analyses and videos (newest first)")
     roots.add_root_arguments(ap)
     ap.add_argument("experiment")
     ap.add_argument("--campaign", help="flown by, or counted by, this campaign")
-    ap.add_argument("--status", choices=STATUSES + ("excluded-any",))
+    ap.add_argument("--status", choices=STATUS_FILTERS,
+                    help="a class (usable, unverified, excluded), the reason of an excluded "
+                         "trial (aborted, quarantined, no-data, scratch), an attempt outcome "
+                         "(blocked, failed, interrupted), attempt for every attempt that left "
+                         "no trial, or excluded-any for everything that does not count")
     ap.add_argument("--where", action="append", metavar="FACTOR=VALUE",
                     help="one cell (repeatable), the spelling of `trials analyze --where`")
-    ap.add_argument("--no-scratch", action="store_true", help="leave out scratch flights")
-    ap.add_argument("--scratch-only", action="store_true", help="only scratch flights")
+    ap.add_argument("--no-scratch", action="store_true", help="leave out scratch recordings")
+    ap.add_argument("--scratch-only", action="store_true", help="only scratch recordings")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the table")
     args = ap.parse_args(argv)
     roots.resolve_root_arguments(args)

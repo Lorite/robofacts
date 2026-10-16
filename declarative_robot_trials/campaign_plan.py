@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Campaign expander: what still needs flying (#96 Phase 3).
+"""The planner: which cells of a campaign are still missing (#96 Phase 3).
 
 Joins the Phase 2 campaign (what we *want*) to the Phase 1 index (what we
 *have*) and answers the operational question directly: **you already have 6 of
-these, fly the other 12.**
+these, run the other 12.** The words are the SAC 2027 paper's (2026-10-16): a
+campaign is *wanted*, *covered* and *still missing* per cell.
 
 The join
 --------
@@ -296,8 +297,8 @@ def render(plan: Plan, limit: int = 40) -> str:
     if campaign.describe:
         lines.append(f"  {campaign.describe}")
     lines.append("")
-    lines.append(f"  wanted {plan.wanted} · already covered {plan.covered} · "
-                 f"STILL TO FLY {plan.needed}")
+    lines.append(f"  wanted {plan.wanted} · covered {plan.covered} · "
+                 f"STILL MISSING {plan.needed}")
     if plan.include_unverified:
         lines.append("  (counting unverified trials as coverage — metadata cannot prove them)")
     else:
@@ -320,7 +321,7 @@ def render(plan: Plan, limit: int = 40) -> str:
 
     if todo:
         lines.append("")
-        lines.append(f"  TO FLY ({len(todo)} combination(s)):")
+        lines.append(f"  STILL MISSING ({len(todo)} cell(s)):")
         for cell in todo[:limit]:
             n = cell.needed(plan.include_unverified)
             have = f"have {cell.usable}u/{cell.unverified}un" if (cell.usable or cell.unverified) else "none yet"
@@ -329,7 +330,7 @@ def render(plan: Plan, limit: int = 40) -> str:
             lines.append(f"    … and {len(todo) - limit} more")
     if done:
         lines.append("")
-        lines.append(f"  ALREADY COVERED ({len(done)} combination(s)):")
+        lines.append(f"  COVERED ({len(done)} cell(s)):")
         for cell in done[:limit]:
             lines.append(f"    ok   {cell.describe()}   [have {cell.usable} usable]")
         if len(done) > limit:

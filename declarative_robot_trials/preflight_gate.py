@@ -302,7 +302,7 @@ class PreflightGate:
                                 checklist=str(self.checklist), mode=mode,
                                 duration_s=0.0, n_checks=0,
                                 factor_checks=self._factor_items([]))
-            print(f"[preflight]{label} gate DISABLED — recorded in trial metadata")
+            print(f"[gate]{label} gate DISABLED — recorded in trial metadata")
             self._last_result = result
             self._log(trial_label, values, result, [])
             return result
@@ -311,7 +311,7 @@ class PreflightGate:
         # force a fresh run.
         reuse_age = None if self.extra_entries else self._fresh_pass_age()
         if reuse_age is not None:
-            print(f"[preflight]{label} reusing PASS from {reuse_age:.0f}s ago "
+            print(f"[gate]{label} reusing PASS from {reuse_age:.0f}s ago "
                   f"(max_age_s={self.max_age_s:.0f})")
             result = GateResult(status="pass", allowed=True, checked_at=now_iso,
                                 reused_age_s=round(reuse_age, 1),
@@ -322,7 +322,7 @@ class PreflightGate:
             return result
 
         where = "" if self.target is None else f" on {self.ran_on()}"
-        print(f"[preflight]{label} running gate{where}…")
+        print(f"[gate]{label} running gate{where}…")
         checklist, scratch = self._materialize()
         try:
             rc, output = self._run(values, checklist)
@@ -342,7 +342,7 @@ class PreflightGate:
                                 output_tail=tail, checklist=str(self.checklist),
                                 mode=mode, duration_s=duration, n_checks=len(items),
                                 factor_checks=factor_items, stop_latch=latch)
-            print(f"[preflight]{label} PASS — clear to run")
+            print(f"[gate]{label} PASS — clear to run")
             self._last_result = result
             self._log(trial_label, values, result, items)
             return result
@@ -367,7 +367,7 @@ class PreflightGate:
         self._last_result = result
         self._log(trial_label, values, result, items)
         raise PreflightBlocked(
-            f"pre-flight gate {status.upper()}{label}: "
+            f"T-0 gate {status.upper()}{label}: "
             + (", ".join(failed) if failed else "see output above")
             + ". Fix it, or set the gate's override flag with a reason to proceed anyway."
         )
@@ -490,13 +490,13 @@ class PreflightGate:
                          or socket.gethostname()))
             append_gate_log(Path(self.log_path), record)
         except Exception as exc:  # noqa: BLE001 - a log line never outranks a trial
-            print(f"[preflight] gate log not written ({exc}) - continuing")
+            print(f"[gate] gate log not written ({exc}) - continuing")
 
     @staticmethod
     def _print_override_banner(label: str, failed: List[str], reason: str) -> None:
         bar = "!" * 78
         print(f"\n{bar}")
-        print(f"!! PRE-FLIGHT GATE FAILED — PROCEEDING ANYWAY BY OPERATOR OVERRIDE{label}")
+        print(f"!! T-0 GATE FAILED — PROCEEDING ANYWAY BY OPERATOR OVERRIDE{label}")
         for item in failed or ["(see gate output)"]:
             print(f"!!   FAILED: {item}")
         print(f"!! Reason: {reason}")

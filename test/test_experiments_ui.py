@@ -184,7 +184,7 @@ def test_index_lists_experiments_and_campaigns(client):
 def test_campaign_view_shows_the_coverage_and_the_shortfall(client):
     body = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert '<div class="k">wanted</div><div class="v">4</div>' in body
-    assert '<div class="k">still to fly</div><div class="v">4</div>' in body
+    assert '<div class="k">still missing</div><div class="v">4</div>' in body
 
 
 def test_campaign_view_marks_non_defaults(client):
@@ -1010,3 +1010,14 @@ def test_every_page_has_the_theme_switch_and_both_themes(client):
     css = client.get("/static/app.css").get_data(as_text=True)
     assert ':root[data-theme="dark"]' in css and ':root:not([data-theme="light"])' in css
     assert "--solid-bad" in css, "buttons keep white text on a solid fill in both themes"
+
+
+def test_the_ui_speaks_the_papers_words(client, root):
+    """Class, not status; still missing, not still to fly; run, not fly (2026-10-16)."""
+    _write_bag(root, "t_abort", _meta("t_abort", aborted=True))
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert 'title="the paper\'s class' in body and "b-excluded" in body and "b-aborted" in body
+    assert "still missing" in body and "still to fly" not in body
+    campaign = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert "EXECUTE: run the trial(s)" in campaign and "fly the trial" not in campaign
+    assert "run the action" in campaign

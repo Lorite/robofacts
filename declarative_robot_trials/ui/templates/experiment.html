@@ -10,12 +10,12 @@
   <a href="{{ url_for('files', experiment=experiment) }}">Files</a>
 </nav>
 
-<h2 id="campaigns">Campaigns <small>each one a plan: what it wants, what exists, what is still to fly</small></h2>
+<h2 id="campaigns">Campaigns <small>each one a plan: what it wants, what is covered, what is still missing</small></h2>
 {% if campaigns %}
 <div class="tablewrap">
 <table class="sortable">
-<thead><tr><th>campaign</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still to fly</th>
-  <th class="num" title="attempts the T-0 gate refused (attempt ledger)">blocked</th><th>last flown</th><th>what it is</th></tr></thead>
+<thead><tr><th>campaign</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still missing</th>
+  <th class="num" title="attempts the T-0 gate refused (attempt ledger)">blocked</th><th>last run</th><th>what it is</th></tr></thead>
 <tbody>
 {% for c in campaigns %}
 {% if c.error %}
@@ -49,14 +49,14 @@
 {% endif %}
 {% else %}
 <div class="empty"><b>No trial recorded yet.</b> Open a campaign above and start with a dry run, or from a terminal:
-  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml</code> (add <code>--execute</code> to fly).</div>
+  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml</code> (add <code>--execute</code> to run it).</div>
 {% endif %}
 
-<h2 id="scratch">Scratch flights <small>diagnostics flown with <code>--scratch</code>: replayable, never coverage</small></h2>
+<h2 id="scratch">Scratch recordings <small>diagnostic trials run with <code>--scratch</code>: replayable, never coverage</small></h2>
 {% if scratch %}
 <div class="tablewrap">
 <table class="sortable">
-<thead><tr><th>started</th><th>flight</th><th>status</th><th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th><th data-nosort>files</th></tr></thead>
+<thead><tr><th>started</th><th>recording</th><th>class</th><th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th><th data-nosort>files</th></tr></thead>
 <tbody>
 {% for r in scratch %}
 <tr>
@@ -71,9 +71,9 @@
 </tr>
 {% endfor %}
 </tbody></table></div>
-<p class="small muted">A scratch flight lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what Foxglove opens.</p>
+<p class="small muted">A scratch recording lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what Foxglove opens.</p>
 {% else %}
-<div class="empty">No scratch flight. Fly one with the campaign's stack and gate, outside coverage:
-  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml --scratch --label &lt;what&gt; --execute</code> (scratch flights are CLI-only).</div>
+<div class="empty">No scratch recording. Make one with the campaign's stack and gate, outside coverage:
+  <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml --scratch --label &lt;what&gt; --execute</code> (scratch recordings are CLI-only).</div>
 {% endif %}
 {% endblock %}

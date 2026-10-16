@@ -162,7 +162,7 @@ def test_unknown_type_in_a_schema_raises(tmp_path):
 
 
 def test_missing_core_schema_raises(tmp_path):
-    with pytest.raises(tms.SchemaError, match="core schema not found"):
+    with pytest.raises(tms.SchemaError, match="core metadata contract not found"):
         tms.load_schema(experiments_root=tmp_path)
 
 
@@ -173,7 +173,7 @@ def test_annotate_records_problems_into_the_metadata(root, capsys):
     meta = {"trial_id": "t1"}
     problems = tms.annotate(meta, experiments_root=root)
     assert problems and meta["_schema_problems"] == problems
-    assert "schema problem" in capsys.readouterr().out
+    assert "contract problem" in capsys.readouterr().out
 
 
 def test_annotate_clears_the_flag_when_fixed(root):

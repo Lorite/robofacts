@@ -197,7 +197,7 @@ def test_all_pass_is_clear_to_arm(tmp_path: Path, monkeypatch, capsys):
     checklist.write_text(json.dumps({"checklist": [{"text": "a", "check": "good"}]}))
 
     assert rp.main(["--checklist", str(checklist), "--no-daemon-bounce"]) == rp.RC_PASS
-    assert "CLEAR TO ARM" in capsys.readouterr().out
+    assert "CLEAR TO START" in capsys.readouterr().out
 
 
 def test_schema_error_exits_usage_not_pass(tmp_path: Path):

@@ -1,6 +1,6 @@
 # declarative_robot_trials
 
-Declarative experiment design for ROS 2 trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists what is still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the bag and verifies it, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
+Declarative experiment design for ROS 2 trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists the cells still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the bag and verifies it, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
 
 The package is a plain `ament_python` ROS 2 package (Humble) that also installs with `pip`.
 
@@ -82,6 +82,31 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required) |
 | `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
+
+## The words
+
+The package uses the terms of the design of experiments, as its paper does. Where a file or a key carries an older name, the table says so; the names of files and keys stay, because projects depend on them.
+
+| Term | Meaning | In the package |
+|------|---------|----------------|
+| experiment | a physical setup with its software | a folder `experiments/<name>/` |
+| factor, level, default | a variable the experiment controls, its values, the value a campaign does not set | `config/factors.yaml` |
+| realization | how a level is applied: the computer, a launch argument, a recording profile, an internal value or an operator step | `maps_to: {kind: host \| launch_arg \| record_profile \| internal \| operator}` |
+| metadata contract | the fields every trial must record | `common/config/trial_metadata_core.yaml` plus `config/trial_metadata_schema.yaml` |
+| coverage axes | the contract fields the coverage index groups by | fields with `factor: true` |
+| cell | one combination of levels (a condition) | a row of `trials plan` and of the campaign page |
+| campaign | which factors to sweep, which to fix, how many repetitions | `campaigns/<name>.yaml` |
+| trial | one run of one cell: a recording (a ROS 2 bag) and a metadata record | `bags/<trial>/` with `trial_metadata.json` |
+| attempt | a started trial, whether the gate refused it or not | a line of `runs/attempts.jsonl`, the ledger |
+| gate | machine checks and operator confirmations, run seconds before every trial (the T-0 gate) | `config/preflight_checklist.json`, `scripts/preflight.sh`, `trials gate`; every verdict in `runs/preflight_gate.jsonl`, the gate log |
+| verify steps | checks on the recording after the trial; a failure aborts it | `verify_steps:` in `runner.yaml` or in a campaign |
+| class | usable (counts), unverified (breaks the contract) or excluded (aborted, quarantined, no data) | `Trial.status` in `trial_index`; `trials records` adds the reason of an excluded trial and the outcome of an attempt that left no trial (blocked, failed, interrupted) |
+| coverage, coverage index | the usable trials per cell | `trials index`; `trials plan` prints wanted, covered and still missing per campaign |
+| silent error | a counted trial whose realized condition differs from the declared one; possible only in a factor no check covers | what the linter's rule L13 and the factor `check:` exist to prevent |
+| domain | simulation or hardware, recorded per trial | `domain` in `trial_metadata.json`, from `simulation:` in `runner.yaml` |
+| reduced bag | the recording without images, a few MB, copied back from the rig | the slim copy, `bags_slim/<trial>_slim/` |
+| scratch recording | a diagnostic trial through the campaign's stack and gate, never coverage | `trials run … --scratch`, `bags_scratch/` |
+| named analysis | a declared computation over a cohort of usable trials, with the exact bag list | `config/analyses.yaml`, `trials analyze`, `analysis_metadata.json` |
 
 ## A project's own gate checks
 

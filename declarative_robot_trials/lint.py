@@ -67,7 +67,10 @@ L13 a factor of `maps_to.kind: operator` (a level the operator realizes by
     must declare a `check` (a preflight check with per-level arguments, added
     to every trial's T-0 gate) or an explicit `unchecked: <reason>`. Before
     this, a level nothing could verify (`latency_stamping`, `scene`) read as
-    coverage on the word of whoever stood at the rig. Every factor `check`
+    coverage on the word of whoever stood at the rig. In the paper's words: a
+    usable trial can carry a *silent error* (the realized condition differs from
+    the declared one) only in a factor that no check covers, so this rule makes
+    every such factor visible. Every factor `check`
     must also name a check script that exists, and once two levels both carry
     numeric `min`/`max` bands, the bands may not overlap: a check that passes
     both levels at once cannot tell a mismatched trial from a correct one.
@@ -480,9 +483,10 @@ def test_operator_factors_declare_a_check_or_why_not(path):
         if factor.maps_to.get("kind") == "operator" and not (factor.check or factor.unchecked):
             problems.append(
                 f"factor {name!r} is realized by the operator (`kind: operator`) but declares "
-                f"neither `check:` (a preflight check with per-level arguments, e.g. "
+                f"neither `check:` (a gate check with per-level arguments, e.g. "
                 f"image_brightness with a band per lighting level) nor `unchecked: <reason>`. "
-                f"An unverified level reads as coverage on the operator's word alone")
+                f"An unchecked level reads as coverage on the operator's word alone: a trial "
+                f"that ran at another level would be a silent error")
         if factor.check and run_preflight.find_check(factor.check['script'], EXPERIMENTS_ROOT) is None:
             problems.append(f"factor {name!r} checks with {factor.check['script']!r}, "
                             f"which is not a script in "

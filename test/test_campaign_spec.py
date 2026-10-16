@@ -401,7 +401,7 @@ def test_factor_recorded_but_not_declared_as_an_axis_is_flagged(root):
         "trajectory: {required: false, type: str, factor: false}"), encoding="utf-8")
     campaign = cs.load_campaign(campaign_file(root, BASIC), root)
     problems = cs.validate_against_metadata_contract(campaign, root)
-    assert any("not as `factor: true`" in p for p in problems)
+    assert any("not as a coverage axis (`factor: true`)" in p for p in problems)
 
 
 def test_a_measurable_campaign_has_no_warnings(root):

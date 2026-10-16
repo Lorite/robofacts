@@ -933,12 +933,12 @@ def validate_against_metadata_contract(campaign: Campaign,
                             f"its coverage could never be measured")
         elif key not in schema.fields:
             problems.append(f"factor {name!r} records to {key!r}, which the metadata "
-                            f"contract does not declare — add it (with factor: true) "
-                            f"or the coverage grid cannot group by it")
+                            f"contract does not declare — add it as a coverage axis "
+                            f"(factor: true) or the coverage index cannot group by it")
         elif not schema.fields[key].factor:
             problems.append(f"factor {name!r} records to {key!r}, which the contract "
-                            f"declares but not as `factor: true` — the coverage grid "
-                            f"will not offer it as an axis")
+                            f"declares but not as a coverage axis (`factor: true`) — the "
+                            f"coverage index will not group by it")
     return problems
 
 
@@ -970,7 +970,7 @@ def contract_refusal(campaign: Campaign,
     return (f"{CONTRACT_REFUSAL}: campaign {campaign.name!r} sweeps factor(s) whose "
             f"coverage cannot be measured:\n  " + "\n  ".join(problems)
             + "\nRecord the factor under a metadata_key that the metadata contract "
-              "declares with `factor: true`, or do not sweep it.")
+              "declares as a coverage axis (`factor: true`), or do not sweep it.")
 
 
 # --------------------------------------------------------------------------- #

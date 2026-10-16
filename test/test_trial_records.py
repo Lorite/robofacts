@@ -244,7 +244,7 @@ def test_the_cli_prints_the_same_records(root, capsys):
     assert sorted(r["name"] for r in rows) == ["t1", "t_blocked"]
     assert trec.main(["--experiments-root", str(root), "expA", "--status", "blocked"]) == 0
     out = capsys.readouterr().out
-    assert "t_blocked" in out and "1 record(s): 1 blocked" in out
+    assert "t_blocked" in out and "1 record(s): 1 attempt(s) without a trial (1 blocked)" in out
     assert trec.main(["--experiments-root", str(root), "expA", "--where", "nonsense"]) == 2
     assert trec.main(["--experiments-root", str(root), "nope"]) == 2
 
@@ -252,3 +252,30 @@ def test_the_cli_prints_the_same_records(root, capsys):
 def test_trials_records_is_a_subcommand():
     from declarative_robot_trials import cli
     assert "records" in cli.COMMANDS
+
+
+def test_every_record_has_the_papers_class_or_none_for_an_attempt(root):
+    """The paper's Equation 4: usable, unverified or excluded (aborted, quarantined or no
+    data); an attempt the gate refused left no trial, so it has no class (2026-10-16)."""
+    bag(root, "t_ok")
+    bag(root, "t_abort", aborted=True)
+    bag(root, "t_quar", folder="bags_issues")
+    bag(root, "t_scratch_flag", scratch=True)
+    ledger(root, trial_label="t_nogo", campaign="c", status="blocked")
+    records = by_name(trec.load_records(root, "expA"))
+    classes = {n: (r.trial_class, trec.class_label(r)) for n, r in records.items()}
+    assert classes == {
+        "t_ok": ("usable", "usable"),
+        "t_abort": ("excluded", "excluded (aborted)"),
+        "t_quar": ("excluded", "excluded (quarantined)"),
+        "t_scratch_flag": ("excluded", "excluded (scratch)"),
+        "t_nogo": (None, "attempt: blocked"),
+    }
+    names = lambda status: sorted(r.name for r in trec.filter_records(records.values(), status=status))
+    assert names("excluded") == ["t_abort", "t_quar", "t_scratch_flag"]
+    assert names("attempt") == ["t_nogo"]
+    assert names("excluded-any") == ["t_abort", "t_nogo", "t_quar", "t_scratch_flag"]
+    assert trec.summary_line(list(records.values())) == (
+        "5 record(s): 1 usable, 3 excluded (1 aborted, 1 quarantined, 1 scratch), "
+        "1 attempt(s) without a trial (1 blocked)")
+    assert records["t_abort"].to_dict()["class"] == "excluded"

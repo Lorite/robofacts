@@ -4,27 +4,27 @@
 {% block title %}Experiments · Trials{% endblock %}
 {% block body %}
 <h1>Experiments</h1>
-<p class="muted small">Every framework experiment, the one flown most recently first. A row answers: how much does it still need, and what is on disk.
+<p class="muted small">Every framework experiment, the one run most recently first. A row answers: how much does it still need, and what is on disk.
   Open one for its campaigns (each one a plan) and its trials (one row per trial, every trial).</p>
 
 {% if rows %}
 <div class="tablewrap">
 <table class="sortable" id="experiments">
 <thead><tr>
-  <th>experiment</th><th class="num" title="sum over its campaigns of the trials still to fly">still to fly</th>
-  <th class="num">campaigns</th><th class="num" title="recorded trials plus attempts the gate refused; scratch flights apart">trials</th><th>by status</th>
+  <th>experiment</th><th class="num" title="sum over its campaigns of the trials still missing">still missing</th>
+  <th class="num">campaigns</th><th class="num" title="recorded trials plus attempts the gate refused; scratch recordings apart">trials</th><th title="the paper's classes: only usable trials count; attempts the gate refused left no trial">by class</th>
   <th class="num" title="trials with a slim copy, ready to open in Foxglove">replayable</th>
-  <th class="num" title="scratch flights: diagnostics, never coverage">scratch</th>
+  <th class="num" title="scratch recordings: diagnostics, never coverage">scratch</th>
   <th>last trial</th><th>layout</th>
 </tr></thead>
 <tbody>
 {% for e in rows %}
-<tr class="{{ 'todo' if e.to_fly }}">
+<tr class="{{ 'todo' if e.missing }}">
   <td><a href="{{ url_for('experiment_view', experiment=e.name) }}"><b>{{ e.name }}</b></a></td>
-  <td class="num" data-sort="{{ e.to_fly }}"><b>{{ e.to_fly }}</b></td>
+  <td class="num" data-sort="{{ e.missing }}"><b>{{ e.missing }}</b></td>
   <td class="num nowrap">{{ e.campaigns }}{% if e.broken %} <span class="bad" title="{{ e.broken }} campaign file(s) do not load">({{ e.broken }} broken)</span>{% endif %}</td>
   <td class="num">{{ e.total }}</td>
-  <td class="statuses">{% for s, n in e.counts.items() %}<a class="badge b-{{ s }}" href="{{ url_for('experiment_view', experiment=e.name, status=s) }}#trials" title="{{ status_meaning.get(s, '') }}">{{ n }} {{ s }}</a> {% else %}<span class="muted">no trials yet</span>{% endfor %}</td>
+  <td class="statuses">{% for c in e.classes %}<a class="badge b-{{ c.css }}" href="{{ url_for('experiment_view', experiment=e.name, status=c.filter) }}#trials" title="{{ c.title }}">{{ c.n }} {{ c.label }}</a> {% else %}<span class="muted">no trials yet</span>{% endfor %}</td>
   <td class="num">{{ e.replayable or '—' }}</td>
   <td class="num">{{ e.scratch or '—' }}</td>
   <td class="nowrap" data-sort="{{ e.last }}">{{ e.last|when or '—' }}</td>
