@@ -109,7 +109,7 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 | domain | simulation or hardware, recorded per trial | `domain` in `trial_metadata.json`, from `simulation:` in `runner.yaml` |
 | reduced bag | the recording without images, a few MB, copied back from the rig | the slim copy, `bags_slim/<trial>_slim/` |
 | scratch recording | a diagnostic trial through the campaign's stack and gate, never coverage | `trials run … --scratch`, `bags_scratch/` |
-| exploration | one condition's stack brought up live to debug and tune it, with a Foxglove bridge that may change parameters; never a trial, never coverage | `trials explore`, the 🔭 Explore buttons, `runs/explore/<stamp>_explore/parameter_changes.yaml`, `explore:` in `runner.yaml` |
+| exploration | one condition's stack brought up live to debug and tune it, with a Foxglove bridge that may change parameters, never a trial and never coverage | `trials explore`, the 🔭 Explore buttons, `runs/explore/<stamp>_explore/parameter_changes.yaml`, `explore:` in `runner.yaml` |
 | named analysis | a declared computation over a cohort of usable trials, with the exact bag list | `config/analyses.yaml`, `trials analyze`, `analysis_metadata.json` |
 
 ## A project's own gate checks
