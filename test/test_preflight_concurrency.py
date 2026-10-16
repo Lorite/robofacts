@@ -17,16 +17,16 @@ from pathlib import Path
 
 import pytest
 
-import declarative_robot_trials.preflight  # noqa: F401  (the parent package of the module under test)
-from declarative_robot_trials import preflight_gate as pg
+import robofacts.preflight  # noqa: F401  (the parent package of the module under test)
+from robofacts import preflight_gate as pg
 
 HERE = Path(__file__).resolve().parent
-PREFLIGHT = HERE.parent / "declarative_robot_trials" / "preflight"
+PREFLIGHT = HERE.parent / "robofacts" / "preflight"
 
 
 def _load(name: str, path: Path):
     """A private copy of the module, loaded INSIDE its package so its relative imports work."""
-    spec = importlib.util.spec_from_file_location(f"declarative_robot_trials.preflight.{name}", path)
+    spec = importlib.util.spec_from_file_location(f"robofacts.preflight.{name}", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

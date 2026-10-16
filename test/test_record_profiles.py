@@ -23,15 +23,15 @@ import sys
 from pathlib import Path
 
 
-from declarative_robot_trials.record_profiles import (  # noqa: E402
+from robofacts.record_profiles import (  # noqa: E402
     PROFILES,
     PROFILE_NOTES,
     build_record_command,
     build_topics,
     is_heavy_topic,
 )
-from declarative_robot_trials.slim_bag import select_topics  # noqa: E402
-from declarative_robot_trials import record_profiles  # noqa: E402
+from robofacts.slim_bag import select_topics  # noqa: E402
+from robofacts import record_profiles  # noqa: E402
 
 CF = "cf1"
 

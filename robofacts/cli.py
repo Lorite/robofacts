@@ -13,7 +13,7 @@
     trials ui                                              the web interface
 
 Every subcommand takes ``--experiments-root`` (see ``trials roots``). The same
-commands work as ``ros2 run declarative_robot_trials trials <subcommand>``.
+commands work as ``ros2 run robofacts trials <subcommand>``.
 """
 from __future__ import annotations
 

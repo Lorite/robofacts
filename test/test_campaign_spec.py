@@ -9,7 +9,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_spec as cs
+from robofacts import campaign_spec as cs
 EXPERIMENTS_ROOT = HERE.parents[1]
 
 CORE = """
@@ -466,15 +466,15 @@ def test_a_swept_factor_not_declared_as_an_axis_is_refused(root, capsys):
 
 
 def test_campaign_plan_refuses_it_too(root, capsys):
-    from declarative_robot_trials import campaign_plan as cp
+    from robofacts import campaign_plan as cp
     path = _unrecorded_campaign(root)
     assert cp.main([str(path), "--experiments-root", str(root)]) == 2
     assert "secret_knob" in capsys.readouterr().err
 
 
 def test_the_runner_refuses_it_before_any_trial_starts(root, capsys):
-    from declarative_robot_trials import campaign_plan as cp
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import campaign_plan as cp
+    from robofacts import trial_runner as tr
     (root / "expA" / "config" / "runner.yaml").write_text(
         "launch: {package: p, file: f.launch.py}\naction: {command: 'fly {secret_knob}'}\n",
         encoding="utf-8")
@@ -488,7 +488,7 @@ def test_the_runner_refuses_it_before_any_trial_starts(root, capsys):
 
 
 def test_a_measurable_campaign_still_plans_and_runs_dry(root):
-    from declarative_robot_trials import campaign_plan as cp
+    from robofacts import campaign_plan as cp
     path = campaign_file(root, BASIC)
     assert cs.main([str(path), "--experiments-root", str(root)]) == 0
     assert cp.main([str(path), "--experiments-root", str(root)]) == 0

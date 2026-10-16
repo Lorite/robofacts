@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from declarative_robot_trials import tools
+from robofacts import tools
 
 pytestmark = pytest.mark.skipif(shutil.which("ps") is None, reason="needs ps")
 

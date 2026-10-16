@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import trial_runner as tr
+from robofacts import trial_runner as tr
 class _Trial:
     def __init__(self, values, repetition=1):
         self.values = values

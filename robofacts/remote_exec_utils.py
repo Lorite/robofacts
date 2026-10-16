@@ -631,4 +631,4 @@ def package_module_command(project_root: Path, module: str, args: list) -> list:
     shim = shlex.quote(str(Path(project_root) / "experiments" / "common" / "scripts" / f"{module}.py"))
     rest = " ".join(shlex.quote(a) for a in args)
     return ["sh", "-c", f"if [ -f {shim} ]; then exec python3 {shim} {rest}; "
-                        f"else exec python3 -m declarative_robot_trials.{module} {rest}; fi"]
+                        f"else exec python3 -m robofacts.{module} {rest}; fi"]

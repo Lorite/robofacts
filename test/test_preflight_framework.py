@@ -17,12 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import preflight_ui
-from declarative_robot_trials.preflight import run_preflight as rp
+from robofacts import preflight_ui
+from robofacts.preflight import run_preflight as rp
 
 HERE = Path(__file__).resolve().parent
 PACKAGE_ROOT = HERE.parent
-CHECKS_DIR = PACKAGE_ROOT / "declarative_robot_trials" / "preflight" / "checks"
+CHECKS_DIR = PACKAGE_ROOT / "robofacts" / "preflight" / "checks"
 EXPERIMENTS_DIR = PACKAGE_ROOT / "example_project" / "experiments"
 
 ALL_CHECKLISTS = sorted(EXPERIMENTS_DIR.glob("*/config/preflight_checklist.json"))

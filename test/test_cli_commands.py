@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import cli, tools
+from robofacts import cli, tools
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = PACKAGE_ROOT / "example_project"
@@ -16,7 +16,7 @@ EXAMPLE = PACKAGE_ROOT / "example_project"
 
 def run_cli(*args):
     env = {**os.environ, "PYTHONPATH": str(PACKAGE_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    return subprocess.run([sys.executable, "-m", "declarative_robot_trials.cli", *args], cwd=EXAMPLE,
+    return subprocess.run([sys.executable, "-m", "robofacts.cli", *args], cwd=EXAMPLE,
                           capture_output=True, text=True, env=env, timeout=600)
 
 
@@ -51,8 +51,8 @@ def test_lint_passes_pytest_flags_through(argv):
 
 def test_ui_help_needs_no_flask(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "flask", None)  # `import flask` now raises ImportError
-    monkeypatch.delitem(sys.modules, "declarative_robot_trials.ui.app", raising=False)
-    import declarative_robot_trials.ui as ui_package
+    monkeypatch.delitem(sys.modules, "robofacts.ui.app", raising=False)
+    import robofacts.ui as ui_package
     monkeypatch.delattr(ui_package, "app", raising=False)
     assert cli.main(["ui", "--help"]) == 0
     out = capsys.readouterr().out
@@ -61,11 +61,11 @@ def test_ui_help_needs_no_flask(monkeypatch, capsys):
 
 def test_ui_without_flask_says_so_instead_of_a_traceback(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "flask", None)
-    monkeypatch.delitem(sys.modules, "declarative_robot_trials.ui.app", raising=False)
+    monkeypatch.delitem(sys.modules, "robofacts.ui.app", raising=False)
     # The package keeps the submodule as an attribute once any test imported it, and
     # `from .ui import app` returns that attribute without importing. The test then
     # started the real server and the whole suite hung on port 8080 (2026-10-14).
-    import declarative_robot_trials.ui as ui_package
+    import robofacts.ui as ui_package
     monkeypatch.delattr(ui_package, "app", raising=False)
     assert cli.main(["ui", "--no-auth"]) == 2
     assert "needs Flask" in capsys.readouterr().err

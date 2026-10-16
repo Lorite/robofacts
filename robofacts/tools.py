@@ -27,7 +27,7 @@ def path(name: str) -> Path:
 def remote_invocation(name: str, args: Optional[List[str]] = None) -> str:
     """How to start a packaged tool on another machine, where this package is
     installed in the sourced ROS 2 workspace but its path is unknown here."""
-    return " ".join(["ros2", "run", "declarative_robot_trials", "trials", "tool", name, *(args or [])])
+    return " ".join(["ros2", "run", "robofacts", "trials", "tool", name, *(args or [])])
 
 
 def run(name: str, args: Optional[List[str]] = None, **kwargs) -> subprocess.CompletedProcess:

@@ -18,9 +18,9 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import operator_voice as ov
-from declarative_robot_trials import trial_runner as tr
+from robofacts import campaign_spec as cs
+from robofacts import operator_voice as ov
+from robofacts import trial_runner as tr
 CORE = """
 version: 1
 factors:
@@ -144,7 +144,7 @@ def test_lint_l15_refuses_unknown_placeholders_and_cues_past_the_deadline(root):
     # Imported here, not at the top: lint resolves the experiments root at import, and
     # the example project's root is set by a fixture, which runs after collection. A
     # top-level import failed collection outside a project (the package's CI, 2026-10-15).
-    from declarative_robot_trials import lint
+    from robofacts import lint
     problems = lint.voice_lint_problems(path, factors, action_timeout_s=100)
     assert any("{battery}" in p for p in problems)
     assert not any("{trajectory}" in p for p in problems)
@@ -334,7 +334,7 @@ def test_a_no_go_is_announced(root, monkeypatch, no_sleep):
 
 
 def test_run_plan_hands_the_campaign_voice_to_each_trial(root, monkeypatch):
-    from declarative_robot_trials import campaign_plan as cp
+    from robofacts import campaign_plan as cp
     seen = {}
 
     def fake_run_trial(spec, factors, config, bags_dir, **kwargs):

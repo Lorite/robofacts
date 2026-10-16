@@ -15,7 +15,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import operator_voice as ov
+from robofacts import operator_voice as ov
 @pytest.fixture
 def listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

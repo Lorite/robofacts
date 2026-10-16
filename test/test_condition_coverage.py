@@ -16,9 +16,9 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_index as ti
-from declarative_robot_trials import trial_runner as tr
+from robofacts import campaign_spec as cs
+from robofacts import trial_index as ti
+from robofacts import trial_runner as tr
 CORE = """
 version: 1
 factors:

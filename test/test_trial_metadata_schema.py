@@ -10,7 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import trial_metadata_schema as tms
+from robofacts import trial_metadata_schema as tms
 EXPERIMENTS_ROOT = HERE.parents[1]
 
 GOOD = {"trial_id": "t1", "execution_host": "orin", "aborted": False}

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>declarative_robot_trials</name>
+  <name>robofacts</name>
   <version>0.1.0</version>
-  <description>Declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, a runner, a coverage index, a linter and named analyses, driven by five declaration files per experiment.</description>
+  <description>RoboFACTS (Factors, A Contract, and checked Trials in Simulation and on hardware), declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, a runner, a coverage index, a linter and named analyses, driven by five declaration files per experiment.</description>
   <maintainer email="a.lorite.mora@gmail.com">Alejandro Lorite Mora</maintainer>
   <license>Apache-2.0</license>
 

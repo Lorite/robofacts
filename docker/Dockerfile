@@ -34,7 +34,7 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 
 # Stage 2: the package installed with pip, and the quickstart as the default command.
 FROM deps AS quickstart
-WORKDIR /opt/declarative_robot_trials
+WORKDIR /opt/robofacts
 COPY . .
 RUN pip install --no-cache-dir . && trials --version
 

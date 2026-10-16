@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import cli, scaffold, validate
+from robofacts import cli, scaffold, validate
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = PACKAGE_ROOT / "example_project"
@@ -208,7 +208,7 @@ def test_lint_experiment_filters_the_parametrized_rules(project):
            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
 
     def collected(*extra):
-        out = subprocess.run([sys.executable, "-m", "declarative_robot_trials.cli", "lint",
+        out = subprocess.run([sys.executable, "-m", "robofacts.cli", "lint",
                               "--experiments-root", str(experiments(project)), *extra,
                               "--collect-only"],
                              capture_output=True, text=True, env=env, cwd=project, timeout=300)
@@ -219,7 +219,7 @@ def test_lint_experiment_filters_the_parametrized_rules(project):
     assert f"[{SOURCE}]" in everything and "[demo_copy]" in everything
     only = collected("--experiment", "demo_copy")
     assert "[demo_copy]" in only and f"[{SOURCE}]" not in only
-    out = subprocess.run([sys.executable, "-m", "declarative_robot_trials.cli", "lint",
+    out = subprocess.run([sys.executable, "-m", "robofacts.cli", "lint",
                           "--experiments-root", str(experiments(project)), "--experiment", "nope"],
                          capture_output=True, text=True, env=env, cwd=project, timeout=300)
     assert out.returncode == 2 and "no experiment 'nope'" in out.stderr

@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_records as trec
+from robofacts import campaign_spec as cs
+from robofacts import trial_records as trec
 
 FACTORS = """
 version: 1
@@ -250,7 +250,7 @@ def test_the_cli_prints_the_same_records(root, capsys):
 
 
 def test_trials_records_is_a_subcommand():
-    from declarative_robot_trials import cli
+    from robofacts import cli
     assert "records" in cli.COMMANDS
 
 

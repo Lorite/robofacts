@@ -20,7 +20,7 @@ CAMPAIGN = {
 
 def run_script(path, *extra):
     return subprocess.run(
-        [sys.executable, "-m", "declarative_robot_trials.campaign_live_steps", str(path), *extra],
+        [sys.executable, "-m", "robofacts.campaign_live_steps", str(path), *extra],
         capture_output=True, text=True, check=True,
         env={**os.environ, "PYTHONPATH": str(PACKAGE_ROOT)},
     ).stdout
@@ -58,7 +58,7 @@ def test_annotate_keeps_the_original_campaign_indices():
     UI's panels. The UI executes a step by its position in the campaign's FULL
     list (that position is the /operator_step allowlist key), so the rows must
     carry the original index even though prose-only steps are filtered out."""
-    from declarative_robot_trials import campaign_live_steps as cls_mod
+    from robofacts import campaign_live_steps as cls_mod
     rows = cls_mod.annotate(CAMPAIGN["operator_live_steps"])
     assert [r["index"] for r in rows] == [0, 2], "prose step 1 skipped, positions kept"
     assert rows[0]["title"] == "FIRST check the estimator"
@@ -69,7 +69,7 @@ def test_annotate_keeps_the_original_campaign_indices():
 def test_live_steps_is_built_on_annotate(tmp_path):
     """The TSV the tmux window consumes and annotate() must be the same rows,
     or the cockpit and the web UI drift apart on what a step pre-types."""
-    from declarative_robot_trials import campaign_live_steps as cls_mod
+    from robofacts import campaign_live_steps as cls_mod
     campaign = tmp_path / "c.yaml"
     campaign.write_text(yaml.safe_dump(CAMPAIGN))
     tsv = cls_mod.live_steps(campaign)

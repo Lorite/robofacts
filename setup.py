@@ -2,7 +2,7 @@ import os
 
 from setuptools import find_packages, setup
 
-package_name = "declarative_robot_trials"
+package_name = "robofacts"
 
 
 def files_under(subdir: str) -> list:
@@ -41,12 +41,12 @@ setup(
     zip_safe=False,
     maintainer="Alejandro Lorite Mora",
     maintainer_email="a.lorite.mora@gmail.com",
-    description="Declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, "
+    description="RoboFACTS, declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, "
                 "a runner, a coverage index, a linter and named analyses.",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
-            "trials = declarative_robot_trials.cli:main",
+            "trials = robofacts.cli:main",
         ],
     },
 )

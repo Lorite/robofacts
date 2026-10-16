@@ -16,7 +16,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import code_version as cv
+from robofacts import code_version as cv
 
 # git exports GIT_DIR and friends to hooks (the pre-push hook runs this file). With them set,
 # every git call below would act on the hook's repository instead of the temporary one.
@@ -141,7 +141,7 @@ def test_a_relative_gitdir_resolves(repo, tmp_path):
 
 
 def test_the_runner_prints_an_unknown_version_as_a_warning(monkeypatch, tmp_path, capsys):
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import trial_runner as tr
     monkeypatch.setattr(cv, "cached", lambda target: cv.unknown("git produced no commit", "local", tmp_path))
     metadata = {}
     tr.stamp_code_version(metadata, None)
@@ -152,7 +152,7 @@ def test_the_runner_prints_an_unknown_version_as_a_warning(monkeypatch, tmp_path
 
 
 def test_the_runner_prints_no_warning_for_a_known_version(repo, monkeypatch, capsys):
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import trial_runner as tr
     monkeypatch.setattr(cv, "cached", lambda target: cv.probe(None, repo, builds=False))
     tr.stamp_code_version({}, None)
     assert "WARNING" not in capsys.readouterr().out

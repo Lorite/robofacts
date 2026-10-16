@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from declarative_robot_trials import verify_ext_pose_age as vea
+from robofacts import verify_ext_pose_age as vea
 
 RATE_HZ = 10.0
 T0 = 1_791_370_000.0          # an arbitrary epoch second on the recorder's clock

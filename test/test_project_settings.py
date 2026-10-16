@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from declarative_robot_trials import record_profiles as rp
-from declarative_robot_trials import roots, stop_latch_clear as slc
-from declarative_robot_trials.preflight import run_preflight as rpf
+from robofacts import record_profiles as rp
+from robofacts import roots, stop_latch_clear as slc
+from robofacts.preflight import run_preflight as rpf
 
 
 @pytest.fixture

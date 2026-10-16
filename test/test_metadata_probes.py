@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 
-from declarative_robot_trials import trial_runner as tr
+from robofacts import trial_runner as tr
 RUNNER = """\
 launch: {package: p, file: f.launch.py}
 metadata_probes:

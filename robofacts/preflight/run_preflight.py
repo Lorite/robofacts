@@ -92,7 +92,7 @@ def _roots():
         if __package__:
             from .. import roots
         else:  # pragma: no cover - python3 path/to/run_preflight.py
-            from declarative_robot_trials import roots  # type: ignore[no-redef]
+            from robofacts import roots  # type: ignore[no-redef]
         return roots
     except ImportError:
         return None

@@ -1,4 +1,4 @@
-# The project file of the declarative_robot_trials framework. `trials` commands run
+# The project file of the robofacts framework. `trials` commands run
 # from anywhere below this directory find the experiments through it.
 experiments_root: experiments
 project_root: .

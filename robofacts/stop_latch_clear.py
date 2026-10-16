@@ -66,7 +66,7 @@ def _roots():
             from . import roots
         else:  # pragma: no cover
             sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-            from declarative_robot_trials import roots  # type: ignore[no-redef]
+            from robofacts import roots  # type: ignore[no-redef]
         return roots
     except ImportError:
         return None

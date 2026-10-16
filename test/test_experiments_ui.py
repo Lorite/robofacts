@@ -20,7 +20,7 @@ UI_DIR = HERE.parent / "ui"
 
 pytest.importorskip("flask", reason="the UI needs Flask (present in the dev container)")
 
-from declarative_robot_trials.ui import app as ui  # noqa: E402
+from robofacts.ui import app as ui  # noqa: E402
 
 PASSWORD = "hunter2"
 
@@ -243,9 +243,9 @@ def test_analyses_view_lists_declared_analyses(client):
 
 
 def test_api_plan_returns_the_same_numbers_as_the_cli(client, root):
-    from declarative_robot_trials import campaign_plan as cp
-    from declarative_robot_trials import campaign_spec as cs
-    from declarative_robot_trials import trial_index as ti
+    from robofacts import campaign_plan as cp
+    from robofacts import campaign_spec as cs
+    from robofacts import trial_index as ti
     payload = json.loads(client.get("/api/plan/expA/c.json", headers=auth()).get_data(as_text=True))
     campaign = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
     expected = cp.build_plan(campaign, ti.load_trials(root, "expA"))
@@ -327,7 +327,7 @@ def test_abort_marks_the_run_and_never_kills_a_trial(client):
 def test_only_one_campaign_may_execute_at_a_time(client, root, monkeypatch):
     """Two campaigns on one rig would fight over radio, recorder and airspace."""
     import threading
-    from declarative_robot_trials import trial_runner as tr_mod
+    from robofacts import trial_runner as tr_mod
     release = threading.Event()
 
     # The first campaign holds the rig until the test releases it. It runs no real
@@ -621,7 +621,7 @@ def test_the_default_bind_is_localhost():
     # Checks the parsed default, not the source text: the parser moved to its own
     # module so that `trials ui --help` needs no Flask, and a source grep of
     # ui.main stopped seeing it.
-    from declarative_robot_trials.ui.arguments import build_parser
+    from robofacts.ui.arguments import build_parser
 
     assert build_parser().parse_args([]).host == "127.0.0.1", "must not default to 0.0.0.0"
 
@@ -668,7 +668,7 @@ def _wait_for(client, run_id: str, predicate, timeout: float = 10.0) -> dict:
 
 def test_tally_is_the_clis_own_function():
     """One tally function for both surfaces — successes first (6d31fcca33)."""
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import trial_runner as tr
     t = tr.tally(["ran", "ran", "blocked", "dry-run"])
     assert (t["total"], t["ok"], t["blocked"], t["failed"]) == (4, 2, 1, 0)
     assert t["line"] == "4 trial(s): 2 OK, 1 blocked, 0 failed"
@@ -768,8 +768,8 @@ def test_operator_step_runs_only_the_campaigns_declared_commands(client):
 def test_run_trial_refuses_an_unconfirmed_trial(root):
     """Runner-side contract behind the UI flow: a False from the confirmation
     surface blocks the trial before ANY process is spawned or path created."""
-    from declarative_robot_trials import campaign_spec as cs
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import campaign_spec as cs
+    from robofacts import trial_runner as tr
     campaign = cs.load_campaign(root / "expA" / "campaigns" / "steps.yaml", root)
     config = tr.RunnerConfig.load("expA", root)
     trial = next(campaign.combinations())
@@ -787,7 +787,7 @@ def test_the_tty_surface_passes_through_headless(monkeypatch):
     """confirm_operator_steps_tty keeps the pre-8f1213cc6e headless behaviour:
     no tty means no prompt, no block, proceed."""
     import types
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts import trial_runner as tr
     monkeypatch.setattr(tr.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
     assert tr.confirm_operator_steps_tty(None, [{"text": "x"}]) is True
 
@@ -805,8 +805,8 @@ def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
     import sys
     from pathlib import Path
     pytest.importorskip("flask")
-    from declarative_robot_trials.ui import app as ui
-    from declarative_robot_trials import trial_runner as tr
+    from robofacts.ui import app as ui
+    from robofacts import trial_runner as tr
     seen = {}
 
     def fake_run_plan(plan, config, bags_dir, **kwargs):
@@ -946,7 +946,7 @@ def test_the_files_route_is_read_only_inside_the_experiment(client, root):
 
 
 def test_the_records_api_is_the_package_function(client, root):
-    from declarative_robot_trials import trial_records as trec
+    from robofacts import trial_records as trec
     _write_bag(root, "t1", _meta("t1"))
     _write_bag(root, "t2", _meta("t2", aborted=True))
     api = json.loads(client.get("/api/records/expA.json?status=aborted", headers=auth())

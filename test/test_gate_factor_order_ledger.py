@@ -17,10 +17,10 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_plan as cp
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_runner as tr
-from declarative_robot_trials.preflight_gate import PreflightBlocked  # noqa: E402
+from robofacts import campaign_plan as cp
+from robofacts import campaign_spec as cs
+from robofacts import trial_runner as tr
+from robofacts.preflight_gate import PreflightBlocked  # noqa: E402
 
 CORE = """
 version: 1
@@ -292,7 +292,7 @@ def test_a_dry_run_writes_no_ledger_line(root):
 
 def test_the_ledger_is_never_read_by_coverage(root):
     """Coverage stays faithful: the index reads bags, not the ledger."""
-    from declarative_robot_trials import trial_index as ti
+    from robofacts import trial_index as ti
     (root / "expE" / "runs").mkdir(parents=True)
     (root / "expE" / "runs" / "attempts.jsonl").write_text(
         json.dumps({"status": "ran", "values": {"gate": "on", "fault": "a"}}) + "\n")

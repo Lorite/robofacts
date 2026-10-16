@@ -10,7 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import analysis_runner as ar
+from robofacts import analysis_runner as ar
 EXPERIMENTS_ROOT = HERE.parents[1]
 
 CONTRACT = """

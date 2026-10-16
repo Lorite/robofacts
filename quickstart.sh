@@ -9,13 +9,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/example_project"
 CAMPAIGN=experiments/demo_talker_listener/campaigns/rates.yaml
 
 # The command: `trials` on the PATH (a pip install), else through ros2 run (a colcon
-# install puts it in lib/declarative_robot_trials, not on the PATH), else from source.
+# install puts it in lib/robofacts, not on the PATH), else from source.
 if command -v trials >/dev/null 2>&1; then
     trials() { command trials "$@"; }
-elif ros2 pkg prefix declarative_robot_trials >/dev/null 2>&1; then
-    trials() { ros2 run declarative_robot_trials trials "$@"; }
+elif ros2 pkg prefix robofacts >/dev/null 2>&1; then
+    trials() { ros2 run robofacts trials "$@"; }
 else
-    trials() { PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/..:${PYTHONPATH:-}" python3 -m declarative_robot_trials.cli "$@"; }
+    trials() { PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/..:${PYTHONPATH:-}" python3 -m robofacts.cli "$@"; }
 fi
 
 echo "== 0. Where the roots resolve to (trials.yaml in this directory)"

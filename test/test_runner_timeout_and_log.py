@@ -12,8 +12,8 @@ from pathlib import Path
 def test_the_verify_output_lands_in_the_run_log(tmp_path):
     """2026-10-02: the run log was closed before the verify steps ran."""
     import sys as _sys
-    from declarative_robot_trials import trial_runner as _tr
-    from declarative_robot_trials import campaign_spec as _cs
+    from robofacts import trial_runner as _tr
+    from robofacts import campaign_spec as _cs
     from types import SimpleNamespace as _NS
     root = tmp_path
     (root / "common" / "config").mkdir(parents=True)
@@ -72,9 +72,9 @@ def _timeout_root(tmp_path, extra):
 def test_an_action_past_its_timeout_is_terminated_and_aborted(tmp_path):
     """2026-10-02: an action blocked on a dead crazyswarm2 server ran forever."""
     import time as _time
-    from declarative_robot_trials import trial_runner as _tr
-    from declarative_robot_trials import campaign_spec as _cs
-    from declarative_robot_trials import remote_exec_utils as _rx
+    from robofacts import trial_runner as _tr
+    from robofacts import campaign_spec as _cs
+    from robofacts import remote_exec_utils as _rx
     import json as _json
     root = _timeout_root(tmp_path, "action_timeout_s: 1.5\n")
 
@@ -100,7 +100,7 @@ def test_an_action_past_its_timeout_is_terminated_and_aborted(tmp_path):
 
 
 def test_no_action_timeout_by_default_and_bad_values_are_refused(tmp_path):
-    from declarative_robot_trials import trial_runner as _tr
+    from robofacts import trial_runner as _tr
     import pytest as _pytest
     assert _tr.RunnerConfig.load("expT", _timeout_root(tmp_path, "")).action_timeout_s is None
     with _pytest.raises(_tr.RunnerError, match="positive number"):

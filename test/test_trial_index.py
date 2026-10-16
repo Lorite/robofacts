@@ -10,7 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import trial_index as ti
+from robofacts import trial_index as ti
 def make_trial(root: Path, experiment: str, name: str, metadata: dict,
                issues: bool = False) -> Path:
     bags = "bags_issues" if issues else "bags"

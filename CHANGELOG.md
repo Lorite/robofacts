@@ -4,7 +4,8 @@
 
 The framework of the robotics lab's experiments, extracted into an installable ROS 2 package (`ament_python`, also `pip install`).
 
-- One command, `trials`, with the planner, the runner, the coverage index, the linter, the T-0 gate, the named analyses, the web interface and the shell tools as subcommands. `ros2 run declarative_robot_trials trials <subcommand>` works the same.
+- Renamed to `robofacts` (2026-10-16), RoboFACTS in the SAC 2027 paper: Factors, A Contract, and checked Trials in Simulation and on hardware. The Python module, the ROS 2 package, the repository (`Lorite/robofacts`, GitHub redirects the old address) and the colcon install directory (`lib/robofacts`) follow the name, so it is `ros2 run robofacts trials …`. The command `trials`, the `TRIALS_*` environment variables and `trials.yaml` are unchanged. Until this date the package was `declarative_robot_trials`.
+- One command, `trials`, with the planner, the runner, the coverage index, the linter, the T-0 gate, the named analyses, the web interface and the shell tools as subcommands. `ros2 run robofacts trials <subcommand>` works the same.
 - The experiments root and the project root are configurable: a flag, an environment variable (`TRIALS_EXPERIMENTS_ROOT`, `TRIALS_PROJECT_ROOT`), a `trials.yaml` found by walking up from the current directory, or the nearest `experiments/` directory. No hardcoded path remains.
 - `trials init <dir>` creates a project with the shared configuration, and `trials new <name>` an experiment from a commented template that passes the linter, the planner and a dry run as generated.
 - Spoken operator cues: a campaign's `voice_cues` and the runner's `voice_announce` reach a laptop voice daemon over UDP (`operator_voice.py`), printed only when `TRIALS_VOICE=off`.

@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: ws/src/declarative_robot_trials
+          path: ws/src/robofacts
       - name: Install dependencies
         run: |
           apt-get update
@@ -35,12 +35,12 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          cd ws && colcon build --packages-select declarative_robot_trials
+          cd ws && colcon build --packages-select robofacts
       - name: Test suite
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash && source ws/install/setup.bash
-          cd ws/src/declarative_robot_trials && python3 -m pytest -q -p no:cacheprovider test
+          cd ws/src/robofacts && python3 -m pytest -q -p no:cacheprovider test
       - name: The example campaign, end to end
         shell: bash
         env:
@@ -50,14 +50,14 @@ jobs:
           printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
             '<CycloneDDS xmlns="https://cdds.io/config"><Domain id="any"><General><AllowMulticast>default</AllowMulticast></General></Domain></CycloneDDS>' > /tmp/cyclonedds.xml
           export CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
-          cd ws/src/declarative_robot_trials
-          ros2 run declarative_robot_trials trials --version
+          cd ws/src/robofacts
+          ros2 run robofacts trials --version
           ./quickstart.sh
       - name: A generated experiment passes lint, plan and a dry run, and so does a copy of it
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash && source ws/install/setup.bash
-          trials() { ros2 run declarative_robot_trials trials "$@"; }
+          trials() { ros2 run robofacts trials "$@"; }
           cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
           trials lint
           trials plan experiments/my_experiment/campaigns/baseline.yaml

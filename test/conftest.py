@@ -58,5 +58,5 @@ def _runner_sleeps_cost_nothing(request, monkeypatch):
     Mark a test (or module) real_sleep to keep the real waits."""
     if request.node.get_closest_marker("real_sleep"):
         return
-    from declarative_robot_trials import trial_runner
+    from robofacts import trial_runner
     monkeypatch.setattr(trial_runner, "time", _TimeWithoutSleep())

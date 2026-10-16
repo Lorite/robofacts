@@ -97,7 +97,7 @@ def runner_command(runner: Path) -> List[str]:
     relative imports work wherever the package is installed; any other path (a
     test fixture's copy) runs as a plain script."""
     if Path(runner).resolve() == DEFAULT_RUNNER:
-        return [sys.executable, "-m", "declarative_robot_trials.preflight.run_preflight"]
+        return [sys.executable, "-m", "robofacts.preflight.run_preflight"]
     return [sys.executable, str(runner)]
 
 
@@ -521,7 +521,7 @@ def remote_gate_script(checklist: bytes, arguments: List[str], pythonpath: str =
     env = f"PYTHONPATH={shlex.quote(pythonpath)}${{PYTHONPATH:+:$PYTHONPATH}} " if pythonpath else ""
     return (f'f=$(mktemp /tmp/trials_gate_XXXXXX) || exit 2; '
             f'echo {encoded} | base64 -d > "$f" || {{ rm -f "$f"; exit 2; }}; '
-            f'{env}python3 -m declarative_robot_trials.preflight.run_preflight --checklist "$f" '
+            f'{env}python3 -m robofacts.preflight.run_preflight --checklist "$f" '
             f'{shlex.join(arguments)}; rc=$?; rm -f "$f"; exit $rc')
 
 

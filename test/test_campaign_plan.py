@@ -10,9 +10,9 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_plan as cp
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_index as ti
+from robofacts import campaign_plan as cp
+from robofacts import campaign_spec as cs
+from robofacts import trial_index as ti
 CORE = """
 version: 1
 factors:

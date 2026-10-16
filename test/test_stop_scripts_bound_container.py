@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-TOOLS = Path(__file__).resolve().parents[1] / "declarative_robot_trials" / "tools"
+TOOLS = Path(__file__).resolve().parents[1] / "robofacts" / "tools"
 ESTOP = TOOLS / "estop.sh"
 ROBOT_ACTION = TOOLS / "robot_action.sh"
 

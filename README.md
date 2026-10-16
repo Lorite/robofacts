@@ -1,4 +1,6 @@
-# declarative_robot_trials
+# RoboFACTS
+
+**RoboFACTS** stands for Factors, A Contract, and checked Trials in Simulation and on hardware, for robot teams. The ROS 2 package and the Python module are `robofacts`. Until 2026-10-16 the package was called `declarative_robot_trials`: same code, same command.
 
 Declarative experiment design for ROS 2 trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists the cells still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the bag and verifies it, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
 
@@ -20,10 +22,10 @@ The image is the official ROS 2 Humble image plus the packages of the example. `
 Into a colcon workspace:
 
 ```bash
-cd ~/ros2_ws/src && git clone <this repository> declarative_robot_trials
+cd ~/ros2_ws/src && git clone <this repository> robofacts
 cd ~/ros2_ws && rosdep install --from-paths src --ignore-src -y
-colcon build --packages-select declarative_robot_trials && source install/setup.bash
-ros2 run declarative_robot_trials trials --help
+colcon build --packages-select robofacts && source install/setup.bash
+ros2 run robofacts trials --help
 ```
 
 Or with pip, into any Python 3.10+ environment that can see your ROS 2 installation:
@@ -33,7 +35,7 @@ pip install git+<this repository>      # or: pip install . from a clone
 trials --help
 ```
 
-A colcon install puts the command in `lib/declarative_robot_trials/`, so it is `ros2 run declarative_robot_trials trials …` there (or an alias: `alias trials='ros2 run declarative_robot_trials trials'`). A pip install puts `trials` on the PATH. The runner, the gate's topic checks and the bag tools need a sourced ROS 2 Humble (`ros2`, `rosbag2`). The linter, the planner, the coverage index and the scaffolding work without ROS.
+A colcon install puts the command in `lib/robofacts/`, so it is `ros2 run robofacts trials …` there (or an alias: `alias trials='ros2 run robofacts trials'`). A pip install puts `trials` on the PATH. The runner, the gate's topic checks and the bag tools need a sourced ROS 2 Humble (`ros2`, `rosbag2`). The linter, the planner, the coverage index and the scaffolding work without ROS.
 
 ## Your own project in five steps
 
@@ -110,7 +112,7 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 
 ## A project's own gate checks
 
-A check is a bash script that prints one `PASS:`, `FAIL:` or `SKIP:` line and exits 0, 1 or 3 (see `declarative_robot_trials/preflight/README.md`). The package ships the general ones (topic rates, node presence, disk, memory, DDS buffers, the stop latch, the bag directory, hosts, GPU memory, and several robot-specific ones). A project adds its own under `<experiments root>/common/preflight/checks/<name>.sh`; a project check with the same name as a packaged one wins. The helper the packaged checks source is passed as `$PF_LIB`.
+A check is a bash script that prints one `PASS:`, `FAIL:` or `SKIP:` line and exits 0, 1 or 3 (see `robofacts/preflight/README.md`). The package ships the general ones (topic rates, node presence, disk, memory, DDS buffers, the stop latch, the bag directory, hosts, GPU memory, and several robot-specific ones). A project adds its own under `<experiments root>/common/preflight/checks/<name>.sh`; a project check with the same name as a packaged one wins. The helper the packaged checks source is passed as `$PF_LIB`.
 
 ## Development
 

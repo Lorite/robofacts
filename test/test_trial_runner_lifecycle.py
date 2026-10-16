@@ -24,8 +24,8 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_runner as tr
+from robofacts import campaign_spec as cs
+from robofacts import trial_runner as tr
 pytestmark = [
     pytest.mark.skipif(shutil.which("ros2") is None,
                        reason="needs ROS 2 (run inside the dev container)"),

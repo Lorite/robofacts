@@ -16,10 +16,10 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from declarative_robot_trials import campaign_plan as cp
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import trial_index as ti
-from declarative_robot_trials import trial_runner as tr
+from robofacts import campaign_plan as cp
+from robofacts import campaign_spec as cs
+from robofacts import trial_index as ti
+from robofacts import trial_runner as tr
 CORE = """
 version: 1
 factors:
@@ -198,7 +198,7 @@ def test_a_launch_arg_value_with_a_space_stays_one_argument(root):
     the adoption test did with `world_file: "<world>.sdf -s"`. That works only if the value
     reaches `ros2 launch` as ONE argument, locally (Popen gets the list) and remotely
     (ssh + docker exec + shell -c)."""
-    from declarative_robot_trials import remote_exec_utils as rx
+    from robofacts import remote_exec_utils as rx
 
     (root / "common" / "config" / "factors.yaml").write_text(
         CORE + """  world:
@@ -266,7 +266,7 @@ def test_record_profile_factor_selects_the_topic_set(pieces, monkeypatch):
         captured["profile"] = profile
         return ["ros2", "bag", "record", "-o", output]
 
-    monkeypatch.setitem(sys.modules, "declarative_robot_trials.record_profiles",
+    monkeypatch.setitem(sys.modules, "robofacts.record_profiles",
                         type("m", (), {"build_record_command": staticmethod(fake_build),
                                        "default_cf_name": staticmethod(lambda: "cf1")}))
     tr.record_command(trial, factors, config, Path("/bags/x"))
@@ -889,7 +889,7 @@ def test_scratch_tally_says_scratch_and_counts_for_nothing(root, pieces, capsys)
 
 def test_scratch_leaves_no_slim_copy_by_default(root, pieces, monkeypatch):
     calls: list = []
-    monkeypatch.setitem(sys.modules, "declarative_robot_trials.slim_bag_archive",
+    monkeypatch.setitem(sys.modules, "robofacts.slim_bag_archive",
                         type("m", (), {"archive_and_sync": staticmethod(
                             lambda bag, target, **kw: calls.append(bag))}))
     _, config, _ = pieces
@@ -923,7 +923,7 @@ def test_start_background_quiet_sink_bypasses_stdout(tmp_path, capsys):
     (tagged) and never the terminal."""
     import io
     import time as _time
-    from declarative_robot_trials import remote_exec_utils as reu
+    from robofacts import remote_exec_utils as reu
     sink = io.StringIO()
     proc = reu.start_background(["bash", "-c", "echo pumped-line"], None,
                                 cwd=tmp_path, label="stack", quiet_sink=sink)
@@ -943,7 +943,7 @@ def test_a_package_module_runs_through_the_shim_or_the_installed_package():
     cmd = tr.package_module_command(Path("/ws"), "export_rosout_text", ["/ws/bags/t 1"])
     assert cmd[:2] == ["sh", "-c"]
     assert "if [ -f /ws/experiments/common/scripts/export_rosout_text.py ]" in cmd[2]
-    assert "python3 -m declarative_robot_trials.export_rosout_text '/ws/bags/t 1'" in cmd[2]
+    assert "python3 -m robofacts.export_rosout_text '/ws/bags/t 1'" in cmd[2]
 
 
 def test_a_remote_trial_exports_rosout_on_the_rig(capsys):

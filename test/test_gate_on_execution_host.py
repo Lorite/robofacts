@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from declarative_robot_trials import campaign_spec as cs
-from declarative_robot_trials import preflight_gate as pg
-from declarative_robot_trials import remote_exec_utils as rx
-from declarative_robot_trials import trial_runner as tr
+from robofacts import campaign_spec as cs
+from robofacts import preflight_gate as pg
+from robofacts import remote_exec_utils as rx
+from robofacts import trial_runner as tr
 
 from test_trial_runner import CAMPAIGN, CONTRACT, CORE, RUNNER, FakeHooks  # noqa: F401
 
@@ -238,7 +238,7 @@ def test_every_relative_import_of_the_ui_resolves():
     level up, since the package split of 2026-10-13: every remote path of the web UI (the
     gate on the rig, the stops, the viewers) raised ImportError when it was used."""
     import ast
-    ui_dir = PACKAGE_ROOT / "declarative_robot_trials" / "ui"
+    ui_dir = PACKAGE_ROOT / "robofacts" / "ui"
     package_dir = ui_dir.parent
     missing = []
     for source in ui_dir.glob("*.py"):
@@ -255,7 +255,7 @@ def test_every_relative_import_of_the_ui_resolves():
 @pytest.mark.parametrize("remote", [True, False])
 def test_the_ui_gate_runs_on_the_trial_host_or_with_its_setup(pieces, monkeypatch, remote):
     pytest.importorskip("flask")
-    from declarative_robot_trials.ui import app
+    from robofacts.ui import app
 
     _, config = pieces
     if remote:
