@@ -217,7 +217,10 @@ def write_changes(path: Path, summary: Dict[str, List[Dict[str, Any]]], header: 
     text = ("# Parameters changed during a robofacts Explore session.\n"
             "# Nothing here reached a trial. To keep a value, change the launch default or a\n"
             "# factor level in the experiment's declarations, and review it like any other change.\n"
-            "# from: null means the starting value is unknown (the node could not be read).\n")
+            "# from: null means the starting value is unknown (the node could not be read).\n"
+            "# A changed value took effect only if the node reads it while running (an on-set\n"
+            "# parameter callback). Many nodes read a parameter once, at startup.\n"
+            "# reverted: set during the session, but ended at the starting value.\n")
     path.write_text(text + yaml.safe_dump(body, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
@@ -423,7 +426,11 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
             "status": result.status, "writable": list(s.param_whitelist)})
         changed = change_lines(result.summary)
         print(f"[explore] {len(changed)} parameter(s) changed"
-              + (f", {len(result.summary['reverted'])} changed and set back" if result.summary["reverted"] else ""))
+              + (f", {len(result.summary['reverted'])} set but ended at the starting value"
+                 if result.summary["reverted"] else ""))
+        if changed:
+            print("[explore]   a change took effect only in nodes that read the parameter while "
+                  "running; many read it once, at startup")
         for line in changed:
             print(f"[explore]   {line}")
         print(f"[explore] written to {out_dir / 'parameter_changes.yaml'}")

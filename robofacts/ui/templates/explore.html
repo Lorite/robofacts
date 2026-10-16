@@ -27,7 +27,7 @@
     <span class="small muted">or <a id="weblink" href="#" target="_blank" rel="noopener">in the web app</a>, or by hand: Open connection → Foxglove WebSocket → <code id="wsurl"></code></span></p>
   <p id="tunnelrow" class="small" style="display:none">The stack runs on <b id="tunnelhost"></b>: open this tunnel on the laptop first.
     <code id="tunnelcmd"></code><button type="button" class="btn-small" id="tunnelcopy" data-copy="">⧉</button></p>
-  <p class="small muted">Change a parameter in Foxglove's Parameters panel. Every change is logged, and when you stop, the page lists what changed (from, to). To keep a value, change the launch default or a factor level in the declarations.</p>
+  <p class="small muted">Change a parameter in Foxglove's Parameters panel. It takes effect only in a node that reads it while running (many read their parameters once, at startup). Every change is logged, and when you stop, the page lists what changed (from, to). To keep a value, change the launch default or a factor level in the declarations.</p>
 </div>
 
 {% if run.state in ('running', 'aborting') %}
@@ -121,10 +121,10 @@ async function poll() {
         + `<td><code>${c.deleted ? '(deleted)' : esc(JSON.stringify(c.to))}</code></td>`
         + `<td class="num">${c.times_changed}</td></tr>`).join('');
       const reverted = (x.reverted || []).length
-        ? `<p class="small muted">Changed and set back to the starting value: ${x.reverted.map(n => '<code>' + esc(n) + '</code>').join(', ')}.</p>` : '';
+        ? `<p class="small muted">Set, but ended at the starting value: ${x.reverted.map(n => '<code>' + esc(n) + '</code>').join(', ')}.</p>` : '';
       document.getElementById('changestable').innerHTML = rows
         ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>to</th><th class="num">changes</th></tr></thead><tbody>${rows}</tbody></table></div>`
-          + `<p class="small muted">Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` + reverted
+          + `<p class="small muted">A change took effect only in a node that reads the parameter while running (an on-set parameter callback). Many nodes read a parameter once, at startup, so Foxglove shows the new value while the node still uses the old one. Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` + reverted
         : `<p class="small muted">No parameter changed during this exploration.</p>` + reverted;
     }
   }
