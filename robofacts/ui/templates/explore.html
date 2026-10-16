@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "_macros.html" import step_cell with context %}
+{% set section = 'experiments' %}
+{% block title %}Explore · {{ run.campaign_file }} · Trials{% endblock %}
+{% block body %}
+<h1>Explore: {{ run.campaign_file }} <small>{{ run.experiment }}</small></h1>
+<p class="small">The stack of one condition, live, with a Foxglove view that may change parameters. <b>No T-0 gate, no recording, no action</b>: an exploration never counts as coverage, and its stack is never reused by a trial.</p>
+
+<div class="cards">
+  <div class="card"><div class="k">state</div><div class="v" id="state">{{ run.state }}</div></div>
+  <div class="card" style="flex:2 1 20rem"><div class="k">condition</div><div class="v" style="font-size:.9rem;overflow-wrap:anywhere">{% for k, v in run.explore.condition.items() %}<div>{{ k }}=<b>{{ v }}</b></div>{% endfor %}</div></div>
+  <div class="card" style="flex:2 1 20rem"><div class="k">parameters</div><div class="v" style="font-size:.9rem;overflow-wrap:anywhere">{{ run.explore.settings }}</div></div>
+</div>
+<p id="phase" class="small"></p>
+<p id="error" class="bad">{{ run.error }}</p>
+
+<div id="waitconfirm" class="panel warnp" style="display:{{ 'flex' if run.awaiting_kind else 'none' }};gap:1rem;align-items:center;flex-wrap:wrap">
+  <div style="flex:1 1 20rem"><b>⏸ WAITING FOR YOU</b>: do the 👤 manual steps below, then confirm. Nothing has launched yet.</div>
+  <form method="post" action="{{ url_for('proceed', run_id=run.run_id) }}" style="margin:0">
+    <button type="submit" class="btn-ok">✔ Steps done: launch the stack</button>
+  </form>
+</div>
+
+<div id="connect" class="panel livep" style="display:none">
+  <h3 style="margin-top:0">🔭 Live: open it in Foxglove</h3>
+  <p><a id="deeplink" class="btn-primary" href="#" style="text-decoration:none;padding:.35rem .8rem;border-radius:6px">▶ Open in Foxglove</a>
+    <span class="small muted">or <a id="weblink" href="#" target="_blank" rel="noopener">in the web app</a>, or by hand: Open connection → Foxglove WebSocket → <code id="wsurl"></code></span></p>
+  <p id="tunnelrow" class="small" style="display:none">The stack runs on <b id="tunnelhost"></b>: open this tunnel on the laptop first.
+    <code id="tunnelcmd"></code><button type="button" class="btn-small" id="tunnelcopy" data-copy="">⧉</button></p>
+  <p class="small muted">Change a parameter in Foxglove's Parameters panel. Every change is logged, and when you stop, the page lists what changed (from, to). To keep a value, change the launch default or a factor level in the declarations.</p>
+</div>
+
+{% if run.state in ('running', 'aborting') %}
+<form method="post" action="{{ url_for('abort_run', run_id=run.run_id) }}" id="stopform">
+  <button class="btn-exec" type="submit">■ Stop exploring: take the stack down</button>
+  <span class="small muted">Nothing is recorded or flown, so the stack stops at once. E-STOP in the bar above stops the robots too.</span>
+</form>
+{% endif %}
+
+{% if run.operator_steps %}
+<div class="panel warnp">
+  <b>👤 Your manual steps for this campaign</b>:
+  <ol class="small" style="padding-left:1.2rem">
+    {% for step in run.operator_steps %}{{ step_cell(step, 'pre', loop.index0, run.experiment, run.campaign_file) }}{% endfor %}
+  </ol>
+</div>
+{% endif %}
+
+<div id="changes" style="display:none">
+  <h2>Parameters changed <small id="changesfile"></small></h2>
+  <div id="changestable"></div>
+</div>
+
+<h2>Terminal <small>the stack, the bridge and the explore steps</small></h2>
+<div class="filters small" style="align-items:center">
+  <label style="flex-direction:row;gap:.3rem"><input type="checkbox" id="onlyprob"> problems only</label>
+  <label style="flex-direction:row;gap:.3rem"><input type="checkbox" id="follow" checked> follow</label>
+  <span id="logcount" class="muted"></span>
+</div>
+<pre id="termlog" class="term">waiting for output…</pre>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const apiUrl = location.origin + {{ url_for('api_run', run_id=run.run_id)|tojson }};
+const filesUrl = {{ url_for('files', experiment=run.experiment, rel='__REL__')|tojson }};
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let lastLog = [];
+function renderLog() {
+  const pre = document.getElementById('termlog');
+  const only = document.getElementById('onlyprob').checked;
+  const lines = lastLog.filter(e => !only || e.lvl !== 'info').map(e => e.text);
+  pre.textContent = lines.length ? lines.join('\n') : 'no output yet';
+  document.getElementById('logcount').textContent = `${lines.length} / ${lastLog.length} lines`;
+  if (document.getElementById('follow').checked) pre.scrollTop = pre.scrollHeight;
+}
+document.addEventListener('change', e => { if (e.target.matches('#onlyprob, #follow')) renderLog(); });
+
+async function poll() {
+  let d;
+  try {
+    const r = await fetch(apiUrl);
+    if (!r.ok) { document.getElementById('phase').textContent = 'lost the run (HTTP ' + r.status + '): this UI may have restarted.'; return; }
+    d = await r.json();
+  } catch (err) {
+    document.getElementById('phase').textContent = 'cannot reach the UI (' + err + '); retrying…';
+    setTimeout(poll, 3000); return;
+  }
+  const x = d.explore || {};
+  document.getElementById('state').textContent = d.state;
+  document.getElementById('error').textContent = d.error || '';
+  document.getElementById('waitconfirm').style.display = d.awaiting_kind ? 'flex' : 'none';
+  const phase = document.getElementById('phase');
+  const running = d.state === 'running' || d.state === 'aborting';
+  if (d.awaiting_kind) phase.textContent = 'paused before the launch: confirm the operator steps.';
+  else if (d.state === 'running' && !x.ready) phase.textContent = 'bringing the stack up: setup steps → parameter log → stack → settle → aux launches → bridge…';
+  else if (d.state === 'running') phase.textContent = 'live. The stack stays up until you stop it.';
+  else if (d.state === 'aborting') phase.textContent = 'stopping: bridge, aux launches, stack, parameter log…';
+  else phase.textContent = '';
+  const connect = document.getElementById('connect');
+  connect.style.display = (running && x.ready) ? 'block' : 'none';
+  if (x.ready) {
+    document.getElementById('deeplink').href = x.deep_link;
+    document.getElementById('weblink').href = x.web_link;
+    document.getElementById('wsurl').textContent = x.url;
+    document.getElementById('tunnelrow').style.display = x.tunnel ? 'block' : 'none';
+    document.getElementById('tunnelhost').textContent = x.host || '';
+    document.getElementById('tunnelcmd').textContent = x.tunnel || '';
+    document.getElementById('tunnelcopy').dataset.copy = x.tunnel || '';
+  }
+  if (!running) {
+    const f = document.getElementById('stopform'); if (f) f.remove();
+    if (x.status) {
+      document.getElementById('changes').style.display = 'block';
+      const file = x.out_dir ? `${x.out_dir}/parameter_changes.yaml` : '';
+      document.getElementById('changesfile').innerHTML = file
+        ? `<a href="${filesUrl.replace('__REL__', file)}">${esc(file)}</a>` : '';
+      const rows = (x.changed || []).map(c =>
+        `<tr><td><code>${esc(c.node)}</code></td><td><code>${esc(c.parameter)}</code></td>`
+        + `<td><code>${esc(JSON.stringify(c.from))}</code></td>`
+        + `<td><code>${c.deleted ? '(deleted)' : esc(JSON.stringify(c.to))}</code></td>`
+        + `<td class="num">${c.times_changed}</td></tr>`).join('');
+      const reverted = (x.reverted || []).length
+        ? `<p class="small muted">Changed and set back to the starting value: ${x.reverted.map(n => '<code>' + esc(n) + '</code>').join(', ')}.</p>` : '';
+      document.getElementById('changestable').innerHTML = rows
+        ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>to</th><th class="num">changes</th></tr></thead><tbody>${rows}</tbody></table></div>`
+          + `<p class="small muted">Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` + reverted
+        : `<p class="small muted">No parameter changed during this exploration.</p>` + reverted;
+    }
+  }
+  lastLog = d.log || [];
+  renderLog();
+  if (['finished', 'aborted', 'error'].includes(d.state)) return;
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+{% endblock %}

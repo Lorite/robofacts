@@ -85,6 +85,12 @@ L15 a campaign's spoken cues (`voice_cues`, `voice_announce`, 2026-10-13) are
     or after runner.yaml's `action_timeout_s`: the runner stops the timeline
     when the action ends, so such a cue would never be spoken, and the
     operator who waits for it would wait in vain.
+L16 on a real robot (`simulation: false`), runner.yaml's `explore:` block may
+    not open every parameter (2026-10-16, Explore mode). Its
+    `param_whitelist` is what a Foxglove tab may change on a running stack, so
+    a pattern such as `.*` would make every gain and every safety limit of the
+    robot writable from a browser. Name each parameter you allow. In
+    simulation the default is `['.*']` and this rule does not apply.
 """
 from __future__ import annotations
 
@@ -98,6 +104,7 @@ import yaml
 
 
 from . import campaign_spec as cs
+from . import explore as ex
 from . import trial_runner as tr
 from . import roots
 from .preflight import run_preflight
@@ -559,3 +566,16 @@ def test_voice_cues_are_speakable(experiment):
     for path in campaigns_of(experiment):
         problems += voice_lint_problems(path, factors, config.action_timeout_s)
     assert not problems, "\n  ".join(problems)
+
+
+@pytest.mark.parametrize("experiment", experiments_with_runner())
+def test_explore_does_not_open_every_parameter_of_a_real_robot(experiment):
+    """L16 - on hardware, each parameter Explore may change is named."""
+    config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
+    if config.simulation or not config.explore_declared:
+        return
+    wide = [p for p in config.explore.get("param_whitelist", []) if ex.matches_everything(p)]
+    assert not wide, (
+        f"{experiment}: explore.param_whitelist has {wide}, which matches every parameter. "
+        f"On real robots Explore lets a Foxglove tab change these on the running stack, so "
+        f"name the parameters you allow, one pattern each (for example '^/cf1/controller\\.kp$')")

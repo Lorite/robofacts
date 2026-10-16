@@ -59,6 +59,7 @@ from .. import campaign_live_steps as cls_mod
 from .. import code_version as cv
 from .. import campaign_plan as cp
 from .. import campaign_spec as cs
+from .. import explore as ex
 from .. import trial_index as ti
 from .. import trial_records as trec
 from .. import trial_runner as tr
@@ -143,7 +144,15 @@ class ActiveRun:
     #: so isatty() alone cannot tell the UI's worker from a CLI operator.
     awaiting_kind: str = ""     # "" | "steps" | "pose"
     awaiting_what: str = ""     # the pending trial's description
+    #: "campaign" (trials, dry or executed) or "explore" (explore.py: a live
+    #: stack, never coverage). An exploration has its own page and its Stop
+    #: takes the stack down at once, because nothing is recorded or flown.
+    kind: str = "campaign"
+    #: For an exploration: the condition, how to connect Foxglove, and at the
+    #: end the parameters that changed and where the file is.
+    explore: Dict[str, Any] = field(default_factory=dict)
     _go: threading.Event = field(default_factory=threading.Event)
+    _stop: threading.Event = field(default_factory=threading.Event)
     _abort: bool = False
 
     def append_log(self, text: str) -> None:
@@ -170,7 +179,7 @@ class ActiveRun:
             # verdicts, and classifying those as "other" would hide the most
             # important lines behind an unrelated filter.
             head = line.lstrip()
-            if head.startswith(("[runner]", "[setup]", "[aux]", "[gate]", "[preflight]", "=== T-0",
+            if head.startswith(("[runner]", "[explore]", "[setup]", "[aux]", "[gate]", "[preflight]", "=== T-0",
                                 "PREFLIGHT", "PASS", "FAIL",
                                 "SKIP", "✓")) \
                     or "CHECK(S)" in line or "MACHINE CHECKS" in line:
@@ -179,7 +188,7 @@ class ActiveRun:
                 src = "stack"
             elif head.startswith("[recorder]"):
                 src = "recorder"
-            elif head.startswith(("[markerless_node]", "[livestream]")):
+            elif head.startswith(("[markerless_node]", "[livestream]", "[bridge]")):
                 src = "nodes"
             elif head.startswith(("[launch_stack]", "[aux:", "[record]")):
                 src = "runner"          # teardown bookkeeping
@@ -197,6 +206,7 @@ class ActiveRun:
                 "done": len(self.results), "results": list(self.results),
                 "awaiting_kind": self.awaiting_kind,
                 "awaiting_what": self.awaiting_what,
+                "kind": self.kind, "explore": dict(self.explore),
                 # The CLI's closing count, same function, so the two surfaces
                 # can never tell a different story about how the batch went.
                 "tally": tr.tally(r["status"] for r in self.results),
@@ -246,6 +256,9 @@ class RunManager:
                 return False
             run._abort = True
             run.state = "aborting"
+            # An exploration records nothing and flies nothing, so its Stop
+            # takes the stack down now instead of after "the current trial".
+            run._stop.set()
             # A worker parked on a browser confirmation must wake up to see
             # the abort, or "abort" would leave the run waiting forever for a
             # confirmation nobody intends to give. The waiting callback
@@ -365,6 +378,82 @@ class RunManager:
 
         threading.Thread(target=worker, name=f"run-{run_id}", daemon=True).start()
         return run
+
+    def start_explore(self, *, experiment: str, campaign, campaign_file: str, label: str,
+                      config, root: Path, journal, operator_steps=None) -> ActiveRun:
+        """Run explore.run_explore off the request thread, until Stop.
+
+        Same single slot as a campaign run: an exploration owns the stack, so a
+        trial started next to it would launch a second one on the same graph.
+        """
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + secrets.token_hex(3)
+        spec = next(campaign.combinations())
+        run = ActiveRun(run_id=run_id, experiment=experiment, campaign=label,
+                        campaign_file=campaign_file, wanted=0, executed=True, kind="explore",
+                        operator_steps=list(operator_steps or []),
+                        explore={"condition": dict(spec.values), "describe": spec.describe(),
+                                 "settings": ex.settings(config).describe(), "ready": False})
+        with self._lock:
+            self._runs[run_id] = run
+            self._current = run_id
+
+        class _Tee:
+            def __init__(self, stream, sink):
+                self._stream, self._sink = stream, sink
+
+            def write(self, text):
+                self._sink.append_log(text)
+                return self._stream.write(text)
+
+            def flush(self):
+                self._stream.flush()
+
+        def confirm_steps(trial, steps_list) -> bool:
+            run._go.clear()
+            run.awaiting_kind, run.awaiting_what = "steps", trial.describe()
+            run.append_log("[explore] waiting for the operator steps to be confirmed in the "
+                           "browser - nothing has launched")
+            run._go.wait()
+            run.awaiting_kind = run.awaiting_what = ""
+            return not run._abort
+
+        def on_ready(info) -> None:
+            run.explore.update(info)
+            run.explore["ready"] = True
+
+        def worker() -> None:
+            import contextlib
+            try:
+                with contextlib.redirect_stdout(_Tee(sys.stdout, run)):
+                    result = ex.run_explore(campaign, config, root, dry_run=False,
+                                            stop=run._stop, label=campaign_file,
+                                            confirm_steps=confirm_steps, on_ready=on_ready)
+                run.explore.update({
+                    "ready": False, "status": result.status, "detail": result.detail,
+                    "changed": result.summary["changed"],
+                    "reverted": [f"{t['node']}.{t['parameter']}" for t in result.summary["reverted"]],
+                    "out_dir": (str(result.out_dir.relative_to(root / experiment))
+                                if result.out_dir and result.out_dir.is_dir() else "")})
+                run.state = "error" if result.status in ("failed", "refused") else "finished"
+                run.error = result.detail if run.state == "error" else ""
+            except Exception as exc:  # noqa: BLE001 - surface it, never hang "running"
+                run.state = "error"
+                run.error = f"{type(exc).__name__}: {exc}"
+            finally:
+                changed = len(run.explore.get("changed") or [])
+                journal.add("explore", f"{experiment}/{label}: {run.state}, "
+                                       f"{changed} parameter(s) changed", run.error)
+
+        threading.Thread(target=worker, name=f"explore-{run_id}", daemon=True).start()
+        return run
+
+
+def explore_settings(root: Path, experiment: str) -> ex.ExploreSettings:
+    """Whether this experiment can be explored, and how, for the pages' buttons."""
+    try:
+        return ex.settings(tr.RunnerConfig.load(experiment, root))
+    except tr.RunnerError as exc:
+        return ex.ExploreSettings(False, f"its runner.yaml does not load ({exc})", [], [], 0, "")
 
 
 def summarize_gate_failure(output: str) -> str:
@@ -601,6 +690,7 @@ class ExperimentData:
         self.records = trec.load_records(root, experiment, campaigns=self.campaigns)
         self.trials = ti.load_trials(root, experiment)
         self.layouts = [f.name for f in trec.foxglove_layouts(root).get(experiment, [])]
+        self.explore = explore_settings(root, experiment)
         # Factor defaults, so a cell can mark its non-default values like the grid does.
         self.defaults: Dict[str, str] = {}
         for campaign in self.campaigns.values():
@@ -837,6 +927,8 @@ def create_app(experiments_root: Optional[Path] = None,
                 "replayable": sum(1 for r in data.records if r.slim_dir is not None),
                 "last": records[0].started if records else "",
                 "layouts": data.layouts,
+                "explore": data.explore,
+                "explore_campaign": next(iter(data.campaigns), ""),
             })
         rows.sort(key=lambda r: r["last"], reverse=True)
         return render_template("index.html", rows=rows, robots=load_robots(app),
@@ -1170,9 +1262,9 @@ def create_app(experiments_root: Optional[Path] = None,
 
         if confirm and runs.busy():
             return error(
-                "A campaign is already running. Two campaigns sharing one rig would "
-                "fight over the radio, the recorder and the airspace — wait for it, "
-                "or abort it first.", 409)
+                "A campaign or an exploration is already running. Two stacks sharing one rig "
+                "would fight over the radio, the recorder and the airspace — wait for it, "
+                "or stop it first.", 409)
 
         try:
             campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
@@ -1225,6 +1317,47 @@ def create_app(experiments_root: Optional[Path] = None,
                             pause_before_action=pose_pause,
                             operator_steps=operator_steps, live_steps=live_steps,
                             extra_verify=campaign.verify_steps)
+        return redirect(url_for("run_view", run_id=active.run_id))
+
+    @app.route("/explore", methods=["POST"])
+    @requires_auth
+    def explore():
+        """Bring up one campaign condition with a Foxglove view that may change parameters.
+
+        A client of explore.run_explore, like /run is of the runner: the picked
+        cell goes through the same `--set` path. No gate, no recorder, no
+        action. On hardware it needs the arm checkbox, like EXECUTE, because it
+        starts the robots' drivers.
+        """
+        experiment = request.form.get("experiment", "")
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404)
+        data = cache.get(experiment)
+        name = request.form.get("campaign") or next(iter(data.campaigns), "")
+        if not name:
+            return error(f"{experiment} declares no campaign that loads, so there is no "
+                         f"condition to explore.", 400)
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
+        pin = request.form.get("pin", "").strip()
+        try:
+            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
+                                        pin.split() if pin else [])
+            config = tr.RunnerConfig.load(experiment, root())
+        except (cs.SpecError, tr.RunnerError) as exc:
+            return error(str(exc), 400, crumbs)
+        settings = ex.settings(config)
+        if not settings.allowed:
+            return error(f"Explore is refused for {experiment}: {settings.reason}.", 400, crumbs)
+        if not config.simulation and request.form.get("explore_confirm") != "yes":
+            return error("This experiment runs real robots: tick “arm” next to Explore. "
+                         "Explore starts the robots' drivers, without a T-0 gate.", 400, crumbs)
+        if runs.busy():
+            return error("A campaign or an exploration is already running. Stop it first: "
+                         "two stacks on one graph would fight over every topic.", 409, crumbs)
+        label = f"{name} [explore{' ' + pin if pin else ''}]"
+        active = runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
+                                    label=label, config=config, root=root(), journal=journal,
+                                    operator_steps=annotate_steps(campaign.operator_steps))
         return redirect(url_for("run_view", run_id=active.run_id))
 
     @app.route("/preflight/<experiment>", methods=["POST"])
@@ -1334,7 +1467,8 @@ def create_app(experiments_root: Optional[Path] = None,
                   (run.campaign_file, url_for("campaign_view", experiment=run.experiment,
                                               name=run.campaign_file)),
                   ("run " + run.run_id, None)]
-        return render_template("run.html", run=run, crumbs=crumbs)
+        return render_template("explore.html" if run.kind == "explore" else "run.html",
+                               run=run, crumbs=crumbs)
 
     @app.route("/api/run/<run_id>.json")
     @requires_auth

@@ -1021,3 +1021,86 @@ def test_the_ui_speaks_the_papers_words(client, root):
     campaign = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert "EXECUTE: run the trial(s)" in campaign and "fly the trial" not in campaign
     assert "run the action" in campaign
+
+
+# --------------------------------------------------------------------------- #
+# Explore (explore.py, 2026-10-16): a live stack, never coverage
+# --------------------------------------------------------------------------- #
+def _simulated(root: Path) -> None:
+    path = root / "expA" / "config" / "runner.yaml"
+    path.write_text("simulation: true\n" + RUNNER, encoding="utf-8")
+
+
+def _wait_state(client, run_id, states, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        d = client.get(f"/api/run/{run_id}.json", headers=auth()).get_json()
+        if d["state"] in states:
+            return d
+        time.sleep(0.02)
+    raise AssertionError(f"run {run_id} never reached {states}: {d['state']}")
+
+
+def test_explore_is_refused_on_hardware_without_a_block(client):
+    r = client.post("/explore", data={"experiment": "expA", "campaign": "c"}, headers=auth())
+    assert r.status_code == 400 and b"explore:" in r.data
+    page = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert "Not available" in page
+
+
+def test_explore_runs_until_stop_and_shows_the_changes(client, root, monkeypatch):
+    from robofacts import explore as ex
+    _simulated(root)
+    seen = {}
+
+    def fake_run_explore(campaign, config, experiments_root, **kw):
+        seen.update(kw, campaign=campaign)
+        out = experiments_root / "expA" / "runs" / "explore" / "x_explore_c"
+        out.mkdir(parents=True)
+        kw["on_ready"]({"url": "ws://localhost:8765", "deep_link": "foxglove://x", "web_link": "w",
+                        "tunnel": "", "host": "this machine", "port": 8765, "writable": [".*"]})
+        print("[explore] READY")
+        kw["stop"].wait(5)
+        spec = next(campaign.combinations())
+        return ex.ExploreResult(spec, "explored", "", out, [], summary={
+            "changed": [{"node": "/stack", "parameter": "kp", "from": 1, "to": 2, "times_changed": 1}],
+            "reverted": []})
+
+    monkeypatch.setattr(ex, "run_explore", fake_run_explore)
+    page = client.get("/", headers=auth()).get_data(as_text=True)
+    assert "🔭 Explore" in page
+    r = client.post("/explore", data={"experiment": "expA", "campaign": "c",
+                                      "pin": "trajectory=circle"}, headers=auth())
+    assert r.status_code == 302, r.data
+    run_id = r.headers["Location"].rsplit("/", 1)[1]
+    d = _wait_state(client, run_id, ("running",))
+    assert d["kind"] == "explore"
+    deadline = time.monotonic() + 5
+    while not client.get(f"/api/run/{run_id}.json", headers=auth()).get_json()["explore"].get("ready"):
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    # The picked cell went through the --set path.
+    assert next(seen["campaign"].combinations()).values["trajectory"] == "circle"
+    assert seen["dry_run"] is False
+    page = client.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
+    assert "Explore: c" in page and "Stop exploring" in page
+    # One stack at a time: neither a second exploration nor an EXECUTE may start.
+    assert client.post("/explore", data={"experiment": "expA", "campaign": "c"},
+                       headers=auth()).status_code == 409
+    assert client.post("/run", data={"experiment": "expA", "campaign": "c", "go": "execute",
+                                     "confirm": "yes"}, headers=auth()).status_code == 409
+    client.post(f"/run/{run_id}/abort", headers=auth())
+    d = _wait_state(client, run_id, ("finished", "error"))
+    assert d["state"] == "finished", d["error"]
+    assert d["explore"]["changed"][0]["parameter"] == "kp"
+    assert d["explore"]["out_dir"] == "runs/explore/x_explore_c"
+
+
+def test_explore_on_hardware_needs_the_arm(client, root):
+    path = root / "expA" / "config" / "runner.yaml"
+    path.write_text("simulation: false\nexplore:\n  param_whitelist: ['^/cf1/kp$']\n" + RUNNER,
+                    encoding="utf-8")
+    r = client.post("/explore", data={"experiment": "expA", "campaign": "c"}, headers=auth())
+    assert r.status_code == 400 and "arm".encode() in r.data
+    page = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert 'name="explore_confirm"' in page

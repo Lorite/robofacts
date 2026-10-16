@@ -178,6 +178,14 @@ class RunnerConfig:
     #: timeout as its reason. Found by the lab-day sim test: an action blocked on
     #: a dead crazyswarm2 server kept the trial, and the recorder, open forever.
     action_timeout_s: Optional[float] = None
+    #: The EXPLORE block (2026-10-16, explore.py): which parameters the explore
+    #: bridge may change from Foxglove, and where it listens. Empty means the
+    #: defaults, which explore.settings() decides from `simulation`: open in
+    #: simulation, refused on hardware until this block is declared.
+    explore: Dict[str, Any] = field(default_factory=dict)
+    #: Whether runner.yaml SAYS `explore:` at all. On hardware the declaration
+    #: is the opt-in, so an absent block and an empty one are not the same.
+    explore_declared: bool = False
 
     def bags_root_for(self, host_level: Optional[Any]) -> Optional[str]:
         """The bags_root that applies to a trial running on ``host_level``."""
@@ -295,6 +303,8 @@ class RunnerConfig:
             simulation=_strict_bool(raw.get("simulation", False), "simulation", path),
             simulation_declared="simulation" in raw,
             action_timeout_s=_positive_or_none(raw.get("action_timeout_s"), "action_timeout_s", path),
+            explore=_explore_block(raw.get("explore"), path),
+            explore_declared="explore" in raw,
         )
 
 
@@ -311,6 +321,54 @@ def _strict_bool(value: Any, name: str, path: Path) -> bool:
     if not isinstance(value, bool):
         raise RunnerError(f"{path}: {name} must be true or false, got {value!r}")
     return value
+
+
+#: The keys an `explore:` block may carry, and what each must be.
+EXPLORE_KEYS = {"param_whitelist": "a list of regular expressions",
+                "topic_whitelist": "a list of regular expressions",
+                "port": "a port number", "address": "an address to bind"}
+
+
+def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
+    """runner.yaml's `explore:` block, checked for shape (explore.py gives it meaning).
+
+    Refused here, at load time, rather than when the explore bridge starts: a
+    misspelled key (`param_whitlist`) would otherwise fall back to the default
+    silently, and on hardware the default is "no parameter may change".
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise RunnerError(f"{path}: explore must be a mapping with "
+                          f"{', '.join(EXPLORE_KEYS)}, got {raw!r}")
+    unknown = sorted(set(raw) - set(EXPLORE_KEYS))
+    if unknown:
+        raise RunnerError(f"{path}: explore has unknown key(s) {', '.join(unknown)}; "
+                          f"the known ones are {', '.join(EXPLORE_KEYS)}")
+    out: Dict[str, Any] = {}
+    for key in ("param_whitelist", "topic_whitelist"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, list) or not all(isinstance(p, str) and p for p in value):
+            raise RunnerError(f"{path}: explore.{key} must be {EXPLORE_KEYS[key]}, got {value!r}")
+        for pattern in value:
+            try:
+                _re.compile(pattern)
+            except _re.error as exc:
+                raise RunnerError(f"{path}: explore.{key} entry {pattern!r} is not a "
+                                  f"regular expression ({exc})") from None
+        out[key] = list(value)
+    if "port" in raw:
+        port = raw["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise RunnerError(f"{path}: explore.port must be a port number, got {port!r}")
+        out["port"] = port
+    if "address" in raw:
+        if not isinstance(raw["address"], str) or not raw["address"]:
+            raise RunnerError(f"{path}: explore.address must be an address, got {raw['address']!r}")
+        out["address"] = raw["address"]
+    return out
 
 
 def _named_commands(raw: Any, field_name: str, path: Path) -> List[Dict[str, Any]]:

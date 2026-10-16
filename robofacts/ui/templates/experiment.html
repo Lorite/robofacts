@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import trials_table, filter_bar, table_hint, status_badge, replay, gate_badge with context %}
+{% from "_macros.html" import trials_table, filter_bar, table_hint, status_badge, replay, gate_badge, explore_button with context %}
 {% set section = 'experiments' %}
 {% block title %}{{ experiment }} · Trials{% endblock %}
 {% block body %}
@@ -14,16 +14,17 @@
 {% if campaigns %}
 <div class="tablewrap">
 <table class="sortable">
-<thead><tr><th>campaign</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still missing</th>
+<thead><tr><th>campaign</th><th data-nosort title="this campaign's first condition, live in Foxglove, parameters changeable: never coverage">explore</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still missing</th>
   <th class="num" title="attempts the T-0 gate refused (attempt ledger)">blocked</th><th>last run</th><th>what it is</th></tr></thead>
 <tbody>
 {% for c in campaigns %}
 {% if c.error %}
 <tr><td><a href="{{ url_for('campaign_view', experiment=experiment, name=c.name) }}">{{ c.name }}</a></td>
-  <td colspan="6" class="bad small">does not load: {{ c.error }}</td></tr>
+  <td colspan="7" class="bad small">does not load: {{ c.error }}</td></tr>
 {% else %}
 <tr class="{{ 'todo' if c.plan.needed }}">
   <td class="nowrap"><a href="{{ url_for('campaign_view', experiment=experiment, name=c.name) }}"><b>{{ c.name }}</b></a></td>
+  <td class="nowrap">{{ explore_button(experiment, c.name, data.explore) }}</td>
   <td class="num">{{ c.plan.wanted }}</td><td class="num">{{ c.plan.covered }}</td>
   <td class="num"><b>{{ c.plan.needed }}</b></td>
   <td class="num">{{ c.blocked or '—' }}</td>

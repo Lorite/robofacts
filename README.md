@@ -73,6 +73,7 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 |---|---|
 | `trials plan <campaign>` | what the campaign still needs, against the recorded usable trials |
 | `trials run <campaign>` | a dry run of the next trials, `--execute` runs them, `--scratch` one diagnostic run |
+| `trials explore <campaign>` | one condition's stack, live in Foxglove, with the parameters `runner.yaml` allows writable. No gate, no recording, no action, so never coverage. At stop it writes `parameter_changes.yaml`. A dry run without `--execute` |
 | `trials index` | the coverage index, `--condition-space` one condition across experiments |
 | `trials validate <exp \| campaign>` | is it ready for a first trial: check, plan, gate, the lint and the tests of that experiment, a dry run per host. One verdict |
 | `trials lint` | every declaration against the rules (pytest), `--experiment <exp>` for one experiment |
@@ -108,6 +109,7 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 | domain | simulation or hardware, recorded per trial | `domain` in `trial_metadata.json`, from `simulation:` in `runner.yaml` |
 | reduced bag | the recording without images, a few MB, copied back from the rig | the slim copy, `bags_slim/<trial>_slim/` |
 | scratch recording | a diagnostic trial through the campaign's stack and gate, never coverage | `trials run … --scratch`, `bags_scratch/` |
+| exploration | one condition's stack brought up live to debug and tune it, with a Foxglove bridge that may change parameters; never a trial, never coverage | `trials explore`, the 🔭 Explore buttons, `runs/explore/<stamp>_explore/parameter_changes.yaml`, `explore:` in `runner.yaml` |
 | named analysis | a declared computation over a cohort of usable trials, with the exact bag list | `config/analyses.yaml`, `trials analyze`, `analysis_metadata.json` |
 
 ## A project's own gate checks

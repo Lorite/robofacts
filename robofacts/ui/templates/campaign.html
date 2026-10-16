@@ -151,6 +151,21 @@
     <label class="small"><input type="checkbox" name="skip_gate" value="yes"> ⚠ skip the gate</label>
     <span class="small muted">refuses unless armed; a skipped gate is written into the run's name in the journal</span>
   </div>
+  <div class="panel" id="explore" style="margin-top:.8rem">
+    <h3 style="margin-top:0">🔭 Explore the picked condition <small>before running trials</small></h3>
+    {% if data.explore.allowed %}
+    <p class="small">Brings up the stack of the cell picked above (or the campaign's first condition) with a live Foxglove view where {{ data.explore.describe() }}. <b>No T-0 gate, no recording, no action</b>: never coverage. It stays up until you press Stop, and then lists every parameter you changed.</p>
+    <div class="cmdline" style="align-items:center;flex-wrap:wrap">
+      {% if not data.explore.simulation %}<label><input type="checkbox" name="explore_confirm" value="yes"> arm (real robots)</label>{% endif %}
+      <button type="submit" formaction="{{ url_for('explore') }}" class="btn-primary">🔭 Explore: launch it live</button>
+    </div>
+    {% else %}
+    <p class="small muted">Not available: {{ data.explore.reason }}.</p>
+    {% endif %}
+    {% set explore_cli = 'trials explore experiments/' ~ experiment ~ '/campaigns/' ~ name ~ '.yaml --execute' %}
+    <div class="cmdline small"><span class="muted">From a terminal (Ctrl-C stops it):</span>
+      <code>{{ explore_cli }}</code><button type="button" class="btn-small" data-copy="{{ explore_cli }}">⧉</button></div>
+  </div>
   {% set scratch_cli = 'trials run experiments/' ~ experiment ~ '/campaigns/' ~ name ~ '.yaml --scratch --label <what> --execute' %}
   <div class="cmdline small" style="margin-top:.8rem"><span class="muted">A scratch recording (a diagnostic, never coverage) is CLI-only:</span>
     <code>{{ scratch_cli }}</code><button type="button" class="btn-small" data-copy="{{ scratch_cli }}">⧉</button></div>

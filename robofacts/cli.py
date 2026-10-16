@@ -2,6 +2,7 @@
 
     trials plan    experiments/<exp>/campaigns/<c>.yaml   what the campaign still needs
     trials run     experiments/<exp>/campaigns/<c>.yaml   dry run; --execute runs the trials
+    trials explore experiments/<exp>/campaigns/<c>.yaml   one condition's stack, live in Foxglove, never coverage
     trials index   --experiment <exp> --summary            the coverage index
     trials records <exp> [--campaign <c>] [--status <s>]   every trial with its bag, gate, analyses, video
     trials lint    [--experiment <exp>]                    the declarations against the rules
@@ -34,6 +35,11 @@ def _plan(argv):
 def _run(argv):
     from . import trial_runner
     return trial_runner.main(argv)
+
+
+def _explore(argv):
+    from . import explore
+    return explore.main(argv)
 
 
 def _index(argv):
@@ -181,6 +187,8 @@ def _roots(argv):
 COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "plan": (_plan, "what a campaign still needs (the planner)"),
     "run": (_run, "run the trials a campaign still needs (dry run without --execute)"),
+    "explore": (_explore, "bring up one condition's stack with a Foxglove view that may change "
+                          "parameters (dry run without --execute, never coverage)"),
     "index": (_index, "the coverage index over the recorded trials"),
     "records": (_records, "every trial of an experiment with its campaign, gate, slim bag, analyses, video"),
     "lint": (_lint, "check every declaration against the rules (pytest)"),

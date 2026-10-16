@@ -27,9 +27,11 @@
   </nav>
   {% if active_run %}
   <a class="runpill {{ 'waiting' if active_run.awaiting_kind }}" href="{{ url_for('run_view', run_id=active_run.run_id) }}"
-     title="a campaign is running in this UI">
+     title="{{ 'an exploration is live in this UI' if active_run.kind == 'explore' else 'a campaign is running in this UI' }}">
+    {% if active_run.kind == 'explore' %}{{ '⏸ waiting for you' if active_run.awaiting_kind else '🔭 EXPLORING' }}:
+    {{ active_run.experiment }} / {{ active_run.campaign_file }}{% else %}
     {{ '⏸ waiting for you' if active_run.awaiting_kind else ('▶ EXECUTING' if active_run.executed else '🔍 dry run') }}:
-    {{ active_run.experiment }} / {{ active_run.campaign }} ({{ active_run.results|length }}/{{ active_run.wanted }})</a>
+    {{ active_run.experiment }} / {{ active_run.campaign }} ({{ active_run.results|length }}/{{ active_run.wanted }}){% endif %}</a>
   {% endif %}
   <button type="button" class="themetoggle" id="themetoggle" title="theme: Auto follows the OS">◐ Auto</button>
 </header>

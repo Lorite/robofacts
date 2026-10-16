@@ -167,3 +167,16 @@
   {%- endif %}
 </li>
 {%- endmacro -%}
+
+{# The Explore button (explore.py): a live stack with a Foxglove view that may change
+   parameters, never coverage. In simulation it posts at once; on hardware it leads to
+   the campaign page, where the arm checkbox is. Refused experiments show why. #}
+{% macro explore_button(experiment, campaign, settings) -%}
+{% if not campaign %}<span class="muted" title="no campaign that loads">—</span>
+{% elif not settings.allowed %}<span class="muted small" title="{{ settings.reason }}">🔭 not available</span>
+{% elif settings.simulation %}<form method="post" action="{{ url_for('explore') }}" style="display:inline" title="bring up {{ campaign }}'s first condition with a live Foxglove view; {{ settings.describe() }}">
+  <input type="hidden" name="experiment" value="{{ experiment }}"><input type="hidden" name="campaign" value="{{ campaign }}">
+  <button type="submit" class="btn-small">🔭 Explore</button></form>
+{% else %}<a class="btn-small" href="{{ url_for('campaign_view', experiment=experiment, name=campaign) }}#explore" title="real robots: arm it on the campaign page">🔭 Explore…</a>
+{% endif %}
+{%- endmacro %}
