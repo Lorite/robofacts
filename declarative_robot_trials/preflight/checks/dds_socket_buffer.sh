@@ -35,6 +35,17 @@ RMEM_PATH=/proc/sys/net/core/rmem_max
 CONFIG="$(pf_arg config "")"
 MIN_BYTES="$(pf_arg min_bytes "")"
 
+# --- does the stack use CycloneDDS at all? --------------------------------------
+# The requirement is CycloneDDS's. With another RMW (Humble's default, when
+# RMW_IMPLEMENTATION is unset, is rmw_fastrtps_cpp) there is no Cyclone config to
+# demand a buffer, so the check does not apply. Without this skip, a project made
+# by `trials init` failed its first gate on any machine without a CycloneDDS
+# config (the package's CI, 2026-10-15). A lab container that sets
+# RMW_IMPLEMENTATION=rmw_cyclonedds_cpp keeps the FAIL on an unset CYCLONEDDS_URI.
+if [ -z "$CONFIG" ] && [ "${RMW_IMPLEMENTATION:-}" != "rmw_cyclonedds_cpp" ]; then
+    pf_skip "RMW_IMPLEMENTATION is '${RMW_IMPLEMENTATION:-unset, so the ROS 2 default}', not rmw_cyclonedds_cpp: no CycloneDDS buffer requirement applies"
+fi
+
 # --- resolve the active config ------------------------------------------------
 # Unreadable is a FAIL, never a skip: on this rig an unset CYCLONEDDS_URI is
 # itself the documented FALSE-DEAD TRAP (bash does not source /etc/zsh/zshenv),

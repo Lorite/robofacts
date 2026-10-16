@@ -20,7 +20,6 @@ HERE = Path(__file__).resolve().parent
 
 from declarative_robot_trials import campaign_spec as cs
 from declarative_robot_trials import operator_voice as ov
-from declarative_robot_trials import lint
 from declarative_robot_trials import trial_runner as tr
 CORE = """
 version: 1
@@ -142,6 +141,10 @@ def test_lint_l15_refuses_unknown_placeholders_and_cues_past_the_deadline(root):
     path = campaign(root, "voice_cues:\n  - {at_s: 0, text: 'Shape {trajectory}.'}\n"
                           "  - {at_s: 5, text: 'Battery {battery}.'}\n"
                           "  - {at_s: 120, text: 'Done.'}\n")
+    # Imported here, not at the top: lint resolves the experiments root at import, and
+    # the example project's root is set by a fixture, which runs after collection. A
+    # top-level import failed collection outside a project (the package's CI, 2026-10-15).
+    from declarative_robot_trials import lint
     problems = lint.voice_lint_problems(path, factors, action_timeout_s=100)
     assert any("{battery}" in p for p in problems)
     assert not any("{trajectory}" in p for p in problems)

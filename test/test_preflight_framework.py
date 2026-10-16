@@ -529,3 +529,27 @@ def test_a_wedged_daemon_cannot_hang_the_gate(monkeypatch, capsys):
     assert calls[1][0][:3] == ["pkill", "-KILL", "-f"] and "--ros-domain-id 42" in calls[1][0][3]
     assert calls[2] == (["ros2", "daemon", "start"], rp.DAEMON_START_TIMEOUT_S)
     assert "wedged" in capsys.readouterr().out
+
+
+def _dds_check(env_updates):
+    import os
+    env = {k: v for k, v in os.environ.items() if k not in ("RMW_IMPLEMENTATION", "CYCLONEDDS_URI")}
+    env.update(env_updates)
+    return subprocess.run(["bash", str(CHECKS_DIR / "dds_socket_buffer.sh")],
+                          capture_output=True, text=True, env=env)
+
+
+def test_dds_socket_buffer_skips_a_stack_that_does_not_use_cyclonedds():
+    """Humble's default RMW is Fast DDS: a project made by `trials init` on a machine
+    without a CycloneDDS config must not fail its first gate (the package's CI,
+    2026-10-15). Exit 3 is SKIP, which the gate does not count as a failure."""
+    for env in ({}, {"RMW_IMPLEMENTATION": "rmw_fastrtps_cpp"}):
+        result = _dds_check(env)
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "not rmw_cyclonedds_cpp" in result.stdout
+
+
+def test_dds_socket_buffer_still_fails_cyclonedds_without_a_config():
+    """The lab's false-dead trap stays a FAIL: Cyclone in use, its config unknown."""
+    result = _dds_check({"RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"})
+    assert result.returncode == 1 and "CYCLONEDDS_URI is unset" in result.stdout
