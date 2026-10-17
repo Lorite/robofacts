@@ -172,7 +172,9 @@ async function ctl(op, data, msgId) {
     j = await r.json().catch(() => ({ok: false, message: 'HTTP ' + r.status}));
   } catch (err) { j = {ok: false, message: String(err)}; }
   if (msg) { msg.textContent = (j.ok ? '✓ ' : '✗ ') + j.message; msg.className = 'small ' + (j.ok ? 'ok' : 'bad'); }
-  refresh();
+  // After Stop the poll loop has ended. An analysis started now must still be
+  // followed to its end (2026-10-17: the page kept saying "running").
+  if (polling) refresh(); else poll();
   return j;
 }
 document.addEventListener('click', e => {
@@ -386,9 +388,11 @@ async function refresh() {
   const analysing = ((x.live || {}).analyses || []).some(a => a.status === 'running');
   return ['finished', 'aborted', 'error'].includes(d.state) && !analysing;
 }
+let polling = false;
 async function poll() {
+  polling = true;
   const done = await refresh();
-  if (!done) setTimeout(poll, 1500);
+  if (!done) setTimeout(poll, 1500); else polling = false;
 }
 poll();
 </script>
