@@ -326,7 +326,8 @@ def _strict_bool(value: Any, name: str, path: Path) -> bool:
 #: The keys an `explore:` block may carry, and what each must be.
 EXPLORE_KEYS = {"param_whitelist": "a list of regular expressions",
                 "topic_whitelist": "a list of regular expressions",
-                "port": "a port number", "address": "an address to bind"}
+                "port": "a port number", "address": "an address to bind",
+                "viewers": "a list of {name, command}"}
 
 
 def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
@@ -368,6 +369,9 @@ def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
         if not isinstance(raw["address"], str) or not raw["address"]:
             raise RunnerError(f"{path}: explore.address must be an address, got {raw['address']!r}")
         out["address"] = raw["address"]
+    if "viewers" in raw:
+        # Windows for a human (a simulator GUI, RViz), started by Explore only.
+        out["viewers"] = _named_commands(raw["viewers"], "explore.viewers", path)
     return out
 
 

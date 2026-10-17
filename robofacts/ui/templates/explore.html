@@ -93,9 +93,9 @@ async function poll() {
   const phase = document.getElementById('phase');
   const running = d.state === 'running' || d.state === 'aborting';
   if (d.awaiting_kind) phase.textContent = 'paused before the launch: confirm the operator steps.';
-  else if (d.state === 'running' && !x.ready) phase.textContent = 'bringing the stack up: setup steps → parameter log → stack → settle → aux launches → bridge…';
+  else if (d.state === 'running' && !x.ready) phase.textContent = 'bringing the stack up: setup steps → parameter log → stack → settle → aux launches → bridge → viewers…';
   else if (d.state === 'running') phase.textContent = 'live. The stack stays up until you stop it.';
-  else if (d.state === 'aborting') phase.textContent = 'stopping: bridge, aux launches, stack, parameter log…';
+  else if (d.state === 'aborting') phase.textContent = 'stopping: viewers, bridge, aux launches, stack, parameter log…';
   else phase.textContent = '';
   const connect = document.getElementById('connect');
   connect.style.display = (running && x.ready) ? 'block' : 'none';

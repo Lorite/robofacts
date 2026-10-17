@@ -179,7 +179,7 @@ class ActiveRun:
             # verdicts, and classifying those as "other" would hide the most
             # important lines behind an unrelated filter.
             head = line.lstrip()
-            if head.startswith(("[runner]", "[explore]", "[setup]", "[aux]", "[gate]", "[preflight]", "=== T-0",
+            if head.startswith(("[runner]", "[explore]", "[viewer]", "[setup]", "[aux]", "[gate]", "[preflight]", "=== T-0",
                                 "PREFLIGHT", "PASS", "FAIL",
                                 "SKIP", "✓")) \
                     or "CHECK(S)" in line or "MACHINE CHECKS" in line:

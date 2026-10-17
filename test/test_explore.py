@@ -356,3 +356,48 @@ def test_the_logger_turns_events_into_lines():
                                 "value": 2.5}
     assert ep.event_lines(SimpleNamespace(node="/robofacts_explore_params"),
                           "/robofacts_explore_params") == []
+
+
+# --------------------------------------------------------------------------- #
+# Viewers (explore.viewers, 2026-10-17): windows for a human, never part of the stack
+# --------------------------------------------------------------------------- #
+VIEWERS = "explore:\n  viewers:\n    - {name: window, command: 'ros2 launch demo_pkg gui.launch.py gain:={arg_gain}'}\n"
+
+
+def test_viewers_start_after_the_bridge_and_stop_first(tmp_path):
+    campaign, config = load(make_root(tmp_path, RUNNER_SIM + VIEWERS), ["gain=high"])
+    fake = FakeHooks()
+    result = ex.run_explore(campaign, config, tmp_path, dry_run=False, hooks=fake.hooks(), max_s=0)
+    assert result.status == "explored"
+    assert [label for label, _ in fake.started] == ["params", "stack", "helper", "bridge", "window"]
+    assert fake.stopped[0] == "viewer:window" and fake.stopped[1] == "bridge"
+    assert dict(fake.started)["window"][-1] == "gain:=high"
+    assert "opens window" in ex.settings(config).describe()
+
+
+def test_viewers_do_not_change_the_stack(tmp_path):
+    campaign, config = load(make_root(tmp_path))
+    plain = ex.run_explore(campaign, config, tmp_path, dry_run=True)
+    campaign, config = load(make_root(tmp_path / "v", RUNNER_SIM + VIEWERS))
+    with_viewer = ex.run_explore(campaign, config, tmp_path / "v", dry_run=True)
+    # The aux launch names each run's own folder, so compare with the folders made equal.
+    same = [[a.replace(str(with_viewer.out_dir), str(plain.out_dir)) for a in c]
+            for c in with_viewer.commands]
+    assert same[:len(plain.commands)] == plain.commands
+    assert with_viewer.commands[-1][:3] == ["ros2", "launch", "demo_pkg"]
+
+
+def test_a_trial_never_runs_a_viewer(tmp_path):
+    root = make_root(tmp_path, RUNNER_SIM + VIEWERS)
+    campaign, config = load(root)
+    spec = next(campaign.combinations())
+    fake = FakeHooks()
+    tr.run_trial(spec, campaign.factors, config, root / "expA" / "bags", dry_run=False,
+                 hooks=fake.hooks(), pause_before_action=False)
+    assert not any("gui.launch.py" in " ".join(cmd) for _, cmd in fake.started)
+
+
+def test_a_viewer_without_a_command_refuses_to_load(tmp_path):
+    root = make_root(tmp_path, RUNNER_SIM + "explore:\n  viewers:\n    - {name: window}\n")
+    with pytest.raises(tr.RunnerError, match="explore.viewers"):
+        tr.RunnerConfig.load("expA", root)

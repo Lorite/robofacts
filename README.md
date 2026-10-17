@@ -73,7 +73,7 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 |---|---|
 | `trials plan <campaign>` | what the campaign still needs, against the recorded usable trials |
 | `trials run <campaign>` | a dry run of the next trials, `--execute` runs them, `--scratch` one diagnostic run |
-| `trials explore <campaign>` | one condition's stack, live in Foxglove, with the parameters `runner.yaml` allows writable. No gate, no recording, no action, so never coverage. At stop it writes `parameter_changes.yaml`. A dry run without `--execute` |
+| `trials explore <campaign>` | one condition's stack, live in Foxglove, with the parameters `runner.yaml` allows writable. No gate, no recording, no action, so never coverage. At stop it writes `parameter_changes.yaml`, and it opens the `explore.viewers` windows (a simulator GUI). A dry run without `--execute` |
 | `trials index` | the coverage index, `--condition-space` one condition across experiments |
 | `trials validate <exp \| campaign>` | is it ready for a first trial: check, plan, gate, the lint and the tests of that experiment, a dry run per host. One verdict |
 | `trials lint` | every declaration against the rules (pytest), `--experiment <exp>` for one experiment |

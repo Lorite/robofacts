@@ -162,6 +162,14 @@ def command_templates(config) -> list[tuple[str, str]]:
     return out
 
 
+def explore_templates(config) -> list[tuple[str, str]]:
+    """(where, template) of the commands only Explore runs (explore.viewers). Kept
+    apart from command_templates because a trial never runs them, so a factor a
+    viewer names is not thereby consumed (L3)."""
+    return [(f"explore.viewers:{v['name']}", v["command"])
+            for v in (config.explore or {}).get("viewers", [])]
+
+
 def probe_templates(config) -> list[tuple[str, str]]:
     """(where, template) of every metadata probe. Kept apart from
     command_templates because a probe READS a factor and never applies it, so
@@ -244,7 +252,7 @@ def test_command_placeholders_are_declared_factors(experiment):
     for factor in all_factors.values():
         if factor.maps_to.get("kind") == "launch_arg":
             launch_args |= set(factor.maps_to.get("names") or [factor.maps_to.get("name")])
-    for where, template in command_templates(config) + probe_templates(config):
+    for where, template in command_templates(config) + probe_templates(config) + explore_templates(config):
         for placeholder in PLACEHOLDER.findall(template):
             # A probe gets {bag} and {arg_*} like a verify step (2026-10-01).
             # Probes keep literal braces of their own (awk '{print $1}'), which
@@ -322,7 +330,7 @@ def test_flight_experiments_declare_a_verify_step(experiment):
 def test_commands_reference_scripts_that_exist(experiment):
     """L7 — a typo'd path fails on the rig, after the stack is up."""
     config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    for where, template in command_templates(config):
+    for where, template in command_templates(config) + explore_templates(config):
         # `ros2 launch <pkg> <file>.launch.py` names a launch file INSIDE a
         # package, resolved by ament at run time — not a path in this repo.
         launch_files = set(re.findall(r"ros2\s+launch\s+\S+\s+(\S+)", template))

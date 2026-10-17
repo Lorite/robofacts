@@ -12,6 +12,12 @@ arguments, the aux launches) and adds two things a trial never has:
   expressions of runner.yaml's ``explore.param_whitelist``. The trial
   livestream bridge stays read-only: a browser tab must never be able to change
   a flight that is being recorded as coverage;
+* the ``explore.viewers`` of runner.yaml (2026-10-17): windows for a human,
+  such as the simulator's GUI attached to its headless server (``gz sim -g``)
+  or RViz. They are started after the bridge and stopped first. They read the
+  running stack and change nothing in it, so the stack stays exactly the one a
+  trial starts (a campaign runs Gazebo headless, and a viewer does not change
+  that). A viewer that exits (its window closed) does not end the exploration;
 * a parameter log (explore_params.py) that starts before the stack and, at
   stop, writes every parameter that changed (from, to) to
   ``runs/explore/<stamp>_explore[_<label>]/parameter_changes.yaml``.
@@ -86,6 +92,8 @@ class ExploreSettings:
     topic_whitelist: List[str]
     port: int
     address: str
+    #: explore.viewers: the windows Explore opens after the bridge, as {name, command}.
+    viewers: List[Dict[str, Any]] = field(default_factory=list)
     #: The experiment's `simulation:`. On hardware the UI asks for the arm checkbox.
     simulation: bool = False
 
@@ -96,9 +104,12 @@ class ExploreSettings:
     def describe(self) -> str:
         if not self.allowed:
             return f"Explore is not available: {self.reason}"
+        opens = (", and it opens " + ", ".join(v["name"] for v in self.viewers)) if self.viewers else ""
         if not self.writable:
-            return "live view only: no parameter may be changed (explore.param_whitelist is empty)"
-        return "parameters matching " + ", ".join(f"`{p}`" for p in self.param_whitelist) + " may be changed"
+            return ("live view only: no parameter may be changed (explore.param_whitelist is empty)"
+                    + opens)
+        return ("parameters matching " + ", ".join(f"`{p}`" for p in self.param_whitelist)
+                + " may be changed" + opens)
 
 
 def settings(config: tr.RunnerConfig) -> ExploreSettings:
@@ -107,9 +118,10 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
     port = int(block.get("port", DEFAULT_PORT))
     address = str(block.get("address", DEFAULT_ADDRESS))
     topics = list(block.get("topic_whitelist", [".*"]))
+    viewers = list(block.get("viewers", []))
     if config.simulation:
         return ExploreSettings(True, "", list(block.get("param_whitelist", [".*"])), topics,
-                               port, address, simulation=True)
+                               port, address, viewers=viewers, simulation=True)
     if not config.explore_declared:
         return ExploreSettings(
             False, "this experiment runs real robots (simulation: false) and its runner.yaml "
@@ -121,8 +133,8 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
         return ExploreSettings(
             False, f"explore.param_whitelist has {', '.join(repr(p) for p in wide)}, which matches "
                    f"every parameter. On real robots name the parameters you allow, one pattern each",
-            whitelist, topics, port, address)
-    return ExploreSettings(True, "", whitelist, topics, port, address)
+            whitelist, topics, port, address, viewers=viewers)
+    return ExploreSettings(True, "", whitelist, topics, port, address, viewers=viewers)
 
 
 def _yaml_list(values: List[str]) -> str:
@@ -324,8 +336,11 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
                 for a in config.aux_launches]
     log_cmd = logger_command(target)
     bridge_cmd = bridge_command(s)
+    viewer_cmds = [(v["name"], tr.templated_command(v["command"], spec, f"viewer {v['name']}",
+                                                    **arg_ph))
+                   for v in s.viewers]
     commands = ([c for _, c, _ in setup_cmds] + [log_cmd, launch_cmd]
-                + [c for _, c in aux_cmds] + [bridge_cmd])
+                + [c for _, c in aux_cmds] + [bridge_cmd] + [c for _, c in viewer_cmds])
     info = connect_info(s, target)
     result = ExploreResult(spec, "dry-run", "nothing executed", out_dir, commands, connect=info)
     if dry_run:
@@ -369,6 +384,9 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
             print(f"[aux] {name}")
             procs[f"aux:{name}"] = hooks.start_background(cmd, target, cwd=cwd, label=name)
         procs["bridge"] = hooks.start_background(bridge_cmd, target, cwd=cwd, label="bridge")
+        for name, cmd in viewer_cmds:
+            print(f"[viewer] {name}")
+            procs[f"viewer:{name}"] = hooks.start_background(cmd, target, cwd=cwd, label=name)
         print(tr._c("32;1", f"[explore] READY - open Foxglove on {info['url']}"))
         if info["tunnel"]:
             print(f"[explore]   first, on the laptop: {info['tunnel']}")
@@ -399,8 +417,8 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
         result.detail = str(exc) if isinstance(exc, tr.RunnerError) else f"execution error: {exc}"
         print(tr._c("31;1", f"[explore] {result.detail}"))
     finally:
-        names = (["bridge"] + [f"aux:{n}" for n, _ in reversed(aux_cmds)]
-                 + ["launch_stack", "params"])
+        names = ([f"viewer:{n}" for n, _ in reversed(viewer_cmds)] + ["bridge"]
+                 + [f"aux:{n}" for n, _ in reversed(aux_cmds)] + ["launch_stack", "params"])
         for name in names:
             proc = procs.get(name)
             # A local process that already exited has nothing left to stop, and
