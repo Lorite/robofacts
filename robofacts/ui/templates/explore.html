@@ -71,6 +71,8 @@
       <span id="recstate" class="small"></span></p>
     <p class="small muted">To <code>bags_scratch/</code>, with the condition and the parameter values at the start in its metadata, then a slim copy that replays in Foxglove. Never coverage.</p>
     <div id="recordings"></div>
+    <div id="analyseslist"></div>
+    <p id="anamsg" class="small"></p>
     <p><textarea id="notetext" rows="2" style="width:100%" placeholder="a note: what you see, what you changed, why"></textarea></p>
     <p><button type="button" class="btn-primary" id="noteadd">✎ Add note</button>
       <button type="button" class="btn-soft" id="notemark">⚑ Mark this moment</button>
@@ -115,6 +117,8 @@
 <div id="changes" style="display:none">
   <h2>Parameters changed <small id="changesfile"></small></h2>
   <div id="changestable"></div>
+  <div id="keptanalyses"></div>
+  <p id="keptmsg" class="small"></p>
 </div>
 
 <h2>Terminal <small>the stack, the bridge and the explore steps</small></h2>
@@ -181,6 +185,11 @@ document.addEventListener('click', e => {
     ctl('jog', {vx: x * speed, vy: y * speed, vz: z * speed, yaw: w * yawTop * 0.5,
                 arm: arm && arm.checked ? 'yes' : ''}, 'actionmsg');
   } else if (t.id === 'actionstop' || t.id === 'jogstop') ctl('action_stop', {}, 'actionmsg');
+  else if (t.matches('.anabtn')) {
+    const sel = document.querySelector(`.anaselect[data-recording="${t.dataset.recording}"]`);
+    const live = document.getElementById('livepanels').style.display !== 'none';
+    ctl('analyze', {recording: t.dataset.recording, analysis: sel ? sel.value : ''}, live ? 'anamsg' : 'keptmsg');
+  }
   else if (t.matches('.setback')) ctl('set_back', {node: t.dataset.node, parameter: t.dataset.parameter}, 'setbackmsg');
   else if (t.id === 'recstart') ctl('record', {label: document.getElementById('reclabel').value}, 'recstate');
   else if (t.id === 'recstop') { t.disabled = true; ctl('record_stop', {}, 'recstate').then(() => { t.disabled = false; }); }
@@ -207,14 +216,28 @@ function changesTable(ch, live) {
         : (ch.reverted || []).length ? 'No parameter differs from its starting value now.'
         : 'No parameter changed yet. Change one in Foxglove\'s Parameters panel.'}</p>` + reverted;
 }
-function recordingsList(recs) {
+function analyzeControl(r, names) {
+  if (!names || !names.length) return '';
+  return ` <span class="nowrap"><select class="anaselect" data-recording="${esc(r.name)}">`
+    + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')
+    + `</select> <button type="button" class="btn-small anabtn" data-recording="${esc(r.name)}" title="run this per-bag analysis of analyses.yaml on the recording">📊 Analyze</button></span>`;
+}
+function analysesList(list) {
+  if (!list || !list.length) return '';
+  return '<ul class="small">' + list.map(a => {
+    const where = a.results ? ` <a href="${filesUrl.replace('__REL__', a.results)}">${esc(a.results)}</a>` : '';
+    const cls = a.status === 'ok' ? 'ok' : a.status === 'running' ? 'muted' : 'bad';
+    return `<li>📊 <b>${esc(a.analysis)}</b> of <code>${esc(a.recording)}</code>: <span class="${cls}">${esc(a.status)}</span>${where}${a.detail ? ' <span class="small muted">' + esc(a.detail) + '</span>' : ''}</li>`;
+  }).join('') + '</ul>';
+}
+function recordingsList(recs, names) {
   if (!recs || !recs.length) return '';
   return '<ul class="small">' + recs.map(r => {
     const replay = r.slim_status === 'done'
       ? ` <a class="iconlink" href="foxglove://open?ds=remote-file&ds.url=${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap" title="replay the slim copy in Foxglove desktop">▶ Foxglove</a>`
         + ` <a class="iconlink" href="${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap">⬇</a>`
       : ` <span class="muted">slim copy: ${esc(r.slim_status)}</span>`;
-    return `<li><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}</li>`;
+    return `<li><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}${analyzeControl(r, names)}</li>`;
   }).join('') + '</ul>';
 }
 // Rewrite a block only when its content changed: a table rebuilt on every poll
@@ -255,7 +278,8 @@ function renderLive(d, x) {
   document.getElementById('recstart').style.display = rec ? 'none' : 'inline-block';
   document.getElementById('recstop').style.display = rec ? 'inline-block' : 'none';
   if (rec) { const st = document.getElementById('recstate'); st.textContent = `● REC ${rec.name}, ${rec.seconds} s`; st.className = 'small bad'; }
-  setHtml('recordings', recordingsList(L.recordings));
+  setHtml('recordings', recordingsList(L.recordings, L.analysis_names));
+  setHtml('analyseslist', analysesList(L.analyses));
   setHtml('notes', notesList(L.notes));
   setHtml('livechangestable', changesTable(L.changes || {}, true));
 }
@@ -322,17 +346,20 @@ async function refresh() {
         ? `<a href="${filesUrl.replace('__REL__', file)}">${esc(file)}</a>` : '';
       const L = x.live || {};
       const kept = (L.recordings || []).length || (L.notes || []).length
-        ? '<h3>Kept from this exploration</h3>' + recordingsList(L.recordings)
+        ? '<h3>Kept from this exploration</h3>' + recordingsList(L.recordings, L.analysis_names)
           + ((L.notes || []).length ? `<p class="small">Notes, also in <code>${esc(x.out_dir)}/notes.md</code>:</p><ul class="small">${notesList(L.notes)}</ul>` : '')
         : '';
-      document.getElementById('changestable').innerHTML = changesTable({changed: x.changed, reverted: x.reverted}, false)
-        + ((x.changed || []).length ? `<p class="small muted">A change took effect only in a node that reads the parameter while running (an on-set parameter callback). Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` : '') + kept;
+      setHtml('changestable', changesTable({changed: x.changed, reverted: x.reverted}, false)
+        + ((x.changed || []).length ? `<p class="small muted">A change took effect only in a node that reads the parameter while running (an on-set parameter callback). Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` : '') + kept);
     }
   }
+  if (!running && x.status) setHtml('keptanalyses', analysesList((x.live || {}).analyses));
   lastLog = d.log || [];
   renderLog();
   renderLive(d, x);
-  return ['finished', 'aborted', 'error'].includes(d.state);
+  // After Stop, keep polling while an analysis of a recording still runs.
+  const analysing = ((x.live || {}).analyses || []).some(a => a.status === 'running');
+  return ['finished', 'aborted', 'error'].includes(d.state) && !analysing;
 }
 async function poll() {
   const done = await refresh();

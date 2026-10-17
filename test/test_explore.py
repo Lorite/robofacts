@@ -434,6 +434,9 @@ class ControlHooks(FakeHooks):
         if label.startswith("action:") or label == "recorder":
             proc = FakeProc()
             self.procs[label] = proc
+        if label.startswith("analysis:"):
+            proc = FakeProc()
+            proc.rc = 1 if "broken" in " ".join(cmd) else 0
         return proc
 
     def _stop(self, proc, target, *, name, kind):
@@ -719,3 +722,58 @@ def test_a_hardware_jog_needs_the_arm_checkbox(tmp_path):
 def test_a_remote_jog_runs_the_installed_module():
     cmd = ex.jog_command(object(), "/cmd_vel", 0.1, 0, 0, 0, 1.0)
     assert cmd[:3] == ["python3", "-m", "robofacts.explore_jog"]
+
+
+# --------------------------------------------------------------------------- #
+# Analyze a recording (#133): the experiment's per-bag analyses, on a scratch bag
+# --------------------------------------------------------------------------- #
+ANALYSES = """
+analyses:
+  look:
+    describe: a quick look
+    per: bag
+    command: "python3 look.py {bag} --output-dir {results}"
+  broken:
+    describe: always fails
+    per: bag
+    command: "python3 broken.py {bag}"
+  table:
+    describe: a cohort table
+    per: cohort
+    command: "python3 table.py {bags}"
+"""
+
+
+def test_a_recording_can_be_analyzed_even_after_stop(tmp_path):
+    controls, fake, _, root, out_dir = bound(tmp_path)
+    (root / "expA" / "config" / "analyses.yaml").write_text(ANALYSES, encoding="utf-8")
+    assert controls.status()["analysis_names"] == ["look", "broken"]   # per-bag only
+    assert not controls.analyze("nothing", "look")[0]
+    controls.start_record("a")
+    controls.stop_record(wait_slim=True)
+    name = controls.recordings[0]["name"]
+    assert not controls.analyze(name, "table")[0]                       # a cohort analysis
+    controls.shutdown()                                                 # the stack is gone
+    ok, msg = controls.analyze(name, "look")
+    assert ok, msg
+    wait_for(lambda: controls.status()["analyses"][0]["status"] != "running")
+    [a] = controls.status()["analyses"]
+    assert a["status"] == "ok" and a["results"].startswith("results/") and a["results"].endswith(name)
+    label, cmd = fake.started[-1]
+    assert label == "analysis:look" and str(root / "expA" / "bags_scratch" / name) in cmd
+    meta = json.loads((root / "expA" / Path(a["results"]).parent / "analysis_metadata.json").read_text())
+    assert meta["bags"] == [name] and meta["scratch"] is True and meta["explore"] is True
+    assert meta["explore_session"] == out_dir.name
+    controls.analyze(name, "broken")
+    wait_for(lambda: controls.status()["analyses"][-1]["status"] != "running")
+    assert controls.status()["analyses"][-1]["status"] == "failed"
+
+
+def test_a_remote_recording_is_not_analyzed_here(tmp_path):
+    controls, _, _, root, _ = bound(tmp_path)
+    (root / "expA" / "config" / "analyses.yaml").write_text(ANALYSES, encoding="utf-8")
+    controls.start_record()
+    controls.stop_record(wait_slim=True)
+    controls._kept["target"] = object()
+    ok, msg = controls.analyze(controls.recordings[0]["name"], "look")
+    assert not ok and "on the rig" in msg

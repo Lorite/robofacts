@@ -161,6 +161,7 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
                  dry_run: bool = True,
                  executor: Optional[Callable[[List[str]], int]] = None,
                  clock: Callable[[], str] = lambda: datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S"),
+                 extra_metadata: Optional[Dict[str, Any]] = None,
                  ) -> AnalysisResult:
     if not bags:
         raise AnalysisError(
@@ -211,6 +212,8 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
         "bags": bag_names,
         "commands": [shlex.join(c) for c in commands],
         "failed_commands": failures,
+        # Provenance the caller adds, e.g. a scratch recording of robofacts Explore (#133).
+        **(extra_metadata or {}),
     }, indent=2), encoding="utf-8")
 
     result.status = "failed" if failures else "ok"

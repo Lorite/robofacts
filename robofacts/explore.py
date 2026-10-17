@@ -354,6 +354,12 @@ def jog_command(target, topic: str, vx: float, vy: float, vz: float, yaw: float,
                    "--yaw", f"{yaw:g}", "--seconds", f"{seconds:g}"]
 
 
+def ti_like(bag_dir: Path):
+    """The one field run_analysis reads of a trial: its bag directory."""
+    from types import SimpleNamespace
+    return SimpleNamespace(bag_dir=bag_dir)
+
+
 def terminate_action(proc, target, cmd: List[str]) -> None:
     """SIGTERM, never SIGINT: the flight scripts land on SIGTERM (rclpy keeps SIGINT).
 
@@ -418,12 +424,18 @@ class ExploreControls:
         self._record: Optional[Dict[str, Any]] = None
         self.recordings: List[Dict[str, Any]] = []
         self.notes: List[str] = []
+        #: Analyses of the recordings (#133), newest last; they outlive the stack.
+        self.analyses: List[Dict[str, Any]] = []
+        self._kept: Optional[Dict[str, Any]] = None
         self._threads: List[threading.Thread] = []
 
     # ------------------------------------------------------------------ binding
     def bind(self, **ctx: Any) -> None:
         with self._lock:
             self._ctx = dict(ctx)
+            # What an analysis needs after Stop: no stack, only the files and a process.
+            self._kept = {k: ctx[k] for k in ("hooks", "target", "cwd", "out_dir", "experiment",
+                                              "experiments_root") if k in ctx}
 
     @property
     def live(self) -> bool:
@@ -473,6 +485,8 @@ class ExploreControls:
                 "action": action, "last_action": last, "record": record,
                 "recordings": [{k: v for k, v in r.items() if k != "t0"} for r in self.recordings],
                 "notes": list(self.notes),
+                "analyses": [{k: v for k, v in a.items() if k != "thread"} for a in self.analyses],
+                "analysis_names": self.analysis_names(),
                 "changes": self.changes() if ctx else {"changed": [], "reverted": []}}
 
     # ------------------------------------------------------------------ actions
@@ -745,6 +759,79 @@ class ExploreControls:
             t.start()
         return True, f"recorded {bag_dir.name} ({seconds} s)"
 
+    # ------------------------------------------------------------------ analyses
+    def analysis_names(self) -> List[str]:
+        """The experiment's per-bag analyses (analyses.yaml), the ones a recording can feed."""
+        kept = self._kept
+        if kept is None:
+            return []
+        from . import analysis_runner as ar
+        try:
+            declared = ar.load_analyses(kept["experiment"], kept["experiments_root"])
+        except Exception:  # noqa: BLE001 - no analyses.yaml, or a broken one
+            return []
+        return [n for n, a in declared.items() if a.per == "bag"]
+
+    def analyze(self, recording: str, analysis: str) -> tuple:
+        """Run one per-bag analysis on one recording of this exploration, in the background.
+
+        The same run_analysis as ``trials analyze``, with the recording as its one
+        bag, so the result lands in results/<stamp>_<analysis>/<recording>/ beside
+        every other result, and its analysis_metadata.json says scratch and
+        explore. Allowed after Stop too: an analysis needs the bag, not the stack.
+        """
+        kept = self._kept
+        if kept is None:
+            return False, "the exploration has not started"
+        rec = next((r for r in self.recordings if r["name"] == recording), None)
+        if rec is None:
+            return False, f"no recording {recording!r} in this exploration"
+        if analysis not in self.analysis_names():
+            return False, f"{analysis!r} is not a per-bag analysis of this experiment (analyses.yaml)"
+        if kept["target"] is not None:
+            return False, ("the recording is on the rig, and analyses run here. Fetch the bag, "
+                           "then run trials analyze")
+        if any(a["status"] == "running" for a in self.analyses):
+            return False, "an analysis is still running: one at a time"
+        from . import analysis_runner as ar
+        declared = ar.load_analyses(kept["experiment"], kept["experiments_root"])[analysis]
+        entry = {"analysis": analysis, "recording": recording, "status": "running",
+                 "results": "", "detail": "", "started": self._stamp()}
+        hooks, cwd = kept["hooks"], kept["cwd"]
+
+        def executor(cmd: List[str]) -> int:
+            proc = hooks.start_background(cmd, None, cwd=cwd, label=f"analysis:{analysis}")
+            tick = threading.Event()
+            while _exited(proc) is None:
+                tick.wait(0.5)
+            return _exited(proc)
+
+        def work() -> None:
+            try:
+                print(f"[explore] analysis {analysis} of {recording}")
+                result = ar.run_analysis(
+                    declared, [ti_like(Path(rec["bag_dir"]))], kept["experiment"],
+                    kept["experiments_root"], dry_run=False, executor=executor,
+                    extra_metadata={"scratch": True, "explore": True,
+                                    "explore_session": kept["out_dir"].name,
+                                    "selection_note": "a scratch recording of robofacts Explore, "
+                                                      "never coverage"})
+                entry["status"] = result.status
+                entry["detail"] = result.detail
+                entry["results"] = str((result.results_dir / recording).relative_to(
+                    kept["experiments_root"] / kept["experiment"]))
+                print(f"[explore] analysis {analysis} of {recording}: {result.status}"
+                      f"{' (' + result.detail + ')' if result.detail else ''}, in {entry['results']}")
+            except Exception as exc:  # noqa: BLE001 - shown on the page
+                entry["status"], entry["detail"] = "failed", str(exc)
+                print(f"[explore] analysis {analysis} of {recording} failed: {exc}")
+
+        t = threading.Thread(target=work, name=f"explore-analysis-{analysis}", daemon=True)
+        entry["thread"] = t
+        self.analyses.append(entry)
+        t.start()
+        return True, f"analysis {analysis} of {recording} started"
+
     # ------------------------------------------------------------------ shutdown
     def shutdown(self) -> None:
         """Before the stack comes down: land the action, finalize the recording, finish slims."""
@@ -756,6 +843,7 @@ class ExploreControls:
         for t in list(self._threads):
             t.join(timeout=300)
         with self._lock:
+            # The stack goes now. _kept stays: a recording can still be analyzed.
             self._ctx = None
 
 

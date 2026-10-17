@@ -1453,10 +1453,13 @@ def create_app(experiments_root: Optional[Path] = None,
         run = runs.get(run_id)
         if run is None or run.kind != "explore" or run.controls is None:
             return {"ok": False, "message": f"no exploration {run_id}"}, 404
-        if run.state != "running":
+        # An analysis needs the recording, not the stack, so it may run after Stop.
+        if run.state != "running" and op != "analyze":
             return {"ok": False, "message": f"the exploration is {run.state}"}, 409
         c, form = run.controls, request.form
-        if op == "action":
+        if op == "analyze":
+            ok, msg = c.analyze(form.get("recording", ""), form.get("analysis", ""))
+        elif op == "action":
             ok, msg = c.start_action(form.get("name", ""), armed=form.get("arm") == "yes")
         elif op == "jog":
             ok, msg = c.jog(*(form.get(k, "0") for k in ("vx", "vy", "vz", "yaw")),
