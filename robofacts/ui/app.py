@@ -405,6 +405,7 @@ class RunManager:
                         explore={"condition": dict(spec.values), "describe": spec.describe(),
                                  "settings": s.describe(), "ready": False,
                                  "actions": [a["name"] for a in s.actions],
+                                 "jog": dict(s.jog),
                                  "simulation": s.simulation, "layouts": list(layouts or []),
                                  # The campaign's swept factors, for "restart with another
                                  # condition" on the run page (#133).
@@ -1457,6 +1458,9 @@ def create_app(experiments_root: Optional[Path] = None,
         c, form = run.controls, request.form
         if op == "action":
             ok, msg = c.start_action(form.get("name", ""), armed=form.get("arm") == "yes")
+        elif op == "jog":
+            ok, msg = c.jog(*(form.get(k, "0") for k in ("vx", "vy", "vz", "yaw")),
+                            armed=form.get("arm") == "yes")
         elif op == "action_stop":
             ok, msg = c.stop_action()
         elif op == "set_back":
@@ -1469,7 +1473,7 @@ def create_app(experiments_root: Optional[Path] = None,
             ok, msg = c.note(form.get("text", ""), mark=form.get("mark") == "yes")
         else:
             return {"ok": False, "message": f"unknown control {op!r}"}, 404
-        if op != "note":
+        if op not in ("note", "jog"):
             journal.add(f"explore-{op.replace('_', '-')}",
                         f"{run.experiment}/{run.campaign_file}: {'OK' if ok else 'refused'}, {msg}")
         return {"ok": ok, "message": msg}, (200 if ok else 400)

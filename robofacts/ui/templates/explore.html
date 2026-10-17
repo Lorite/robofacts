@@ -39,13 +39,28 @@
     {% if run.explore.actions %}
     {% if not run.explore.simulation %}<p class="small warn"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" id="armactions"> arm actions: they move a real robot, without a T-0 gate</label></p>{% endif %}
     <p id="actionbuttons">{% for a in run.explore.actions %}<button type="button" class="btn-primary actionbtn" data-name="{{ a }}">{{ a }}</button> {% endfor %}</p>
-    <p id="actionrunning" style="display:none"><b id="actionname"></b> <span id="actiontime" class="muted"></span>
-      <button type="button" class="btn-stop" id="actionstop">■ Stop action (SIGTERM, it lands)</button></p>
-    <p id="actionlast" class="small"></p>
-    <pre id="actionlog" class="term" style="max-height:12rem;display:none"></pre>
     {% else %}
     <p class="small muted">This experiment declares no <code>explore.actions</code> in runner.yaml.</p>
     {% endif %}
+    {% if run.explore.jog %}{% set j = run.explore.jog %}
+    <div id="jogpad">
+      <h3 style="margin-bottom:.3rem">🕹 Jog <small class="muted"><code>{{ j.topic }}</code>, {{ j.step_s }} s per press, at most {{ j.max_speed_mps }} m/s</small></h3>
+      {% if not run.explore.simulation and not run.explore.actions %}<p class="small warn"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" id="armactions"> arm: a jog moves a real robot, without a T-0 gate</label></p>{% endif %}
+      <p class="small"><label style="flex-direction:row;gap:.3rem;display:inline-flex">speed
+        <select id="jogspeed">{% for f in (0.25, 0.5, 1.0) %}<option value="{{ f * j.max_speed_mps }}" {{ 'selected' if f == 0.5 }}>{{ '%.2f'|format(f * j.max_speed_mps) }} m/s</option>{% endfor %}</select></label></p>
+      <div style="display:grid;grid-template-columns:repeat(4,3.2rem);gap:.3rem">
+        <span></span><button type="button" class="btn-small jogbtn" data-dir="1,0,0,0" title="+x">+x ▲</button><span></span><button type="button" class="btn-small jogbtn" data-dir="0,0,1,0" title="up (+z): on the floor this is a takeoff">⤒ up</button>
+        <button type="button" class="btn-small jogbtn" data-dir="0,1,0,0" title="+y">◀ +y</button><button type="button" class="btn-stop btn-small" id="jogstop" title="stop the jog: zero twist">■</button><button type="button" class="btn-small jogbtn" data-dir="0,-1,0,0" title="-y">-y ▶</button><button type="button" class="btn-small jogbtn" data-dir="0,0,-1,0" title="down (-z): near the floor this lands">⤓ down</button>
+        <span></span><button type="button" class="btn-small jogbtn" data-dir="-1,0,0,0" title="-x">-x ▼</button><span></span><span></span>
+      </div>
+      {% if j.max_yaw_rate_rps %}<p class="small"><button type="button" class="btn-small jogbtn" data-dir="0,0,0,1" data-yaw="1">⟲ yaw left</button> <button type="button" class="btn-small jogbtn" data-dir="0,0,0,-1" data-yaw="1">⟳ yaw right</button></p>{% endif %}
+      <p class="small muted">Velocities in the frame of <code>{{ j.topic }}</code>. Each press publishes for {{ j.step_s }} s, then a zero twist. The runner publishes, never the Foxglove bridge.</p>
+    </div>
+    {% endif %}
+    <p id="actionrunning" style="display:none"><b id="actionname"></b> <span id="actiontime" class="muted"></span>
+      <button type="button" class="btn-stop" id="actionstop">■ Stop (SIGTERM: an action lands, a jog sends a zero twist)</button></p>
+    <p id="actionlast" class="small"></p>
+    <pre id="actionlog" class="term" style="max-height:12rem;display:none"></pre>
     <p id="actionmsg" class="small"></p>
   </div>
   <div class="panel" id="keeppanel">
@@ -158,7 +173,14 @@ document.addEventListener('click', e => {
   if (t.matches('.actionbtn')) {
     const arm = document.getElementById('armactions');
     ctl('action', {name: t.dataset.name, arm: arm && arm.checked ? 'yes' : ''}, 'actionmsg');
-  } else if (t.id === 'actionstop') ctl('action_stop', {}, 'actionmsg');
+  } else if (t.matches('.jogbtn')) {
+    const arm = document.getElementById('armactions');
+    const speed = parseFloat(document.getElementById('jogspeed').value);
+    const yawTop = {{ (run.explore.jog or {}).get('max_yaw_rate_rps', 0)|tojson }};
+    const [x, y, z, w] = t.dataset.dir.split(',').map(Number);
+    ctl('jog', {vx: x * speed, vy: y * speed, vz: z * speed, yaw: w * yawTop * 0.5,
+                arm: arm && arm.checked ? 'yes' : ''}, 'actionmsg');
+  } else if (t.id === 'actionstop' || t.id === 'jogstop') ctl('action_stop', {}, 'actionmsg');
   else if (t.matches('.setback')) ctl('set_back', {node: t.dataset.node, parameter: t.dataset.parameter}, 'setbackmsg');
   else if (t.id === 'recstart') ctl('record', {label: document.getElementById('reclabel').value}, 'recstate');
   else if (t.id === 'recstop') { t.disabled = true; ctl('record_stop', {}, 'recstate').then(() => { t.disabled = false; }); }
@@ -211,7 +233,7 @@ function renderLive(d, x) {
   document.getElementById('livechanges').style.display = running ? 'block' : 'none';
   if (!running) return;
   const act = L.action;
-  document.querySelectorAll('.actionbtn').forEach(b => { b.disabled = !!act; });
+  document.querySelectorAll('.actionbtn, .jogbtn').forEach(b => { b.disabled = !!act; });
   const ar = document.getElementById('actionrunning');
   if (ar) {
     ar.style.display = act ? 'block' : 'none';
@@ -222,9 +244,9 @@ function renderLive(d, x) {
     const last = L.last_action;
     document.getElementById('actionlast').innerHTML = last
       ? `last: <b>${esc(last.name)}</b> exited <span class="${last.rc === 0 ? 'ok' : 'bad'}">rc=${last.rc}</span> after ${last.seconds} s${last.stopping ? ' (stopped from this page)' : ''}` : '';
-    const name = act ? act.name : (last ? last.name : '');
+    const tag = act ? act.tag : (last ? last.tag : '');
     const pre = document.getElementById('actionlog');
-    const lines = name ? lastLog.filter(e => e.text.startsWith('[action:' + name + ']')).map(e => e.text).slice(-12) : [];
+    const lines = tag ? lastLog.filter(e => e.text.startsWith('[' + tag + ']')).map(e => e.text).slice(-12) : [];
     pre.style.display = lines.length ? 'block' : 'none';
     pre.textContent = lines.join('\n');
     pre.scrollTop = pre.scrollHeight;

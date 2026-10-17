@@ -661,3 +661,61 @@ def test_parameter_changes_lists_the_notes_and_recordings(tmp_path):
     assert len(changes["recordings"]) == 1 and "bags_scratch" in changes["recordings"][0]
     # The recording was finalized at stop, with its metadata.
     assert (Path(changes["recordings"][0]) / "trial_metadata.json").is_file()
+
+
+# --------------------------------------------------------------------------- #
+# The jog pad (explore.jog, #133): a velocity for a moment, from the runner
+# --------------------------------------------------------------------------- #
+JOG = "explore:\n  jog: {topic: /cmd_vel, max_speed_mps: 0.3, step_s: 1.5}\n"
+
+
+@pytest.mark.parametrize("block, words", [
+    ("explore:\n  jog: {topic: cmd_vel, max_speed_mps: 0.3}\n", "absolute topic"),
+    ("explore:\n  jog: {topic: /cmd_vel}\n", "needs max_speed_mps"),
+    ("explore:\n  jog: {topic: /cmd_vel, max_speed_mps: 0}\n", "positive number"),
+    ("explore:\n  jog: {topic: /cmd_vel, max_speed_mps: 0.3, step_s: 30}\n", "at most 5.0"),
+    ("explore:\n  jog: {topic: /cmd_vel, max_speed_mps: 0.3, speed: 1}\n", "unknown key"),
+])
+def test_a_malformed_jog_refuses_to_load(tmp_path, block, words):
+    with pytest.raises(tr.RunnerError, match=words):
+        tr.RunnerConfig.load("expA", make_root(tmp_path, RUNNER_SIM + block))
+
+
+def test_a_jog_is_clipped_to_its_limits_and_shares_the_action_slot(tmp_path):
+    controls, fake, terminated, _, _ = bound(tmp_path, RUNNER_SIM + JOG)
+    assert controls.status()["jog"]["topic"] == "/cmd_vel"
+    ok, msg = controls.jog(vx=2.0, vz=-0.1)
+    assert ok, msg
+    label, cmd = fake.started[-1]
+    assert label == "action:jog" and cmd[1].endswith("explore_jog.py")
+    args = dict(zip(cmd[2::2], cmd[3::2]))
+    assert args == {"--topic": "/cmd_vel", "--vx": "0.3", "--vy": "0", "--vz": "-0.1",
+                    "--yaw": "0", "--seconds": "1.5"}
+    # One thing at a time: a second jog waits, and the stop ends it.
+    assert not controls.jog(vy=0.1)[0]
+    assert controls.status()["action"]["name"] == "jog vx=+0.30 vz=-0.10"
+    controls.stop_action()
+    assert terminated == [cmd]
+    wait_for(lambda: controls.status()["action"] is None)
+    # No yaw limit declared: yaw is clipped to zero, and a jog of nothing is refused.
+    assert not controls.jog(yaw=1.0)[0]
+    assert not controls.jog(vx="fast")[0] and not controls.jog(vx=float("nan"))[0]
+
+
+def test_no_jog_pad_without_a_declaration(tmp_path):
+    controls, fake, _, _, _ = bound(tmp_path)
+    ok, msg = controls.jog(vx=0.1)
+    assert not ok and "explore.jog" in msg
+
+
+def test_a_hardware_jog_needs_the_arm_checkbox(tmp_path):
+    controls, _, _, _, _ = bound(tmp_path, hardware(
+        "explore:\n  param_whitelist: ['^/stack\\\\.kp$']\n  jog: {topic: /cf1/cmd_vel, max_speed_mps: 0.2}\n"))
+    assert "arm" in controls.jog(vx=0.1)[1]
+    assert controls.jog(vx=0.1, armed=True)[0]
+    assert "Jog pad on /cf1/cmd_vel" in ex.settings(controls._ctx["config"]).describe()
+
+
+def test_a_remote_jog_runs_the_installed_module():
+    cmd = ex.jog_command(object(), "/cmd_vel", 0.1, 0, 0, 0, 1.0)
+    assert cmd[:3] == ["python3", "-m", "robofacts.explore_jog"]

@@ -328,7 +328,8 @@ EXPLORE_KEYS = {"param_whitelist": "a list of regular expressions",
                 "topic_whitelist": "a list of regular expressions",
                 "port": "a port number", "address": "an address to bind",
                 "viewers": "a list of {name, command}",
-                "actions": "a list of {name, command}"}
+                "actions": "a list of {name, command}",
+                "jog": "a mapping with topic, max_speed_mps and optionally step_s, max_yaw_rate_rps"}
 
 
 def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
@@ -382,7 +383,46 @@ def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
         if twice:
             raise RunnerError(f"{path}: explore.actions names {', '.join(twice)} more than once; "
                               f"the run page starts an action by its name")
+    if "jog" in raw:
+        out["jog"] = _explore_jog(raw["jog"], path)
     return out
+
+
+#: The keys of explore.jog, and the hard ceilings the runner never exceeds.
+JOG_KEYS = ("topic", "max_speed_mps", "step_s", "max_yaw_rate_rps")
+JOG_MAX_STEP_S = 5.0
+
+
+def _explore_jog(raw: Any, path: Path) -> Dict[str, Any]:
+    """explore.jog (#133): the velocity topic of the run page's jog pad and its limits.
+
+    The limits are required, not defaulted: a jog pad publishes velocities, and
+    how fast is a reviewed decision of the experiment, like a safety limit.
+    """
+    if not isinstance(raw, dict):
+        raise RunnerError(f"{path}: explore.jog must be a mapping with {', '.join(JOG_KEYS)}")
+    unknown = sorted(set(raw) - set(JOG_KEYS))
+    if unknown:
+        raise RunnerError(f"{path}: explore.jog has unknown key(s) {', '.join(unknown)}; "
+                          f"the known ones are {', '.join(JOG_KEYS)}")
+    topic = raw.get("topic")
+    if not isinstance(topic, str) or not topic.startswith("/"):
+        raise RunnerError(f"{path}: explore.jog.topic must be an absolute topic name, got {topic!r}")
+
+    def positive(key, default=None, ceiling=None):
+        value = raw.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 \
+                or (value == 0 and key != "max_yaw_rate_rps"):
+            raise RunnerError(f"{path}: explore.jog.{key} must be a positive number, got {value!r}")
+        if ceiling is not None and value > ceiling:
+            raise RunnerError(f"{path}: explore.jog.{key} may be at most {ceiling}, got {value!r}")
+        return float(value)
+
+    if "max_speed_mps" not in raw:
+        raise RunnerError(f"{path}: explore.jog needs max_speed_mps (the fastest a press may move)")
+    return {"topic": topic, "max_speed_mps": positive("max_speed_mps"),
+            "step_s": positive("step_s", 1.0, JOG_MAX_STEP_S),
+            "max_yaw_rate_rps": positive("max_yaw_rate_rps", 0.0)}
 
 
 def _named_commands(raw: Any, field_name: str, path: Path) -> List[Dict[str, Any]]:

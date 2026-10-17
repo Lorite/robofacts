@@ -107,6 +107,8 @@ class ExploreSettings:
     viewers: List[Dict[str, Any]] = field(default_factory=list)
     #: explore.actions (#133): the run page's buttons, as {name, command}. Never run by a trial.
     actions: List[Dict[str, Any]] = field(default_factory=list)
+    #: explore.jog (#133): {topic, max_speed_mps, step_s, max_yaw_rate_rps}, or empty: no jog pad.
+    jog: Dict[str, Any] = field(default_factory=dict)
     #: The experiment's `simulation:`. On hardware the UI asks for the arm checkbox.
     simulation: bool = False
 
@@ -120,6 +122,8 @@ class ExploreSettings:
         opens = (", and it opens " + ", ".join(v["name"] for v in self.viewers)) if self.viewers else ""
         if self.actions:
             opens += ". Actions: " + ", ".join(a["name"] for a in self.actions)
+        if self.jog:
+            opens += f". Jog pad on {self.jog['topic']} (at most {self.jog['max_speed_mps']} m/s)"
         if not self.writable:
             return ("live view only: no parameter may be changed (explore.param_whitelist is empty)"
                     + opens)
@@ -135,9 +139,11 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
     topics = list(block.get("topic_whitelist", [".*"]))
     viewers = list(block.get("viewers", []))
     actions = list(block.get("actions", []))
+    jog = dict(block.get("jog") or {})
     if config.simulation:
         return ExploreSettings(True, "", list(block.get("param_whitelist", [".*"])), topics,
-                               port, address, viewers=viewers, actions=actions, simulation=True)
+                               port, address, viewers=viewers, actions=actions, jog=jog,
+                               simulation=True)
     if not config.explore_declared:
         return ExploreSettings(
             False, "this experiment runs real robots (simulation: false) and its runner.yaml "
@@ -151,7 +157,7 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
                    f"every parameter. On real robots name the parameters you allow, one pattern each",
             whitelist, topics, port, address, viewers=viewers)
     return ExploreSettings(True, "", whitelist, topics, port, address, viewers=viewers,
-                           actions=actions)
+                           actions=actions, jog=jog)
 
 
 def _yaml_list(values: List[str]) -> str:
@@ -338,6 +344,16 @@ def whitelisted(s: ExploreSettings, node: str, parameter: str) -> bool:
     return False
 
 
+def jog_command(target, topic: str, vx: float, vy: float, vz: float, yaw: float,
+                seconds: float) -> List[str]:
+    """One jog step (explore_jog.py): by file path locally, as a module remotely."""
+    head = ([sys.executable if sys.executable else "python3",
+             str(Path(__file__).resolve().with_name("explore_jog.py"))] if target is None
+            else ["python3", "-m", "robofacts.explore_jog"])
+    return head + ["--topic", topic, "--vx", f"{vx:g}", "--vy", f"{vy:g}", "--vz", f"{vz:g}",
+                   "--yaw", f"{yaw:g}", "--seconds", f"{seconds:g}"]
+
+
 def terminate_action(proc, target, cmd: List[str]) -> None:
     """SIGTERM, never SIGINT: the flight scripts land on SIGTERM (rclpy keeps SIGINT).
 
@@ -452,6 +468,7 @@ class ExploreControls:
             record.pop("t0", None)
         return {"live": ctx is not None,
                 "actions": [a["name"] for a in (ctx["settings"].actions if ctx else [])],
+                "jog": dict(ctx["settings"].jog) if ctx else {},
                 "simulation": bool(ctx and ctx["settings"].simulation),
                 "action": action, "last_action": last, "record": record,
                 "recordings": [{k: v for k, v in r.items() if k != "t0"} for r in self.recordings],
@@ -470,23 +487,59 @@ class ExploreControls:
         if not s.simulation and not armed:
             return False, ("this experiment runs real robots: tick 'arm actions' first. "
                            "An action moves a robot without a T-0 gate")
+        try:
+            cmd = tr.templated_command(declared[name]["command"], ctx["spec"],
+                                       f"explore action {name}", **ctx["placeholders"])
+        except tr.RunnerError as exc:
+            return False, str(exc)
+        return self._start_in_slot(name, cmd)
+
+    def jog(self, vx: float = 0.0, vy: float = 0.0, vz: float = 0.0, yaw: float = 0.0, *,
+            armed: bool = False) -> tuple:
+        """One press of the jog pad: a velocity for explore.jog.step_s, clipped to its limits."""
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live (not ready yet, or stopping)"
+        s: ExploreSettings = ctx["settings"]
+        if not s.jog:
+            return False, "this experiment declares no explore.jog in runner.yaml"
+        if not s.simulation and not armed:
+            return False, ("this experiment runs real robots: tick 'arm actions' first. "
+                           "A jog moves a robot without a T-0 gate")
+        try:
+            v = [float(x) for x in (vx, vy, vz, yaw)]
+        except (TypeError, ValueError):
+            return False, "a jog needs numbers"
+        if not all(x == x and abs(x) != float("inf") for x in v):
+            return False, "a jog needs finite numbers"
+        top, rot = s.jog["max_speed_mps"], s.jog.get("max_yaw_rate_rps", 0.0)
+        # "+ 0.0" turns a clipped -0.0 into 0.0, so the command line says 0.
+        vx, vy, vz = (max(-top, min(top, x)) + 0.0 for x in v[:3])
+        yaw = max(-rot, min(rot, v[3])) + 0.0
+        if not any((vx, vy, vz, yaw)):
+            return False, "a jog of zero moves nothing"
+        name = "jog " + " ".join(f"{k}={x:+.2f}" for k, x in
+                                 (("vx", vx), ("vy", vy), ("vz", vz), ("yaw", yaw)) if x)
+        cmd = jog_command(ctx["target"], s.jog["topic"], vx, vy, vz, yaw, s.jog["step_s"])
+        return self._start_in_slot(name, cmd, label="jog")
+
+    def _start_in_slot(self, name: str, cmd: List[str], label: str = "") -> tuple:
+        """Start an action or a jog in the one slot they share. ``label`` tags its output."""
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live"
         with self._lock:
             if self._action is not None:
                 return False, (f"the action {self._action['name']!r} is still running: "
                                f"wait for it, or stop it first")
-            try:
-                cmd = tr.templated_command(declared[name]["command"], ctx["spec"],
-                                           f"explore action {name}", **ctx["placeholders"])
-            except tr.RunnerError as exc:
-                return False, str(exc)
-            print(f"[explore] action {name}: $ {shlex.join(cmd)}")
-            proc = ctx["hooks"].start_background(cmd, ctx["target"], cwd=ctx["cwd"],
-                                                 label=f"action:{name}")
-            self._action = {"name": name, "proc": proc, "cmd": cmd, "started": self._now(),
-                            "rc": None, "stopping": False}
+            print(f"[explore] {'action ' if not label else ''}{name}: $ {shlex.join(cmd)}")
+            tag = f"action:{label or name}"
+            proc = ctx["hooks"].start_background(cmd, ctx["target"], cwd=ctx["cwd"], label=tag)
+            self._action = {"name": name, "tag": tag, "proc": proc, "cmd": cmd,
+                            "started": self._now(), "rc": None, "stopping": False}
             entry = self._action
         t = threading.Thread(target=self._watch_action, args=(entry,),
-                             name=f"explore-action-{name}", daemon=True)
+                             name=f"explore-{entry['tag']}", daemon=True)
         self._threads.append(t)
         t.start()
         return True, f"started {name}"
@@ -501,7 +554,8 @@ class ExploreControls:
             tick.wait(0.2)
         entry["rc"] = rc
         entry["seconds"] = round(self._now() - entry["started"], 1)
-        print(f"[explore] action {entry['name']} exited rc={rc} after {entry['seconds']} s"
+        print(f"[explore] {entry['name'] if entry['tag'] == 'action:jog' else 'action ' + entry['name']}"
+              f" exited rc={rc} after {entry['seconds']} s"
               + (" (stopped)" if entry["stopping"] else ""))
         with self._lock:
             if self._action is entry:
