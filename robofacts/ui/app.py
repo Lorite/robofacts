@@ -1453,10 +1453,14 @@ def create_app(experiments_root: Optional[Path] = None,
         run = runs.get(run_id)
         if run is None or run.kind != "explore" or run.controls is None:
             return {"ok": False, "message": f"no exploration {run_id}"}, 404
-        # An analysis needs the recording, not the stack, so it may run after Stop.
-        if run.state != "running" and op != "analyze":
+        # An analysis needs the recording, and a proposal the change table, not the
+        # stack, so both may run after Stop.
+        if run.state != "running" and op not in ("analyze", "propose"):
             return {"ok": False, "message": f"the exploration is {run.state}"}, 409
         c, form = run.controls, request.form
+        if op == "propose":
+            ok, msg, proposal = c.propose(form.get("node", ""), form.get("parameter", ""))
+            return {"ok": ok, "message": msg, "proposal": proposal}, (200 if ok else 400)
         if op == "analyze":
             ok, msg = c.analyze(form.get("recording", ""), form.get("analysis", ""))
         elif op == "action":

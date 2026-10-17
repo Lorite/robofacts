@@ -1204,6 +1204,10 @@ def test_the_explore_run_page_drives_actions_records_and_notes(client, root, mon
     assert d["explore"]["live"]["recordings"][0]["name"] == bag.name
     assert len(d["explore"]["live"]["notes"]) == 2
     assert client.post(ctl + "note", data={"text": "late"}, headers=auth()).status_code == 409
+    # Keep it? works after Stop, from the last change table, and applies nothing.
+    r = client.post(ctl + "propose", data={"node": "/talker", "parameter": "rate"}, headers=auth())
+    assert r.status_code == 200 and r.get_json()["proposal"]["to"] == 4.0, r.get_json()
+    assert (root / "expA" / "runs" / "explore" / "x_explore_c" / "proposed_changes.md").is_file()
 
 
 def test_restart_with_another_condition_waits_for_the_old_stack(client, root, monkeypatch):

@@ -427,6 +427,8 @@ class ExploreControls:
         #: Analyses of the recordings (#133), newest last; they outlive the stack.
         self.analyses: List[Dict[str, Any]] = []
         self._kept: Optional[Dict[str, Any]] = None
+        self._final: Optional[Dict[str, List[Dict[str, Any]]]] = None
+        self.proposals: List[Dict[str, Any]] = []
         self._threads: List[threading.Thread] = []
 
     # ------------------------------------------------------------------ binding
@@ -435,7 +437,8 @@ class ExploreControls:
             self._ctx = dict(ctx)
             # What an analysis needs after Stop: no stack, only the files and a process.
             self._kept = {k: ctx[k] for k in ("hooks", "target", "cwd", "out_dir", "experiment",
-                                              "experiments_root") if k in ctx}
+                                              "experiments_root", "spec", "factors", "config",
+                                              "settings") if k in ctx}
 
     @property
     def live(self) -> bool:
@@ -832,6 +835,48 @@ class ExploreControls:
         t.start()
         return True, f"analysis {analysis} of {recording} started"
 
+    # ------------------------------------------------------------------ proposals
+    def propose(self, node: str, parameter: str) -> tuple:
+        """Where ``<node>.<parameter>`` is declared, and the edit that keeps its current value.
+
+        Read-only (explore_propose.py): nothing is applied. The proposal is also
+        appended to ``proposed_changes.md`` in the exploration's folder. Returns
+        ``(ok, message, proposal)``. Allowed after Stop, from the last change table.
+        """
+        from . import explore_propose as epr
+        kept = self._kept
+        if kept is None:
+            return False, "the exploration has not started", None
+        summary = self.changes() if self._ctx is not None else (self._final or {"changed": []})
+        row = next((r for r in summary["changed"]
+                    if r["node"] == node and r["parameter"] == parameter), None)
+        if row is None:
+            return False, f"{node}.{parameter} did not change in this exploration", None
+        if row.get("deleted"):
+            return False, f"{node}.{parameter} was deleted: there is no value to keep", None
+        config = kept["config"]
+        proposal = epr.propose(node, parameter, row["from"], row["to"],
+                               project_root=Path(config.project_root),
+                               launch_package=config.launch_package,
+                               launch_file=config.launch_file, factors=kept["factors"],
+                               condition=dict(kept["spec"].values))
+        path = kept["out_dir"] / "proposed_changes.md"
+        try:
+            new = not path.exists()
+            with path.open("a", encoding="utf-8") as fh:
+                if new:
+                    fh.write(f"# Proposed changes: {kept['experiment']} exploration {kept['out_dir'].name}\n\n"
+                             "Where each kept value is declared, found by robofacts Explore. Nothing was "
+                             "applied. Each edit is a reviewed change of the declarations.\n\n")
+                fh.write(epr.markdown(proposal, self._stamp()))
+        except OSError as exc:
+            return False, f"could not write {path}: {exc}", proposal
+        self.proposals.append({"node": node, "parameter": parameter, "to": row["to"],
+                               "candidates": len(proposal["candidates"])})
+        print(f"[explore] proposal for {node}.{parameter} = {json.dumps(row['to'])}: "
+              f"{proposal['summary']} (proposed_changes.md)")
+        return True, proposal["summary"], proposal
+
     # ------------------------------------------------------------------ shutdown
     def shutdown(self) -> None:
         """Before the stack comes down: land the action, finalize the recording, finish slims."""
@@ -842,6 +887,8 @@ class ExploreControls:
             self.stop_record(wait_slim=True)
         for t in list(self._threads):
             t.join(timeout=300)
+        # The last change table, for a proposal made after Stop.
+        self._final = self.changes()
         with self._lock:
             # The stack goes now. _kept stays: a recording can still be analyzed.
             self._ctx = None

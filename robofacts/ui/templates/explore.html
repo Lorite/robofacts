@@ -121,6 +121,8 @@
   <p id="keptmsg" class="small"></p>
 </div>
 
+<div id="proposal" class="panel" style="display:none"></div>
+
 <h2>Terminal <small>the stack, the bridge and the explore steps</small></h2>
 <div class="filters small" style="align-items:center">
   <label style="flex-direction:row;gap:.3rem"><input type="checkbox" id="onlyprob"> problems only</label>
@@ -190,6 +192,11 @@ document.addEventListener('click', e => {
     const live = document.getElementById('livepanels').style.display !== 'none';
     ctl('analyze', {recording: t.dataset.recording, analysis: sel ? sel.value : ''}, live ? 'anamsg' : 'keptmsg');
   }
+  else if (t.matches('.propose')) {
+    const live = document.getElementById('livepanels').style.display !== 'none';
+    ctl('propose', {node: t.dataset.node, parameter: t.dataset.parameter}, live ? 'setbackmsg' : 'keptmsg')
+      .then(j => showProposal(j.proposal));
+  }
   else if (t.matches('.setback')) ctl('set_back', {node: t.dataset.node, parameter: t.dataset.parameter}, 'setbackmsg');
   else if (t.id === 'recstart') ctl('record', {label: document.getElementById('reclabel').value}, 'recstate');
   else if (t.id === 'recstop') { t.disabled = true; ctl('record_stop', {}, 'recstate').then(() => { t.disabled = false; }); }
@@ -205,13 +212,15 @@ function changesTable(ch, live) {
     `<tr><td><code>${esc(c.node)}</code></td><td><code>${esc(c.parameter)}</code></td>`
     + `<td>${val(c.from)}</td><td>${c.deleted ? '<code>(deleted)</code>' : val(c.to)}</td>`
     + `<td class="num">${c.times_changed}</td>`
-    + (live ? `<td><button type="button" class="btn-small setback" data-node="${esc(c.node)}" data-parameter="${esc(c.parameter)}"`
+    + `<td class="nowrap">` + (live ? `<button type="button" class="btn-small setback" data-node="${esc(c.node)}" data-parameter="${esc(c.parameter)}"`
        + (c.settable ? '' : ` disabled title="${c.from === null ? 'the starting value is unknown' : 'not in the explore whitelist'}"`)
-       + `>↺ set back</button></td>` : '') + `</tr>`).join('');
+       + `>↺ set back</button> ` : '')
+    + (c.deleted ? '' : `<button type="button" class="btn-small propose" data-node="${esc(c.node)}" data-parameter="${esc(c.parameter)}" title="where this value is declared, and the edit that keeps it (nothing is applied)">✎ keep it?</button>`)
+    + `</td></tr>`).join('');
   const reverted = (ch.reverted || []).length
     ? `<p class="small muted">Set, but back at the starting value now: ${ch.reverted.map(n => '<code>' + esc(typeof n === 'string' ? n : n.node + '.' + n.parameter) + '</code>').join(', ')}.</p>` : '';
   return rows
-    ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>${live ? 'now' : 'to'}</th><th class="num">changes</th>${live ? '<th></th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>` + reverted
+    ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>${live ? 'now' : 'to'}</th><th class="num">changes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` + reverted
     : `<p class="small muted">${!live ? 'No parameter changed during this exploration.'
         : (ch.reverted || []).length ? 'No parameter differs from its starting value now.'
         : 'No parameter changed yet. Change one in Foxglove\'s Parameters panel.'}</p>` + reverted;
@@ -245,6 +254,20 @@ function recordingsList(recs, names) {
 function setHtml(id, html) {
   const el = document.getElementById(id);
   if (el && el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+function showProposal(p) {
+  const box = document.getElementById('proposal');
+  if (!p) return;
+  const items = (p.candidates || []).map(c => {
+    const where = c.line ? `${esc(c.file)}:${c.line}` : esc(c.file);
+    return `<li><b>${esc(c.kind)}</b> <code>${where}</code>: ${esc(c.note)}<br><span class="muted">now</span> <code>${esc(c.text)}</code>`
+      + (c.suggestion && c.suggestion !== c.text ? `<br><span class="ok">proposed</span> <code>${esc(c.suggestion)}</code>` : '') + `</li>`;
+  }).join('');
+  box.innerHTML = `<h3>✎ Keep <code>${esc(p.node)}.${esc(p.parameter)}</code> = <code>${esc(JSON.stringify(p.to))}</code>?</h3>`
+    + `<p class="small">${esc(p.summary)}. Nothing was applied: make the edit you choose, and review it like any other change. Also written to <code>proposed_changes.md</code> in the exploration's folder.</p>`
+    + (items ? `<ul class="small">${items}</ul>` : '');
+  box.style.display = 'block';
+  box.scrollIntoView({block: 'nearest'});
 }
 function notesList(notes) { return (notes || []).map(n => '<li>' + esc(n.replace(/^- /, '')) + '</li>').join(''); }
 

@@ -777,3 +777,81 @@ def test_a_remote_recording_is_not_analyzed_here(tmp_path):
     controls._kept["target"] = object()
     ok, msg = controls.analyze(controls.recordings[0]["name"], "look")
     assert not ok and "on the rig" in msg
+
+
+# --------------------------------------------------------------------------- #
+# Keep a value: where it is declared, and the edit that would keep it (#133)
+# --------------------------------------------------------------------------- #
+LAUNCH = """
+from launch.actions import DeclareLaunchArgument
+def generate_launch_description():
+    declare_gain = DeclareLaunchArgument(
+        'stack_gain', default_value='1.0', description='the gain')
+    node = Node(package='demo_pkg', executable='stack', name='stack',
+                parameters=[params_file, {'kp': ParameterValue(LaunchConfiguration('stack_gain'), value_type=float),
+                             'ki': 0.1}])
+"""
+PARAMS_YAML = "stack:\n  ros__parameters:\n    kp: 1.0\n    kd: 0.5\nother:\n  ros__parameters:\n    kd: 9.0\n"
+FACTORS_GAIN = FACTORS + """  stack_gain:
+    levels: [low, high]
+    default: low
+    metadata_key: stack_gain
+    maps_to: {kind: launch_arg, name: stack_gain, level_values: {low: "1.0", high: "2.5"}}
+"""
+
+
+def _project(tmp_path):
+    pkg = tmp_path / "ros2_ws" / "src" / "demo_pkg"
+    (pkg / "launch").mkdir(parents=True)
+    (pkg / "config").mkdir()
+    (pkg / "package.xml").write_text("<package><name>demo_pkg</name></package>", encoding="utf-8")
+    (pkg / "launch" / "stack.launch.py").write_text(LAUNCH, encoding="utf-8")
+    (pkg / "config" / "stack.yaml").write_text(PARAMS_YAML, encoding="utf-8")
+    # A stale installed copy must never be the one proposed.
+    inst = tmp_path / "ros2_ws" / "install" / "demo_pkg" / "launch"
+    inst.mkdir(parents=True)
+    (inst / "stack.launch.py").write_text("'kp': 7.0", encoding="utf-8")
+    return tmp_path
+
+
+def test_a_proposal_names_the_factor_the_launch_default_and_the_yaml(tmp_path):
+    from robofacts import campaign_spec as cs2
+    from robofacts import explore_propose as epr
+    root = make_root(tmp_path / "exp")
+    (root / "common" / "config" / "factors.yaml").write_text(FACTORS_GAIN, encoding="utf-8")
+    factors = cs2.load_factors("expA", root)
+    p = epr.propose("/stack", "kp", 1.0, 2.5, project_root=_project(tmp_path), launch_package="demo_pkg",
+                    launch_file="stack.launch.py", factors=factors, condition={"stack_gain": "low"})
+    kinds = {c["kind"]: c for c in p["candidates"]}
+    assert set(kinds) == {"launch_arg", "launch_default", "factor", "yaml"}
+    assert kinds["launch_arg"]["file"] == "ros2_ws/src/demo_pkg/launch/stack.launch.py"
+    assert kinds["launch_default"]["suggestion"] == "'stack_gain', default_value='2.5', description='the gain')"
+    assert "level 'high' of factor stack_gain gives 2.5" in kinds["factor"]["note"]
+    assert "overridden by the launch file" in kinds["yaml"]["note"]
+    # A literal in the launch file, and a YAML value only in the node's own section.
+    lit = epr.propose("/stack", "ki", 0.1, 0.2, project_root=tmp_path, launch_package="demo_pkg",
+                      launch_file="stack.launch.py", factors=factors)
+    assert [c["kind"] for c in lit["candidates"]] == ["literal"]
+    assert "'ki': 0.2" in lit["candidates"][0]["suggestion"]
+    kd = epr.propose("/stack", "kd", 0.5, 0.7, project_root=tmp_path, launch_package="demo_pkg",
+                     launch_file="stack.launch.py", factors=factors)
+    assert [(c["kind"], c["suggestion"]) for c in kd["candidates"]] == [("yaml", "kd: 0.7")]
+    none = epr.propose("/stack", "kz", 1, 2, project_root=tmp_path, launch_package="demo_pkg",
+                       launch_file="stack.launch.py", factors=factors)
+    assert not none["candidates"] and "declare_parameter('kz'" in none["summary"]
+    assert "proposed: `kd: 0.7`" in epr.markdown(kd, "t")
+
+
+def test_keep_it_writes_proposed_changes_md_and_works_after_stop(tmp_path):
+    controls, _, _, root, out_dir = bound(tmp_path, events=EVENTS)
+    controls._kept["config"].project_root = _project(tmp_path / "proj")
+    controls._kept["config"].launch_package = "demo_pkg"
+    ok, msg, proposal = controls.propose("/stack", "kp")
+    assert ok and proposal["to"] == 2.5 and proposal["candidates"]
+    assert not controls.propose("/stack", "ki")[0]            # never changed
+    controls.shutdown()
+    ok, _, again = controls.propose("/stack", "kp")            # from the last table
+    assert ok and again["from"] == 1.0
+    text = (out_dir / "proposed_changes.md").read_text()
+    assert text.startswith("# Proposed changes: expA") and text.count("## /stack.kp: 1.0 -> 2.5") == 2
+    assert "Nothing was applied" in text
