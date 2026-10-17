@@ -798,15 +798,29 @@ class ExploreControls:
             return False, "an analysis is still running: one at a time"
         from . import analysis_runner as ar
         declared = ar.load_analyses(kept["experiment"], kept["experiments_root"])[analysis]
+        log_path = kept["out_dir"] / f"analysis_{analysis}_{recording}.log"
+        exp_dir = kept["experiments_root"] / kept["experiment"]
         entry = {"analysis": analysis, "recording": recording, "status": "running",
-                 "results": "", "detail": "", "started": self._stamp()}
+                 "results": "", "detail": "", "started": self._stamp(),
+                 "log": str(log_path.relative_to(exp_dir))}
         hooks, cwd = kept["hooks"], kept["cwd"]
 
         def executor(cmd: List[str]) -> int:
-            proc = hooks.start_background(cmd, None, cwd=cwd, label=f"analysis:{analysis}")
-            tick = threading.Event()
-            while _exited(proc) is None:
-                tick.wait(0.5)
+            # The output goes to its own file: after Stop the run log is closed, and
+            # the lines would land on the UI's console (2026-10-17). Its tail is
+            # printed once it ends, which reaches the run log while one is open.
+            with log_path.open("w", encoding="utf-8") as sink:
+                proc = hooks.start_background(cmd, None, cwd=cwd, label=f"analysis:{analysis}",
+                                              quiet_sink=sink)
+                tick = threading.Event()
+                while _exited(proc) is None:
+                    tick.wait(0.5)
+                tick.wait(0.3)   # the pump thread's last lines
+            try:
+                for line in log_path.read_text(encoding="utf-8").splitlines()[-15:]:
+                    print(line)
+            except OSError:
+                pass
             return _exited(proc)
 
         def work() -> None:

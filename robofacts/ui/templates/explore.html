@@ -47,13 +47,14 @@
       <h3 style="margin-bottom:.3rem">🕹 Jog <small class="muted"><code>{{ j.topic }}</code>, {{ j.step_s }} s per press, at most {{ j.max_speed_mps }} m/s</small></h3>
       {% if not run.explore.simulation and not run.explore.actions %}<p class="small warn"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" id="armactions"> arm: a jog moves a real robot, without a T-0 gate</label></p>{% endif %}
       <p class="small"><label style="flex-direction:row;gap:.3rem;display:inline-flex">speed
-        <select id="jogspeed">{% for f in (0.25, 0.5, 1.0) %}<option value="{{ f * j.max_speed_mps }}" {{ 'selected' if f == 0.5 }}>{{ '%.2f'|format(f * j.max_speed_mps) }} m/s</option>{% endfor %}</select></label></p>
+        <select id="jogspeed">{% for f in (0.25, 0.5, 1.0) %}<option value="{{ f * j.max_speed_mps }}" {{ 'selected' if f == 0.5 }}>{{ '%g'|format(f * j.max_speed_mps) }} m/s</option>{% endfor %}</select></label></p>
       <div style="display:grid;grid-template-columns:repeat(4,3.2rem);gap:.3rem">
-        <span></span><button type="button" class="btn-small jogbtn" data-dir="1,0,0,0" title="+x">+x ▲</button><span></span><button type="button" class="btn-small jogbtn" data-dir="0,0,1,0" title="up (+z): on the floor this is a takeoff">⤒ up</button>
-        <button type="button" class="btn-small jogbtn" data-dir="0,1,0,0" title="+y">◀ +y</button><button type="button" class="btn-stop btn-small" id="jogstop" title="stop the jog: zero twist">■</button><button type="button" class="btn-small jogbtn" data-dir="0,-1,0,0" title="-y">-y ▶</button><button type="button" class="btn-small jogbtn" data-dir="0,0,-1,0" title="down (-z): near the floor this lands">⤓ down</button>
+        <span></span><button type="button" class="btn-small jogbtn" data-dir="1,0,0,0" title="+x">+x ▲</button><span></span><button type="button" class="btn-small jogbtn" data-dir="0,0,1,0" title="+z">⤒ up</button>
+        <button type="button" class="btn-small jogbtn" data-dir="0,1,0,0" title="+y">◀ +y</button><button type="button" class="btn-stop btn-small" id="jogstop" title="stop the jog: zero twist">■</button><button type="button" class="btn-small jogbtn" data-dir="0,-1,0,0" title="-y">-y ▶</button><button type="button" class="btn-small jogbtn" data-dir="0,0,-1,0" title="-z">⤓ down</button>
         <span></span><button type="button" class="btn-small jogbtn" data-dir="-1,0,0,0" title="-x">-x ▼</button><span></span><span></span>
       </div>
       {% if j.max_yaw_rate_rps %}<p class="small"><button type="button" class="btn-small jogbtn" data-dir="0,0,0,1" data-yaw="1">⟲ yaw left</button> <button type="button" class="btn-small jogbtn" data-dir="0,0,0,-1" data-yaw="1">⟳ yaw right</button></p>{% endif %}
+      {% if j.note %}<p class="small warn">{{ j.note }}</p>{% endif %}
       <p class="small muted">Velocities in the frame of <code>{{ j.topic }}</code>. Each press publishes for {{ j.step_s }} s, then a zero twist. The runner publishes, never the Foxglove bridge.</p>
     </div>
     {% endif %}
@@ -234,9 +235,10 @@ function analyzeControl(r, names) {
 function analysesList(list) {
   if (!list || !list.length) return '';
   return '<ul class="small">' + list.map(a => {
-    const where = a.results ? ` <a href="${filesUrl.replace('__REL__', a.results)}">${esc(a.results)}</a>` : '';
+    const where = (a.results ? ` <a href="${filesUrl.replace('__REL__', a.results)}">results</a>` : '')
+      + (a.log ? ` · <a href="${filesUrl.replace('__REL__', a.log)}">log</a>` : '');
     const cls = a.status === 'ok' ? 'ok' : a.status === 'running' ? 'muted' : 'bad';
-    return `<li>📊 <b>${esc(a.analysis)}</b> of <code>${esc(a.recording)}</code>: <span class="${cls}">${esc(a.status)}</span>${where}${a.detail ? ' <span class="small muted">' + esc(a.detail) + '</span>' : ''}</li>`;
+    return `<li style="overflow-wrap:anywhere">📊 <b>${esc(a.analysis)}</b> of <code>${esc(a.recording)}</code>: <span class="${cls}">${esc(a.status)}</span>${where}${a.detail ? ' <span class="small muted">' + esc(a.detail) + '</span>' : ''}</li>`;
   }).join('') + '</ul>';
 }
 function recordingsList(recs, names) {
@@ -246,7 +248,7 @@ function recordingsList(recs, names) {
       ? ` <a class="iconlink" href="foxglove://open?ds=remote-file&ds.url=${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap" title="replay the slim copy in Foxglove desktop">▶ Foxglove</a>`
         + ` <a class="iconlink" href="${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap">⬇</a>`
       : ` <span class="muted">slim copy: ${esc(r.slim_status)}</span>`;
-    return `<li><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}${analyzeControl(r, names)}</li>`;
+    return `<li style="overflow-wrap:anywhere"><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}${analyzeControl(r, names)}</li>`;
   }).join('') + '</ul>';
 }
 // Rewrite a block only when its content changed: a table rebuilt on every poll

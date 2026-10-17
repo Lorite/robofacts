@@ -329,7 +329,7 @@ EXPLORE_KEYS = {"param_whitelist": "a list of regular expressions",
                 "port": "a port number", "address": "an address to bind",
                 "viewers": "a list of {name, command}",
                 "actions": "a list of {name, command}",
-                "jog": "a mapping with topic, max_speed_mps and optionally step_s, max_yaw_rate_rps"}
+                "jog": "a mapping with topic, max_speed_mps and optionally step_s, max_yaw_rate_rps, note"}
 
 
 def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
@@ -389,7 +389,7 @@ def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
 
 
 #: The keys of explore.jog, and the hard ceilings the runner never exceeds.
-JOG_KEYS = ("topic", "max_speed_mps", "step_s", "max_yaw_rate_rps")
+JOG_KEYS = ("topic", "max_speed_mps", "step_s", "max_yaw_rate_rps", "note")
 JOG_MAX_STEP_S = 5.0
 
 
@@ -420,9 +420,14 @@ def _explore_jog(raw: Any, path: Path) -> Dict[str, Any]:
 
     if "max_speed_mps" not in raw:
         raise RunnerError(f"{path}: explore.jog needs max_speed_mps (the fastest a press may move)")
+    note = raw.get("note", "")
+    if not isinstance(note, str):
+        raise RunnerError(f"{path}: explore.jog.note must be text, got {note!r}")
     return {"topic": topic, "max_speed_mps": positive("max_speed_mps"),
             "step_s": positive("step_s", 1.0, JOG_MAX_STEP_S),
-            "max_yaw_rate_rps": positive("max_yaw_rate_rps", 0.0)}
+            "max_yaw_rate_rps": positive("max_yaw_rate_rps", 0.0),
+            # What this robot does with a jog that the page cannot know (shown above the pad).
+            "note": note.strip()}
 
 
 def _named_commands(raw: Any, field_name: str, path: Path) -> List[Dict[str, Any]]:

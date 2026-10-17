@@ -686,7 +686,7 @@ def test_a_malformed_jog_refuses_to_load(tmp_path, block, words):
 
 def test_a_jog_is_clipped_to_its_limits_and_shares_the_action_slot(tmp_path):
     controls, fake, terminated, _, _ = bound(tmp_path, RUNNER_SIM + JOG)
-    assert controls.status()["jog"]["topic"] == "/cmd_vel"
+    assert controls.status()["jog"]["topic"] == "/cmd_vel" and controls.status()["jog"]["note"] == ""
     ok, msg = controls.jog(vx=2.0, vz=-0.1)
     assert ok, msg
     label, cmd = fake.started[-1]
@@ -764,6 +764,9 @@ def test_a_recording_can_be_analyzed_even_after_stop(tmp_path):
     meta = json.loads((root / "expA" / Path(a["results"]).parent / "analysis_metadata.json").read_text())
     assert meta["bags"] == [name] and meta["scratch"] is True and meta["explore"] is True
     assert meta["explore_session"] == out_dir.name
+    # Its output has its own file, which outlives the run log.
+    assert a["log"] == f"runs/explore/{out_dir.name}/analysis_look_{name}.log"
+    assert (root / "expA" / a["log"]).is_file()
     controls.analyze(name, "broken")
     wait_for(lambda: controls.status()["analyses"][-1]["status"] != "running")
     assert controls.status()["analyses"][-1]["status"] == "failed"
