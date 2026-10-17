@@ -4,7 +4,7 @@
 {% block title %}Explore · {{ run.campaign_file }} · Trials{% endblock %}
 {% block body %}
 <h1>Explore: {{ run.campaign_file }} <small>{{ run.experiment }}</small></h1>
-<p class="small">The stack of one condition, live, with a Foxglove view that may change parameters. <b>No T-0 gate, no recording, no action</b>: an exploration never counts as coverage, and its stack is never reused by a trial.</p>
+<p class="small">The stack of one condition, live, with a Foxglove view that may change parameters, the experiment's actions as buttons, and a record button. <b>No T-0 gate, never coverage</b>: a recording made here goes to <code>bags_scratch/</code> with <code>scratch: true</code>, and the stack is never reused by a trial.</p>
 
 <div class="cards">
   <div class="card"><div class="k">state</div><div class="v" id="state">{{ run.state }}</div></div>
@@ -22,18 +22,58 @@
 </div>
 
 <div id="connect" class="panel livep" style="display:none">
-  <h3 style="margin-top:0">🔭 Live: open it in Foxglove</h3>
+  <h3 style="margin-top:0">🔭 Live: Foxglove</h3>
   <p><a id="deeplink" class="btn-primary" href="#" style="text-decoration:none;padding:.35rem .8rem;border-radius:6px">▶ Open in Foxglove</a>
     <span class="small muted">or <a id="weblink" href="#" target="_blank" rel="noopener">in the web app</a>, or by hand: Open connection → Foxglove WebSocket → <code id="wsurl"></code></span></p>
-  <p id="tunnelrow" class="small" style="display:none">The stack runs on <b id="tunnelhost"></b>: open this tunnel on the laptop first.
+  <p class="small"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" id="autoopen"> open Foxglove by itself when the stack is ready</label>
+    <span id="autoopened" class="muted"></span></p>
+  {% if run.explore.layouts %}<p class="small">Layout of this experiment: {% for l in run.explore.layouts %}<a class="chip" href="{{ url_for('layout_file', experiment=run.experiment, name=l) }}" title="download, then in Foxglove: Layouts → Import from file (once per Foxglove)">⬇ {{ l }}</a> {% endfor %}<span class="muted">import it once (Layouts → Import from file), Foxglove keeps it.</span></p>{% endif %}
+  <p id="tunnelrow" class="small" style="display:none">The stack runs on <b id="tunnelhost"></b>: open this tunnel on the laptop first (Foxglove connects when it is up).
     <code id="tunnelcmd"></code><button type="button" class="btn-small" id="tunnelcopy" data-copy="">⧉</button></p>
-  <p class="small muted">Change a parameter in Foxglove's Parameters panel. It takes effect only in a node that reads it while running (many read their parameters once, at startup). Every change is logged, and when you stop, the page lists what changed (from, to). To keep a value, change the launch default or a factor level in the declarations.</p>
+  <p class="small muted">Change a parameter in Foxglove's Parameters panel. It takes effect only in a node that reads it while running (many read their parameters once, at startup). Every change appears in the table below as it happens. To keep a value, change the launch default or a factor level in the declarations.</p>
+</div>
+
+<div id="livepanels" class="cols" style="display:none">
+  <div class="panel" id="actionspanel">
+    <h3>✈ Actions <small class="muted">runner.yaml <code>explore.actions</code>, one at a time</small></h3>
+    {% if run.explore.actions %}
+    {% if not run.explore.simulation %}<p class="small warn"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" id="armactions"> arm actions: they move a real robot, without a T-0 gate</label></p>{% endif %}
+    <p id="actionbuttons">{% for a in run.explore.actions %}<button type="button" class="btn-primary actionbtn" data-name="{{ a }}">{{ a }}</button> {% endfor %}</p>
+    <p id="actionrunning" style="display:none"><b id="actionname"></b> <span id="actiontime" class="muted"></span>
+      <button type="button" class="btn-stop" id="actionstop">■ Stop action (SIGTERM, it lands)</button></p>
+    <p id="actionlast" class="small"></p>
+    <pre id="actionlog" class="term" style="max-height:12rem;display:none"></pre>
+    {% else %}
+    <p class="small muted">This experiment declares no <code>explore.actions</code> in runner.yaml.</p>
+    {% endif %}
+    <p id="actionmsg" class="small"></p>
+  </div>
+  <div class="panel" id="keeppanel">
+    <h3>● Keep what you saw</h3>
+    <p><input type="text" id="reclabel" placeholder="label (optional)" size="14">
+      <button type="button" class="btn-exec" id="recstart">● Record</button>
+      <button type="button" class="btn-stop" id="recstop" style="display:none">■ Stop recording</button>
+      <span id="recstate" class="small"></span></p>
+    <p class="small muted">To <code>bags_scratch/</code>, with the condition and the parameter values at the start in its metadata, then a slim copy that replays in Foxglove. Never coverage.</p>
+    <div id="recordings"></div>
+    <p><textarea id="notetext" rows="2" style="width:100%" placeholder="a note: what you see, what you changed, why"></textarea></p>
+    <p><button type="button" class="btn-primary" id="noteadd">✎ Add note</button>
+      <button type="button" class="btn-soft" id="notemark">⚑ Mark this moment</button>
+      <span id="notemsg" class="small"></span></p>
+    <ul id="notes" class="small"></ul>
+  </div>
+</div>
+
+<div id="livechanges" style="display:none">
+  <h2>Parameters changed <small>live, from the parameter log</small></h2>
+  <div id="livechangestable"></div>
+  <p id="setbackmsg" class="small"></p>
 </div>
 
 {% if run.state in ('running', 'aborting') %}
 <form method="post" action="{{ url_for('abort_run', run_id=run.run_id) }}" id="stopform">
   <button class="btn-exec" type="submit">■ Stop exploring: take the stack down</button>
-  <span class="small muted">Nothing is recorded or flown, so the stack stops at once. E-STOP in the bar above stops the robots too.</span>
+  <span class="small muted">A running action gets SIGTERM and lands first, and a recording is finalized. Then the stack comes down. E-STOP in the bar above stops the robots too.</span>
 </form>
 {% endif %}
 
@@ -65,7 +105,127 @@
 const apiUrl = location.origin + {{ url_for('api_run', run_id=run.run_id)|tojson }};
 const filesUrl = {{ url_for('files', experiment=run.experiment, rel='__REL__')|tojson }};
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const runId = {{ run.run_id|tojson }};
+const experiment = {{ run.experiment|tojson }};
+const ctlUrl = (op) => location.origin + {{ url_for('explore_control', run_id=run.run_id, op='__OP__')|tojson }}.replace('__OP__', op);
 let lastLog = [];
+let lastLive = null;
+
+// Foxglove opens by itself (#133). Chrome launches the FIRST foxglove:// link of a
+// page without a click (measured 2026-10-17: "Launched external handler"), and
+// refuses a second one until the next click ("a user gesture is required"). So the
+// page opens it once per exploration, when the bridge is ready. Foxglove 3.4
+// reconnects by itself, so a tunnel opened later still works.
+const AUTO_KEY = 'robofacts.explore.autoOpenFoxglove';
+function storeGet(store, key) { try { return window[store].getItem(key); } catch (e) { return null; } }
+function storeSet(store, key, v) { try { window[store].setItem(key, v); } catch (e) { /* private window */ } }
+const autoBox = document.getElementById('autoopen');
+autoBox.checked = storeGet('localStorage', AUTO_KEY) !== '0';
+autoBox.addEventListener('change', () => storeSet('localStorage', AUTO_KEY, autoBox.checked ? '1' : '0'));
+function autoOpen(x) {
+  const key = 'robofacts.explore.opened.' + runId;
+  if (!autoBox.checked || storeGet('sessionStorage', key)) return;
+  storeSet('sessionStorage', key, '1');
+  document.getElementById('autoopened').textContent = 'sent to Foxglove. The first time, Chrome asks: tick "Always allow" and it opens directly next time. Nothing opened? Use the button.';
+  location.href = x.deep_link;
+}
+
+async function ctl(op, data, msgId) {
+  const msg = document.getElementById(msgId);
+  if (msg) { msg.textContent = '…'; msg.className = 'small muted'; }
+  let j;
+  try {
+    const r = await fetch(ctlUrl(op), {method: 'POST', body: new URLSearchParams(data || {})});
+    j = await r.json().catch(() => ({ok: false, message: 'HTTP ' + r.status}));
+  } catch (err) { j = {ok: false, message: String(err)}; }
+  if (msg) { msg.textContent = (j.ok ? '✓ ' : '✗ ') + j.message; msg.className = 'small ' + (j.ok ? 'ok' : 'bad'); }
+  refresh();
+  return j;
+}
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.matches('.actionbtn')) {
+    const arm = document.getElementById('armactions');
+    ctl('action', {name: t.dataset.name, arm: arm && arm.checked ? 'yes' : ''}, 'actionmsg');
+  } else if (t.id === 'actionstop') ctl('action_stop', {}, 'actionmsg');
+  else if (t.matches('.setback')) ctl('set_back', {node: t.dataset.node, parameter: t.dataset.parameter}, 'setbackmsg');
+  else if (t.id === 'recstart') ctl('record', {label: document.getElementById('reclabel').value}, 'recstate');
+  else if (t.id === 'recstop') { t.disabled = true; ctl('record_stop', {}, 'recstate').then(() => { t.disabled = false; }); }
+  else if (t.id === 'noteadd' || t.id === 'notemark') {
+    const box = document.getElementById('notetext');
+    ctl('note', {text: box.value, mark: t.id === 'notemark' ? 'yes' : ''}, 'notemsg').then(j => { if (j.ok) box.value = ''; });
+  }
+});
+
+const val = (v) => '<code>' + esc(JSON.stringify(v)) + '</code>';
+function changesTable(ch, live) {
+  const rows = (ch.changed || []).map(c =>
+    `<tr><td><code>${esc(c.node)}</code></td><td><code>${esc(c.parameter)}</code></td>`
+    + `<td>${val(c.from)}</td><td>${c.deleted ? '<code>(deleted)</code>' : val(c.to)}</td>`
+    + `<td class="num">${c.times_changed}</td>`
+    + (live ? `<td><button type="button" class="btn-small setback" data-node="${esc(c.node)}" data-parameter="${esc(c.parameter)}"`
+       + (c.settable ? '' : ` disabled title="${c.from === null ? 'the starting value is unknown' : 'not in the explore whitelist'}"`)
+       + `>↺ set back</button></td>` : '') + `</tr>`).join('');
+  const reverted = (ch.reverted || []).length
+    ? `<p class="small muted">Set, but back at the starting value now: ${ch.reverted.map(n => '<code>' + esc(typeof n === 'string' ? n : n.node + '.' + n.parameter) + '</code>').join(', ')}.</p>` : '';
+  return rows
+    ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>${live ? 'now' : 'to'}</th><th class="num">changes</th>${live ? '<th></th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>` + reverted
+    : `<p class="small muted">${!live ? 'No parameter changed during this exploration.'
+        : (ch.reverted || []).length ? 'No parameter differs from its starting value now.'
+        : 'No parameter changed yet. Change one in Foxglove\'s Parameters panel.'}</p>` + reverted;
+}
+function recordingsList(recs) {
+  if (!recs || !recs.length) return '';
+  return '<ul class="small">' + recs.map(r => {
+    const replay = r.slim_status === 'done'
+      ? ` <a class="iconlink" href="foxglove://open?ds=remote-file&ds.url=${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap" title="replay the slim copy in Foxglove desktop">▶ Foxglove</a>`
+        + ` <a class="iconlink" href="${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap">⬇</a>`
+      : ` <span class="muted">slim copy: ${esc(r.slim_status)}</span>`;
+    return `<li><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}</li>`;
+  }).join('') + '</ul>';
+}
+// Rewrite a block only when its content changed: a table rebuilt on every poll
+// replaces the button under the cursor, and the click is lost (2026-10-17).
+function setHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el && el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+function notesList(notes) { return (notes || []).map(n => '<li>' + esc(n.replace(/^- /, '')) + '</li>').join(''); }
+
+function renderLive(d, x) {
+  const L = x.live || {};
+  lastLive = L;
+  const running = d.state === 'running' && x.ready && L.live;
+  document.getElementById('livepanels').style.display = running ? 'flex' : 'none';
+  document.getElementById('livechanges').style.display = running ? 'block' : 'none';
+  if (!running) return;
+  const act = L.action;
+  document.querySelectorAll('.actionbtn').forEach(b => { b.disabled = !!act; });
+  const ar = document.getElementById('actionrunning');
+  if (ar) {
+    ar.style.display = act ? 'block' : 'none';
+    if (act) {
+      document.getElementById('actionname').textContent = '▶ ' + act.name + (act.stopping ? ' (stopping, landing)' : ' running');
+      document.getElementById('actiontime').textContent = Math.round(Date.now() / 1000 - act.started) + ' s';
+    }
+    const last = L.last_action;
+    document.getElementById('actionlast').innerHTML = last
+      ? `last: <b>${esc(last.name)}</b> exited <span class="${last.rc === 0 ? 'ok' : 'bad'}">rc=${last.rc}</span> after ${last.seconds} s${last.stopping ? ' (stopped from this page)' : ''}` : '';
+    const name = act ? act.name : (last ? last.name : '');
+    const pre = document.getElementById('actionlog');
+    const lines = name ? lastLog.filter(e => e.text.startsWith('[action:' + name + ']')).map(e => e.text).slice(-12) : [];
+    pre.style.display = lines.length ? 'block' : 'none';
+    pre.textContent = lines.join('\n');
+    pre.scrollTop = pre.scrollHeight;
+  }
+  const rec = L.record;
+  document.getElementById('recstart').style.display = rec ? 'none' : 'inline-block';
+  document.getElementById('recstop').style.display = rec ? 'inline-block' : 'none';
+  if (rec) { const st = document.getElementById('recstate'); st.textContent = `● REC ${rec.name}, ${rec.seconds} s`; st.className = 'small bad'; }
+  setHtml('recordings', recordingsList(L.recordings));
+  setHtml('notes', notesList(L.notes));
+  setHtml('livechangestable', changesTable(L.changes || {}, true));
+}
 function renderLog() {
   const pre = document.getElementById('termlog');
   const only = document.getElementById('onlyprob').checked;
@@ -76,15 +236,15 @@ function renderLog() {
 }
 document.addEventListener('change', e => { if (e.target.matches('#onlyprob, #follow')) renderLog(); });
 
-async function poll() {
+async function refresh() {
   let d;
   try {
     const r = await fetch(apiUrl);
-    if (!r.ok) { document.getElementById('phase').textContent = 'lost the run (HTTP ' + r.status + '): this UI may have restarted.'; return; }
+    if (!r.ok) { document.getElementById('phase').textContent = 'lost the run (HTTP ' + r.status + '): this UI may have restarted.'; return true; }
     d = await r.json();
   } catch (err) {
-    document.getElementById('phase').textContent = 'cannot reach the UI (' + err + '); retrying…';
-    setTimeout(poll, 3000); return;
+    document.getElementById('phase').textContent = 'cannot reach the UI (' + err + '), retrying…';
+    return false;
   }
   const x = d.explore || {};
   document.getElementById('state').textContent = d.state;
@@ -107,6 +267,7 @@ async function poll() {
     document.getElementById('tunnelhost').textContent = x.host || '';
     document.getElementById('tunnelcmd').textContent = x.tunnel || '';
     document.getElementById('tunnelcopy').dataset.copy = x.tunnel || '';
+    if (running) autoOpen(x);
   }
   if (!running) {
     const f = document.getElementById('stopform'); if (f) f.remove();
@@ -115,23 +276,23 @@ async function poll() {
       const file = x.out_dir ? `${x.out_dir}/parameter_changes.yaml` : '';
       document.getElementById('changesfile').innerHTML = file
         ? `<a href="${filesUrl.replace('__REL__', file)}">${esc(file)}</a>` : '';
-      const rows = (x.changed || []).map(c =>
-        `<tr><td><code>${esc(c.node)}</code></td><td><code>${esc(c.parameter)}</code></td>`
-        + `<td><code>${esc(JSON.stringify(c.from))}</code></td>`
-        + `<td><code>${c.deleted ? '(deleted)' : esc(JSON.stringify(c.to))}</code></td>`
-        + `<td class="num">${c.times_changed}</td></tr>`).join('');
-      const reverted = (x.reverted || []).length
-        ? `<p class="small muted">Set, but ended at the starting value: ${x.reverted.map(n => '<code>' + esc(n) + '</code>').join(', ')}.</p>` : '';
-      document.getElementById('changestable').innerHTML = rows
-        ? `<div class="tablewrap"><table><thead><tr><th>node</th><th>parameter</th><th>from</th><th>to</th><th class="num">changes</th></tr></thead><tbody>${rows}</tbody></table></div>`
-          + `<p class="small muted">A change took effect only in a node that reads the parameter while running (an on-set parameter callback). Many nodes read a parameter once, at startup, so Foxglove shows the new value while the node still uses the old one. Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` + reverted
-        : `<p class="small muted">No parameter changed during this exploration.</p>` + reverted;
+      const L = x.live || {};
+      const kept = (L.recordings || []).length || (L.notes || []).length
+        ? '<h3>Kept from this exploration</h3>' + recordingsList(L.recordings)
+          + ((L.notes || []).length ? `<p class="small">Notes, also in <code>${esc(x.out_dir)}/notes.md</code>:</p><ul class="small">${notesList(L.notes)}</ul>` : '')
+        : '';
+      document.getElementById('changestable').innerHTML = changesTable({changed: x.changed, reverted: x.reverted}, false)
+        + ((x.changed || []).length ? `<p class="small muted">A change took effect only in a node that reads the parameter while running (an on-set parameter callback). Nothing here reached a trial. To keep a value, change the launch default or a factor level in the declarations, and review it like any other change. <code>null</code> in "from" means the node could not be read.</p>` : '') + kept;
     }
   }
   lastLog = d.log || [];
   renderLog();
-  if (['finished', 'aborted', 'error'].includes(d.state)) return;
-  setTimeout(poll, 1500);
+  renderLive(d, x);
+  return ['finished', 'aborted', 'error'].includes(d.state);
+}
+async function poll() {
+  const done = await refresh();
+  if (!done) setTimeout(poll, 1500);
 }
 poll();
 </script>

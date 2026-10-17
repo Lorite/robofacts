@@ -18,12 +18,21 @@ arguments, the aux launches) and adds two things a trial never has:
   running stack and change nothing in it, so the stack stays exactly the one a
   trial starts (a campaign runs Gazebo headless, and a viewer does not change
   that). A viewer that exits (its window closed) does not end the exploration;
-* a parameter log (explore_params.py) that starts before the stack and, at
-  stop, writes every parameter that changed (from, to) to
-  ``runs/explore/<stamp>_explore[_<label>]/parameter_changes.yaml``.
+* a parameter log (explore_params.py) that starts before the stack. It is
+  read live (the run page's change table) and, at stop, every parameter that
+  changed (from, to) goes to
+  ``runs/explore/<stamp>_explore[_<label>]/parameter_changes.yaml``;
+* since #133 (2026-10-17), ``ExploreControls``: what the run page may do while
+  the stack runs. Start one of runner.yaml's ``explore.actions`` at a time
+  (take off, fly a route, land) and stop it with SIGTERM, set a changed
+  parameter back to its starting value, record the running stack to a scratch
+  recording (``bags_scratch/<stamp>_explore_<label>``, ``scratch: true`` and
+  ``explore: true`` in its metadata, a slim copy for Foxglove), and write
+  timestamped notes and marks to ``notes.md`` in the exploration's folder.
 
-And it leaves out what makes a trial a trial: no T-0 gate, no recorder, no
-action, no trial_metadata.json, no attempt-ledger line. An exploration can
+And it leaves out what makes a trial a trial: no T-0 gate, no trial action,
+no trial_metadata.json in bags/, no attempt-ledger line. A recording made from
+the run page goes to bags_scratch/ and says scratch: true. An exploration can
 never count as coverage, and a stack whose parameters were changed is never
 handed to a trial (it is not a continuous session, and it stops when the
 exploration stops). A value worth keeping goes back into the declarations (a
@@ -43,8 +52,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
+import signal
 import sys
 import threading
 import time
@@ -94,6 +105,8 @@ class ExploreSettings:
     address: str
     #: explore.viewers: the windows Explore opens after the bridge, as {name, command}.
     viewers: List[Dict[str, Any]] = field(default_factory=list)
+    #: explore.actions (#133): the run page's buttons, as {name, command}. Never run by a trial.
+    actions: List[Dict[str, Any]] = field(default_factory=list)
     #: The experiment's `simulation:`. On hardware the UI asks for the arm checkbox.
     simulation: bool = False
 
@@ -105,6 +118,8 @@ class ExploreSettings:
         if not self.allowed:
             return f"Explore is not available: {self.reason}"
         opens = (", and it opens " + ", ".join(v["name"] for v in self.viewers)) if self.viewers else ""
+        if self.actions:
+            opens += ". Actions: " + ", ".join(a["name"] for a in self.actions)
         if not self.writable:
             return ("live view only: no parameter may be changed (explore.param_whitelist is empty)"
                     + opens)
@@ -119,9 +134,10 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
     address = str(block.get("address", DEFAULT_ADDRESS))
     topics = list(block.get("topic_whitelist", [".*"]))
     viewers = list(block.get("viewers", []))
+    actions = list(block.get("actions", []))
     if config.simulation:
         return ExploreSettings(True, "", list(block.get("param_whitelist", [".*"])), topics,
-                               port, address, viewers=viewers, simulation=True)
+                               port, address, viewers=viewers, actions=actions, simulation=True)
     if not config.explore_declared:
         return ExploreSettings(
             False, "this experiment runs real robots (simulation: false) and its runner.yaml "
@@ -134,7 +150,8 @@ def settings(config: tr.RunnerConfig) -> ExploreSettings:
             False, f"explore.param_whitelist has {', '.join(repr(p) for p in wide)}, which matches "
                    f"every parameter. On real robots name the parameters you allow, one pattern each",
             whitelist, topics, port, address, viewers=viewers)
-    return ExploreSettings(True, "", whitelist, topics, port, address, viewers=viewers)
+    return ExploreSettings(True, "", whitelist, topics, port, address, viewers=viewers,
+                           actions=actions)
 
 
 def _yaml_list(values: List[str]) -> str:
@@ -290,12 +307,411 @@ def _out_dir(experiments_root: Path, experiment: str, stamp: str, label: str) ->
     return out
 
 
+def current_values(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The last value the log knows for every parameter, as {"<node>.<parameter>": value}."""
+    values: Dict[str, Any] = {}
+    for e in events:
+        key = f"{e['node']}.{e['name']}"
+        if e["kind"] == "deleted":
+            values.pop(key, None)
+        else:
+            values[key] = e.get("value")
+    return values
+
+
+def param_value_text(value: Any) -> str:
+    """A value as `ros2 param set` reads it (YAML): JSON is valid YAML and keeps the type."""
+    return json.dumps(value)
+
+
+def whitelisted(s: ExploreSettings, node: str, parameter: str) -> bool:
+    """Whether the explore bridge would let this parameter change (its param_whitelist)."""
+    # foxglove_bridge matches its whitelist against "<node>.<parameter>", the node
+    # fully qualified, so this asks the same question of the same string.
+    full = f"{node}.{parameter}"
+    for pattern in s.param_whitelist:
+        try:
+            if re.search(pattern, full):
+                return True
+        except re.error:
+            continue
+    return False
+
+
+def terminate_action(proc, target, cmd: List[str]) -> None:
+    """SIGTERM, never SIGINT: the flight scripts land on SIGTERM (rclpy keeps SIGINT).
+
+    Locally the action has its own process group (start_background), so the
+    group gets the signal. Remotely the local process is only the ssh tunnel,
+    and closing it would hang up the script without a landing, so the script
+    itself is signalled in the container by its command line.
+    """
+    if target is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        return
+    from .remote_exec_utils import _pkill_remote
+    _pkill_remote(target, re.escape(" ".join(cmd)), "TERM")
+
+
+def kill_action(proc, target, cmd: List[str]) -> None:
+    """The last resort when an action ignores SIGTERM for too long."""
+    if target is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        return
+    from .remote_exec_utils import _pkill_remote
+    _pkill_remote(target, re.escape(" ".join(cmd)), "KILL")
+
+
+class ExploreControls:
+    """What the run page may do to a live exploration (#133, 2026-10-17).
+
+    run_explore binds it once the stack is READY and unbinds it in its
+    ``finally``, before the stack comes down: a running action gets SIGTERM
+    (and lands) and a running recorder is stopped first, so the bag is
+    finalized. Every method is safe to call from a web request thread and
+    returns ``(ok, message)``. The browser names an action, a parameter or a
+    note, never a command: what may run is what runner.yaml declares.
+
+    * actions: ``explore.actions``, one at a time. On hardware only when the
+      caller says ``armed`` (the run page's arm checkbox).
+    * set back: ``ros2 param set`` to the starting value the parameter log
+      read, only for a parameter that changed, whose start is known, and
+      that the bridge's whitelist allows.
+    * record: the trial's own record command, to
+      ``bags_scratch/<stamp>_explore_<label>``, with ``scratch: true`` and
+      ``explore: true`` in its trial_metadata.json, then a slim copy.
+    * notes: timestamped lines in ``notes.md``, a mark says so.
+    """
+
+    def __init__(self, *, terminate: Callable = terminate_action, kill: Callable = kill_action,
+                 now: Callable[[], float] = time.time, land_wait_s: float = 90.0,
+                 slim: Optional[Callable[..., Any]] = None):
+        self._lock = threading.Lock()
+        self._terminate, self._kill, self._now = terminate, kill, now
+        self._land_wait_s = land_wait_s
+        self._slim = slim
+        self._ctx: Optional[Dict[str, Any]] = None
+        self._action: Optional[Dict[str, Any]] = None
+        self._last_action: Optional[Dict[str, Any]] = None
+        self._record: Optional[Dict[str, Any]] = None
+        self.recordings: List[Dict[str, Any]] = []
+        self.notes: List[str] = []
+        self._threads: List[threading.Thread] = []
+
+    # ------------------------------------------------------------------ binding
+    def bind(self, **ctx: Any) -> None:
+        with self._lock:
+            self._ctx = dict(ctx)
+
+    @property
+    def live(self) -> bool:
+        return self._ctx is not None
+
+    def _events(self) -> List[Dict[str, Any]]:
+        ctx = self._ctx
+        if ctx is None:
+            return []
+        try:
+            lines = (ctx["out_dir"] / "parameter_events.jsonl").read_text(
+                encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        return parse_events(lines)
+
+    def changes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """The live change table: summarize() over the parameter log so far."""
+        summary = summarize(self._events())
+        ctx = self._ctx
+        for row in summary["changed"] + summary["reverted"]:
+            row["settable"] = bool(ctx and row["from"] is not None and not row.get("deleted")
+                                   and whitelisted(ctx["settings"], row["node"], row["parameter"]))
+        return summary
+
+    def status(self) -> Dict[str, Any]:
+        ctx = self._ctx
+        with self._lock:
+            action = dict(self._action) if self._action else None
+            last = dict(self._last_action) if self._last_action else None
+            record = dict(self._record) if self._record else None
+        for a in (action, last):
+            if a:
+                a.pop("proc", None)
+                a.pop("cmd", None)
+        if record:
+            # The parameter snapshot is for the metadata, not for a page that polls
+            # every 1.5 s (249 values in the Gazebo stand-in, 2026-10-17).
+            for key in ("proc", "parameters", "changed"):
+                record.pop(key, None)
+            record["seconds"] = round(self._now() - record["t0"], 1)
+            record.pop("t0", None)
+        return {"live": ctx is not None,
+                "actions": [a["name"] for a in (ctx["settings"].actions if ctx else [])],
+                "simulation": bool(ctx and ctx["settings"].simulation),
+                "action": action, "last_action": last, "record": record,
+                "recordings": [{k: v for k, v in r.items() if k != "t0"} for r in self.recordings],
+                "notes": list(self.notes),
+                "changes": self.changes() if ctx else {"changed": [], "reverted": []}}
+
+    # ------------------------------------------------------------------ actions
+    def start_action(self, name: str, *, armed: bool = False) -> tuple:
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live (not ready yet, or stopping)"
+        s: ExploreSettings = ctx["settings"]
+        declared = {a["name"]: a for a in s.actions}
+        if name not in declared:
+            return False, f"no explore action named {name!r} in runner.yaml"
+        if not s.simulation and not armed:
+            return False, ("this experiment runs real robots: tick 'arm actions' first. "
+                           "An action moves a robot without a T-0 gate")
+        with self._lock:
+            if self._action is not None:
+                return False, (f"the action {self._action['name']!r} is still running: "
+                               f"wait for it, or stop it first")
+            try:
+                cmd = tr.templated_command(declared[name]["command"], ctx["spec"],
+                                           f"explore action {name}", **ctx["placeholders"])
+            except tr.RunnerError as exc:
+                return False, str(exc)
+            print(f"[explore] action {name}: $ {shlex.join(cmd)}")
+            proc = ctx["hooks"].start_background(cmd, ctx["target"], cwd=ctx["cwd"],
+                                                 label=f"action:{name}")
+            self._action = {"name": name, "proc": proc, "cmd": cmd, "started": self._now(),
+                            "rc": None, "stopping": False}
+            entry = self._action
+        t = threading.Thread(target=self._watch_action, args=(entry,),
+                             name=f"explore-action-{name}", daemon=True)
+        self._threads.append(t)
+        t.start()
+        return True, f"started {name}"
+
+    def _watch_action(self, entry: Dict[str, Any]) -> None:
+        proc = entry["proc"]
+        tick = threading.Event()
+        while True:
+            rc = _exited(proc)
+            if rc is not None:
+                break
+            tick.wait(0.2)
+        entry["rc"] = rc
+        entry["seconds"] = round(self._now() - entry["started"], 1)
+        print(f"[explore] action {entry['name']} exited rc={rc} after {entry['seconds']} s"
+              + (" (stopped)" if entry["stopping"] else ""))
+        with self._lock:
+            if self._action is entry:
+                self._action = None
+            self._last_action = dict(entry)
+
+    def stop_action(self) -> tuple:
+        with self._lock:
+            entry = self._action
+            if entry is None:
+                return False, "no action is running"
+            entry["stopping"] = True
+        print(f"[explore] action {entry['name']}: SIGTERM (stop from the run page)")
+        ctx = self._ctx or {}
+        self._terminate(entry["proc"], ctx.get("target"), entry["cmd"])
+        return True, f"SIGTERM sent to {entry['name']}"
+
+    def _end_action(self) -> None:
+        """At stop: SIGTERM the running action, wait for its landing, kill it if it hangs."""
+        entry = self._action
+        if entry is None:
+            return
+        self.stop_action()
+        t0 = time.monotonic()
+        while self._action is entry and time.monotonic() - t0 < self._land_wait_s:
+            if _exited(entry["proc"]) is not None:
+                break
+            time.sleep(0.2)
+        if _exited(entry["proc"]) is None:
+            print(f"[explore] action {entry['name']} still running after "
+                  f"{self._land_wait_s:.0f} s: SIGKILL")
+            self._kill(entry["proc"], (self._ctx or {}).get("target"), entry["cmd"])
+
+    # ------------------------------------------------------------------ set back
+    def set_back(self, node: str, parameter: str) -> tuple:
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live"
+        summary = self.changes()
+        row = next((r for r in summary["changed"]
+                    if r["node"] == node and r["parameter"] == parameter), None)
+        if row is None:
+            return False, f"{node}.{parameter} has not changed in this exploration"
+        if not row["settable"]:
+            why = ("its starting value is unknown" if row["from"] is None
+                   else "the explore whitelist does not allow it")
+            return False, f"{node}.{parameter} cannot be set back: {why}"
+        cmd = ["ros2", "param", "set", node, parameter, param_value_text(row["from"])]
+        print(f"[explore] set back {node}.{parameter} to {json.dumps(row['from'])}: "
+              f"$ {shlex.join(cmd)}")
+        completed = ctx["hooks"].run_foreground(cmd, ctx["target"], cwd=ctx["cwd"], check=False)
+        rc = getattr(completed, "returncode", 0)
+        out = (getattr(completed, "stdout", "") or "").strip()
+        if rc != 0 or "Setting parameter failed" in out:
+            return False, f"ros2 param set failed (rc={rc}): {out[-300:]}"
+        return True, f"{node}.{parameter} set back to {json.dumps(row['from'])}"
+
+    # ------------------------------------------------------------------ notes
+    def _stamp(self) -> str:
+        return datetime.fromtimestamp(self._now()).astimezone().isoformat(timespec="seconds")
+
+    def note(self, text: str, *, mark: bool = False) -> tuple:
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live"
+        text = " ".join((text or "").split())
+        if not text and not mark:
+            return False, "an empty note"
+        parts = [f"- {self._stamp()}"]
+        if mark:
+            parts.append("● mark")
+        with self._lock:
+            record = self._record
+        if record:
+            parts.append(f"[recording {record['name']} at +{self._now() - record['t0']:.1f} s]")
+        action = self._action
+        if action:
+            parts.append(f"[action {action['name']}]")
+        if text:
+            parts.append(text)
+        line = " ".join(parts)
+        path = ctx["out_dir"] / "notes.md"
+        try:
+            new = not path.exists()
+            with path.open("a", encoding="utf-8") as fh:
+                if new:
+                    fh.write(f"# Notes: {ctx['experiment']} exploration {ctx['out_dir'].name}\n\n"
+                             f"Condition: {ctx['spec'].describe()}\n\n")
+                fh.write(line + "\n")
+        except OSError as exc:
+            return False, f"could not write {path}: {exc}"
+        self.notes.append(line)
+        print(f"[explore] note: {line[2:]}")
+        return True, line
+
+    # ------------------------------------------------------------------ record
+    def start_record(self, label: str = "") -> tuple:
+        ctx = self._ctx
+        if ctx is None:
+            return False, "the exploration is not live"
+        with self._lock:
+            if self._record is not None:
+                return False, f"already recording {self._record['name']}"
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "-", (label or "").strip()).strip("-")
+            base = f"{ctx['clock']()}_explore" + (f"_{safe}" if safe else "")
+            bags = ctx["experiments_root"] / ctx["experiment"] / "bags_scratch"
+            bag_dir, n = bags / base, 2
+            while bag_dir.exists() or any(r["bag_dir"] == str(bag_dir) for r in self.recordings):
+                bag_dir, n = bags / f"{base}-{n}", n + 1
+            events = self._events()
+            cmd = tr.record_command(ctx["spec"], ctx["factors"], ctx["config"], bag_dir)
+            if ctx["target"] is None:
+                bags.mkdir(parents=True, exist_ok=True)
+            print(f"[explore] record {bag_dir.name}: $ {shlex.join(cmd)}")
+            proc = ctx["hooks"].start_background(cmd, ctx["target"], cwd=ctx["cwd"],
+                                                 label="recorder")
+            self._record = {"name": bag_dir.name, "bag_dir": str(bag_dir), "label": safe,
+                            "proc": proc, "t0": self._now(), "started": self._stamp(),
+                            "parameters": current_values(events),
+                            "changed": summarize(events)["changed"]}
+        return True, f"recording {bag_dir.name}"
+
+    def stop_record(self, *, wait_slim: bool = False) -> tuple:
+        ctx = self._ctx
+        with self._lock:
+            rec = self._record
+            self._record = None
+        if rec is None or ctx is None:
+            return False, "nothing is recording"
+        hooks, target, config = ctx["hooks"], ctx["target"], ctx["config"]
+        try:
+            hooks.stop_process(rec["proc"], target, name="record", kind="recorder")
+        except Exception as exc:  # noqa: BLE001 - still write what we know
+            print(f"[explore] stopping the recorder failed: {exc}")
+        time.sleep(config.stop_grace_s)
+        bag_dir = Path(rec["bag_dir"])
+        seconds = round(self._now() - rec["t0"], 1)
+        metadata = tr.trial_metadata(ctx["spec"], ctx["factors"], config, trial_id=bag_dir.name)
+        metadata.update({
+            # Two locks, as for a --scratch flight: bags_scratch/ is never indexed,
+            # and scratch: true is refused as coverage even inside bags/.
+            "scratch": True, "scratch_label": rec["label"] or "explore",
+            "explore": True, "explore_session": ctx["out_dir"].name,
+            "explore_condition": dict(ctx["spec"].values),
+            "explore_started": rec["started"], "record_duration_sec": seconds,
+            # What the stack's parameters were when the recorder started: the bag
+            # alone cannot say that a gain had been changed from Foxglove.
+            "explore_parameters_at_start": rec["parameters"],
+            "explore_changed_at_start": rec["changed"],
+        })
+        try:
+            tr.stamp_code_version(metadata, target)
+        except Exception:  # noqa: BLE001 - provenance, never fatal
+            pass
+        out = {"name": bag_dir.name, "bag_dir": str(bag_dir), "seconds": seconds,
+               "started": rec["started"], "slim": "", "slim_status": "pending"}
+        try:
+            from .remote_exec_utils import write_trial_file
+            write_trial_file(target, bag_dir / "trial_metadata.json",
+                             json.dumps(metadata, indent=2, default=str))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[explore] could not write the recording's metadata: {exc}")
+        print(f"[explore] recorded {bag_dir.name} ({seconds} s), scratch, never coverage")
+        self.recordings.append(out)
+
+        def slim() -> None:
+            try:
+                tr.export_rosout(bag_dir, target, hooks, ctx["cwd"])
+                if self._slim is not None:
+                    self._slim(bag_dir, target, project_root=ctx["cwd"])
+                else:
+                    from .slim_bag_archive import archive_and_sync
+                    archive_and_sync(bag_dir, target, project_root=ctx["cwd"])
+                out["slim"] = bag_dir.name + "_slim"
+                out["slim_status"] = "done"
+                print(f"[explore] slim copy of {bag_dir.name} ready: replay it in Foxglove")
+            except Exception as exc:  # noqa: BLE001 - the full bag is safe
+                out["slim_status"] = f"failed: {exc}"
+                print(f"[explore] slim copy of {bag_dir.name} failed: {exc}")
+
+        if wait_slim:
+            slim()
+        else:
+            out["slim_status"] = "slimming"
+            t = threading.Thread(target=slim, name=f"explore-slim-{bag_dir.name}", daemon=True)
+            self._threads.append(t)
+            t.start()
+        return True, f"recorded {bag_dir.name} ({seconds} s)"
+
+    # ------------------------------------------------------------------ shutdown
+    def shutdown(self) -> None:
+        """Before the stack comes down: land the action, finalize the recording, finish slims."""
+        if self._ctx is None:
+            return
+        self._end_action()
+        if self._record is not None:
+            self.stop_record(wait_slim=True)
+        for t in list(self._threads):
+            t.join(timeout=300)
+        with self._lock:
+            self._ctx = None
+
+
 def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_root: Path, *,
                 dry_run: bool = True, hooks: Optional[tr.ProcessHooks] = None,
                 stop: Optional[threading.Event] = None, max_s: Optional[float] = None,
                 label: str = "",
                 confirm_steps: Optional[Callable[[cs.TrialSpec, List[Dict[str, Any]]], bool]] = None,
                 on_ready: Optional[Callable[[Dict[str, Any]], None]] = None,
+                controls: Optional[ExploreControls] = None,
                 clock: Callable[[], str] = lambda: datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S"),
                 poll_s: float = 0.5, logger_settle_s: float = 1.0) -> ExploreResult:
     """Bring up the campaign's first condition, hold it until ``stop`` is set, tear it down.
@@ -306,6 +722,9 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
     setup steps, parameter log, stack, aux launches, bridge. The parameter log
     starts before the stack so it hears every node declare its parameters.
     Teardown runs in reverse, in a ``finally``, so a crash still stops the stack.
+    ``controls`` (#133) is bound when the stack is ready and shut down first in
+    the teardown: a running action lands and a recording is finalized before
+    anything else stops.
     """
     spec = next(campaign.combinations())
     factors = campaign.factors
@@ -318,7 +737,8 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
         print(tr._c("31;1", f"[explore] REFUSED - {s.reason}"))
         return ExploreResult(spec, "refused", s.reason)
     print(f"[explore]   {s.describe()}")
-    print("[explore]   no T-0 gate, no recorder, no action: an exploration never counts as coverage")
+    print("[explore]   no T-0 gate, no trial action: an exploration never counts as coverage, "
+          "and a recording from the run page goes to bags_scratch/")
 
     target = config.remote_target(spec.host(factors))
     hooks = hooks or tr.ProcessHooks.default()
@@ -393,6 +813,14 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
         print(f"[explore]   Foxglove: Open connection -> Foxglove WebSocket -> {info['url']}")
         print(f"[explore]   {s.describe()}")
         print("[explore]   stop with Ctrl-C (or Stop on the run page); the stack comes down then")
+        if controls is not None:
+            controls.bind(hooks=hooks, target=target, cwd=cwd, out_dir=out_dir, spec=spec,
+                          factors=factors, config=config, settings=s, clock=clock,
+                          experiment=campaign.experiment, experiments_root=experiments_root,
+                          placeholders=arg_ph)
+            if s.actions:
+                print("[explore]   actions on the run page: "
+                      + ", ".join(a["name"] for a in s.actions))
         if on_ready is not None:
             on_ready(info)
         t0 = time.monotonic()
@@ -417,6 +845,11 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
         result.detail = str(exc) if isinstance(exc, tr.RunnerError) else f"execution error: {exc}"
         print(tr._c("31;1", f"[explore] {result.detail}"))
     finally:
+        if controls is not None:
+            try:
+                controls.shutdown()
+            except Exception as exc:  # noqa: BLE001 - the stack must still come down
+                result.detail = f"{result.detail} | ending the actions failed: {exc}".strip(" |")
         names = ([f"viewer:{n}" for n, _ in reversed(viewer_cmds)] + ["bridge"]
                  + [f"aux:{n}" for n, _ in reversed(aux_cmds)] + ["launch_stack", "params"])
         for name in names:
@@ -441,7 +874,12 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
             "experiment": campaign.experiment, "campaign": campaign.name,
             "condition": dict(spec.values), "started": started,
             "stopped": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "status": result.status, "writable": list(s.param_whitelist)})
+            "status": result.status, "writable": list(s.param_whitelist),
+            # What the run page kept (#133): the notes (also in notes.md) and the
+            # scratch recordings, so this one file lists everything of the session.
+            "notes": list(controls.notes) if controls is not None else [],
+            "recordings": ([r["bag_dir"] for r in controls.recordings]
+                           if controls is not None else [])})
         changed = change_lines(result.summary)
         print(f"[explore] {len(changed)} parameter(s) changed"
               + (f", {len(result.summary['reverted'])} set but ended at the starting value"

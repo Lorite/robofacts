@@ -1104,3 +1104,103 @@ def test_explore_on_hardware_needs_the_arm(client, root):
     assert r.status_code == 400 and "arm".encode() in r.data
     page = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
     assert 'name="explore_confirm"' in page
+
+
+def test_the_explore_run_page_drives_actions_records_and_notes(client, root, monkeypatch):
+    """#133: Foxglove opens by itself, action buttons, a live table, record and notes."""
+    import json as _json
+    from types import SimpleNamespace
+    from robofacts import explore as ex
+    path = root / "expA" / "config" / "runner.yaml"
+    path.write_text("simulation: true\nexplore:\n  actions:\n"
+                    "    - {name: take_off, command: 'python3 fly.py --mode take_off'}\n" + RUNNER,
+                    encoding="utf-8")
+    (root / "expA" / "config" / "foxglove_demo.json").write_text("{}", encoding="utf-8")
+    started, foreground, signalled = [], [], []
+
+    class Proc:
+        rc = None
+        pid = 0
+
+        def poll(self):
+            return self.rc
+
+    def start(cmd, target, *, cwd, label="", quiet_sink=None):
+        started.append((label, cmd))
+        return Proc()
+
+    def stop(proc, target, *, name, kind):
+        proc.rc = 0
+
+    hooks = SimpleNamespace(start_background=start, stop_process=stop,
+                            run_foreground=lambda cmd, target, *, cwd, check=True: (
+                                foreground.append(cmd), SimpleNamespace(returncode=0, stdout=""))[1])
+
+    def fake_run_explore(campaign, config, experiments_root, **kw):
+        spec = next(campaign.combinations())
+        out = experiments_root / "expA" / "runs" / "explore" / "x_explore_c"
+        out.mkdir(parents=True)
+        (out / "parameter_events.jsonl").write_text(
+            '[params] {"node": "/talker", "name": "rate", "kind": "initial", "value": 1.0}\n'
+            '[params] {"node": "/talker", "name": "rate", "kind": "changed", "value": 4.0}\n',
+            encoding="utf-8")
+        controls = kw["controls"]
+        controls._terminate = lambda proc, target, cmd: (signalled.append(cmd), setattr(proc, "rc", 2))
+        controls._slim = lambda *a, **k: None
+        controls.bind(hooks=hooks, target=None, cwd=experiments_root, out_dir=out, spec=spec,
+                      factors=campaign.factors, config=config, settings=ex.settings(config),
+                      clock=lambda: "20261017T120000", experiment="expA",
+                      experiments_root=experiments_root, placeholders={})
+        kw["on_ready"]({"url": "ws://localhost:8765", "deep_link": "foxglove://open?x", "web_link": "w",
+                        "tunnel": "", "host": "this machine", "port": 8765, "writable": [".*"]})
+        kw["stop"].wait(10)
+        controls.shutdown()
+        return ex.ExploreResult(spec, "explored", "", out, [])
+
+    monkeypatch.setattr(ex, "run_explore", fake_run_explore)
+    r = client.post("/explore", data={"experiment": "expA", "campaign": "c"}, headers=auth())
+    run_id = r.headers["Location"].rsplit("/", 1)[1]
+    deadline = time.monotonic() + 5
+    while not (client.get(f"/api/run/{run_id}.json", headers=auth()).get_json()["explore"]
+               .get("live", {}).get("live")):
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    page = client.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
+    # Foxglove by itself (a checkbox remembered per browser), the layout beside it, the buttons.
+    assert 'id="autoopen"' in page and "robofacts.explore.autoOpenFoxglove" in page
+    assert "foxglove_demo.json" in page and 'data-name="take_off"' in page
+    assert "● Record" in page and "Mark this moment" in page
+    ctl = f"/run/{run_id}/explore/"
+    assert client.post(ctl + "action", data={"name": "take_off"}).status_code == 401
+    r = client.post(ctl + "action", data={"name": "take_off"}, headers=auth())
+    assert r.status_code == 200 and r.get_json()["ok"], r.get_json()
+    assert started[-1] == ("action:take_off", ["python3", "fly.py", "--mode", "take_off"])
+    r = client.post(ctl + "action", data={"name": "take_off"}, headers=auth())
+    assert r.status_code == 400 and "still running" in r.get_json()["message"]
+    assert client.post(ctl + "action_stop", headers=auth()).get_json()["ok"]
+    assert signalled == [["python3", "fly.py", "--mode", "take_off"]]
+    # The live table, and its set back.
+    live = client.get(f"/api/run/{run_id}.json", headers=auth()).get_json()["explore"]["live"]
+    assert live["changes"]["changed"][0]["to"] == 4.0 and live["changes"]["changed"][0]["settable"]
+    assert client.post(ctl + "set_back", data={"node": "/talker", "parameter": "rate"},
+                       headers=auth()).get_json()["ok"]
+    assert foreground[-1] == ["ros2", "param", "set", "/talker", "rate", "1.0"]
+    # Record, note, mark, stop recording.
+    assert client.post(ctl + "record", data={"label": "first"}, headers=auth()).get_json()["ok"]
+    assert client.post(ctl + "note", data={"text": "looks right"}, headers=auth()).get_json()["ok"]
+    assert client.post(ctl + "note", data={"mark": "yes"}, headers=auth()).get_json()["ok"]
+    r = client.post(ctl + "record_stop", headers=auth())
+    assert r.get_json()["ok"], r.get_json()
+    bag = root / "expA" / "bags_scratch" / "20261017T120000_explore_first"
+    meta = _json.loads((bag / "trial_metadata.json").read_text())
+    assert meta["scratch"] and meta["explore"] and meta["explore_parameters_at_start"]["/talker.rate"] == 4.0
+    notes = (root / "expA" / "runs" / "explore" / "x_explore_c" / "notes.md").read_text()
+    assert "looks right" in notes and "● mark" in notes and "[recording 20261017T120000_explore_first" in notes
+    assert client.post(ctl + "nope", headers=auth()).status_code == 404
+    client.post(f"/run/{run_id}/abort", headers=auth())
+    d = _wait_state(client, run_id, ("finished", "error"))
+    assert d["state"] == "finished", d["error"]
+    # Kept after Stop: the recording and the notes stay listed.
+    assert d["explore"]["live"]["recordings"][0]["name"] == bag.name
+    assert len(d["explore"]["live"]["notes"]) == 2
+    assert client.post(ctl + "note", data={"text": "late"}, headers=auth()).status_code == 409

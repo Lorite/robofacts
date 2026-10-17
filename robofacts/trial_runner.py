@@ -327,7 +327,8 @@ def _strict_bool(value: Any, name: str, path: Path) -> bool:
 EXPLORE_KEYS = {"param_whitelist": "a list of regular expressions",
                 "topic_whitelist": "a list of regular expressions",
                 "port": "a port number", "address": "an address to bind",
-                "viewers": "a list of {name, command}"}
+                "viewers": "a list of {name, command}",
+                "actions": "a list of {name, command}"}
 
 
 def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
@@ -372,6 +373,15 @@ def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
     if "viewers" in raw:
         # Windows for a human (a simulator GUI, RViz), started by Explore only.
         out["viewers"] = _named_commands(raw["viewers"], "explore.viewers", path)
+    if "actions" in raw:
+        # Buttons on the Explore run page (#133): take off, fly a route, land.
+        # Run by Explore only, one at a time, never by a trial.
+        out["actions"] = _named_commands(raw["actions"], "explore.actions", path)
+        names = [a["name"] for a in out["actions"]]
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:
+            raise RunnerError(f"{path}: explore.actions names {', '.join(twice)} more than once; "
+                              f"the run page starts an action by its name")
     return out
 
 

@@ -151,6 +151,9 @@ class ActiveRun:
     #: For an exploration: the condition, how to connect Foxglove, and at the
     #: end the parameters that changed and where the file is.
     explore: Dict[str, Any] = field(default_factory=dict)
+    #: For an exploration (#133): explore.ExploreControls, what the run page may
+    #: do while the stack runs (actions, set back, record, notes).
+    controls: Any = None
     _go: threading.Event = field(default_factory=threading.Event)
     _stop: threading.Event = field(default_factory=threading.Event)
     _abort: bool = False
@@ -190,7 +193,7 @@ class ActiveRun:
                 src = "recorder"
             elif head.startswith(("[markerless_node]", "[livestream]", "[bridge]")):
                 src = "nodes"
-            elif head.startswith(("[launch_stack]", "[aux:", "[record]")):
+            elif head.startswith(("[launch_stack]", "[aux:", "[record]", "[action:")):
                 src = "runner"          # teardown bookkeeping
             else:
                 src = "other"
@@ -200,13 +203,17 @@ class ActiveRun:
         del self.log[:-2000]
 
     def to_dict(self) -> Dict[str, Any]:
+        explore = dict(self.explore)
+        if self.controls is not None:
+            # Live while the stack runs: the change table, the action, the recorder, the notes.
+            explore["live"] = self.controls.status()
         return {"run_id": self.run_id, "experiment": self.experiment,
                 "campaign": self.campaign, "state": self.state,
                 "executed": self.executed, "wanted": self.wanted,
                 "done": len(self.results), "results": list(self.results),
                 "awaiting_kind": self.awaiting_kind,
                 "awaiting_what": self.awaiting_what,
-                "kind": self.kind, "explore": dict(self.explore),
+                "kind": self.kind, "explore": explore,
                 # The CLI's closing count, same function, so the two surfaces
                 # can never tell a different story about how the batch went.
                 "tally": tr.tally(r["status"] for r in self.results),
@@ -380,7 +387,8 @@ class RunManager:
         return run
 
     def start_explore(self, *, experiment: str, campaign, campaign_file: str, label: str,
-                      config, root: Path, journal, operator_steps=None) -> ActiveRun:
+                      config, root: Path, journal, operator_steps=None,
+                      layouts: Optional[List[str]] = None) -> ActiveRun:
         """Run explore.run_explore off the request thread, until Stop.
 
         Same single slot as a campaign run: an exploration owns the stack, so a
@@ -388,11 +396,15 @@ class RunManager:
         """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + secrets.token_hex(3)
         spec = next(campaign.combinations())
+        s = ex.settings(config)
         run = ActiveRun(run_id=run_id, experiment=experiment, campaign=label,
                         campaign_file=campaign_file, wanted=0, executed=True, kind="explore",
                         operator_steps=list(operator_steps or []),
                         explore={"condition": dict(spec.values), "describe": spec.describe(),
-                                 "settings": ex.settings(config).describe(), "ready": False})
+                                 "settings": s.describe(), "ready": False,
+                                 "actions": [a["name"] for a in s.actions],
+                                 "simulation": s.simulation, "layouts": list(layouts or [])},
+                        controls=ex.ExploreControls())
         with self._lock:
             self._runs[run_id] = run
             self._current = run_id
@@ -427,7 +439,8 @@ class RunManager:
                 with contextlib.redirect_stdout(_Tee(sys.stdout, run)):
                     result = ex.run_explore(campaign, config, root, dry_run=False,
                                             stop=run._stop, label=campaign_file,
-                                            confirm_steps=confirm_steps, on_ready=on_ready)
+                                            confirm_steps=confirm_steps, on_ready=on_ready,
+                                            controls=run.controls)
                 run.explore.update({
                     "ready": False, "status": result.status, "detail": result.detail,
                     "changed": result.summary["changed"],
@@ -1357,8 +1370,44 @@ def create_app(experiments_root: Optional[Path] = None,
         label = f"{name} [explore{' ' + pin if pin else ''}]"
         active = runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
                                     label=label, config=config, root=root(), journal=journal,
-                                    operator_steps=annotate_steps(campaign.operator_steps))
+                                    operator_steps=annotate_steps(campaign.operator_steps),
+                                    layouts=data.layouts)
         return redirect(url_for("run_view", run_id=active.run_id))
+
+    @app.route("/run/<run_id>/explore/<op>", methods=["POST"])
+    @requires_auth
+    def explore_control(run_id: str, op: str):
+        """The Explore run page's buttons (#133), answered as JSON for the page's fetch.
+
+        The browser names an action, a parameter or a note, never a command:
+        an action must be one runner.yaml's explore.actions declares, a set
+        back goes to the starting value the parameter log read, and a
+        recording uses the trial's own record command into bags_scratch/.
+        """
+        run = runs.get(run_id)
+        if run is None or run.kind != "explore" or run.controls is None:
+            return {"ok": False, "message": f"no exploration {run_id}"}, 404
+        if run.state != "running":
+            return {"ok": False, "message": f"the exploration is {run.state}"}, 409
+        c, form = run.controls, request.form
+        if op == "action":
+            ok, msg = c.start_action(form.get("name", ""), armed=form.get("arm") == "yes")
+        elif op == "action_stop":
+            ok, msg = c.stop_action()
+        elif op == "set_back":
+            ok, msg = c.set_back(form.get("node", ""), form.get("parameter", ""))
+        elif op == "record":
+            ok, msg = c.start_record(form.get("label", ""))
+        elif op == "record_stop":
+            ok, msg = c.stop_record()
+        elif op == "note":
+            ok, msg = c.note(form.get("text", ""), mark=form.get("mark") == "yes")
+        else:
+            return {"ok": False, "message": f"unknown control {op!r}"}, 404
+        if op != "note":
+            journal.add(f"explore-{op.replace('_', '-')}",
+                        f"{run.experiment}/{run.campaign_file}: {'OK' if ok else 'refused'}, {msg}")
+        return {"ok": ok, "message": msg}, (200 if ok else 400)
 
     @app.route("/preflight/<experiment>", methods=["POST"])
     @requires_auth

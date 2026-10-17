@@ -31,6 +31,8 @@ L6  an experiment that flies must declare verify_steps — an action's exit code
     describes a process, only the bag describes the experiment. (A latched
     e-stop produced a "successful" trial with the drone on the ground.)
 L7  a command may not reference a script that does not exist.
+    L4 and L7 also cover the commands only Explore runs: `explore.viewers`
+    (2026-10-17) and `explore.actions` (the run page's buttons, #133).
 L8  a campaign's preflight_checklist must exist and be coherent. A campaign may
     declare its own T-0 gate; naming one that is missing or malformed would fail
     at T-0 on the rig, with the stack up and the operator waiting.
@@ -163,11 +165,12 @@ def command_templates(config) -> list[tuple[str, str]]:
 
 
 def explore_templates(config) -> list[tuple[str, str]]:
-    """(where, template) of the commands only Explore runs (explore.viewers). Kept
-    apart from command_templates because a trial never runs them, so a factor a
-    viewer names is not thereby consumed (L3)."""
-    return [(f"explore.viewers:{v['name']}", v["command"])
-            for v in (config.explore or {}).get("viewers", [])]
+    """(where, template) of the commands only Explore runs (explore.viewers and,
+    since #133, explore.actions). Kept apart from command_templates because a
+    trial never runs them, so a factor they name is not thereby consumed (L3)."""
+    block = config.explore or {}
+    return [(f"explore.{group}:{v['name']}", v["command"])
+            for group in ("viewers", "actions") for v in block.get(group, [])]
 
 
 def probe_templates(config) -> list[tuple[str, str]]:

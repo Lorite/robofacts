@@ -401,3 +401,263 @@ def test_a_viewer_without_a_command_refuses_to_load(tmp_path):
     root = make_root(tmp_path, RUNNER_SIM + "explore:\n  viewers:\n    - {name: window}\n")
     with pytest.raises(tr.RunnerError, match="explore.viewers"):
         tr.RunnerConfig.load("expA", root)
+
+
+# --------------------------------------------------------------------------- #
+# The run page's controls (#133, 2026-10-17): actions, set back, record, notes
+# --------------------------------------------------------------------------- #
+ACTIONS = ("explore:\n  actions:\n"
+           "    - {name: take_off, command: 'python3 fly.py --mode take_off --gain {gain}'}\n"
+           "    - {name: land, command: 'python3 fly.py --mode land'}\n")
+
+
+class FakeProc:
+    """A background process whose exit the test decides."""
+
+    def __init__(self):
+        self.rc = None
+        self.pid = 0
+
+    def poll(self):
+        return self.rc
+
+
+class ControlHooks(FakeHooks):
+    """FakeHooks whose actions and recorder run until signalled."""
+
+    def __init__(self, events=()):
+        super().__init__(events)
+        self.procs = {}
+
+    def _start(self, cmd, target, *, cwd, label="", quiet_sink=None):
+        proc = super()._start(cmd, target, cwd=cwd, label=label, quiet_sink=quiet_sink)
+        if label.startswith("action:") or label == "recorder":
+            proc = FakeProc()
+            self.procs[label] = proc
+        return proc
+
+    def _stop(self, proc, target, *, name, kind):
+        self.stopped.append(name)
+        if isinstance(proc, FakeProc):
+            proc.rc = 0
+
+
+def wait_for(predicate, timeout=5.0):
+    t0 = time.monotonic()
+    while not predicate():
+        if time.monotonic() - t0 > timeout:
+            raise AssertionError("timed out")
+        time.sleep(0.01)
+
+
+def bound(tmp_path, runner=RUNNER_SIM + ACTIONS, events=(), sets=("gain=high",), **kw):
+    """A controls object bound the way run_explore binds it, without running a stack."""
+    root = make_root(tmp_path, runner)
+    campaign, config = load(root, list(sets))
+    spec = next(campaign.combinations())
+    out_dir = root / "expA" / "runs" / "explore" / "20261017T100000_explore_c"
+    out_dir.mkdir(parents=True)
+    (out_dir / "parameter_events.jsonl").write_text(
+        "".join("[params] " + json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    fake = ControlHooks()
+    terminated = []
+
+    def terminate(proc, target, cmd):
+        terminated.append(cmd)
+        proc.rc = 2
+
+    controls = ex.ExploreControls(terminate=terminate, kill=lambda *a: None,
+                                  slim=lambda *a, **k: None, **kw)
+    controls.bind(hooks=fake.hooks(), target=None, cwd=root, out_dir=out_dir, spec=spec,
+                  factors=campaign.factors, config=config, settings=ex.settings(config),
+                  clock=lambda: "20261017T100500", experiment="expA", experiments_root=root,
+                  placeholders={f"arg_{k}": v for k, v in spec.launch_args(campaign.factors).items()})
+    return controls, fake, terminated, root, out_dir
+
+
+def test_actions_are_declared_like_viewers(tmp_path):
+    _, config = load(make_root(tmp_path, RUNNER_SIM + ACTIONS))
+    s = ex.settings(config)
+    assert [a["name"] for a in s.actions] == ["take_off", "land"]
+    assert "Actions: take_off, land" in s.describe()
+
+
+@pytest.mark.parametrize("block, words", [
+    ("explore:\n  actions:\n    - {name: a}\n", "explore.actions"),
+    ("explore:\n  actions:\n    - {name: a, command: x}\n    - {name: a, command: y}\n", "more than once"),
+])
+def test_a_malformed_action_refuses_to_load(tmp_path, block, words):
+    with pytest.raises(tr.RunnerError, match=words):
+        tr.RunnerConfig.load("expA", make_root(tmp_path, RUNNER_SIM + block))
+
+
+def test_a_trial_never_runs_an_explore_action(tmp_path):
+    root = make_root(tmp_path, RUNNER_SIM + ACTIONS)
+    campaign, config = load(root)
+    fake = FakeHooks()
+    tr.run_trial(next(campaign.combinations()), campaign.factors, config, root / "expA" / "bags",
+                 dry_run=False, hooks=fake.hooks(), pause_before_action=False)
+    ran = [" ".join(c) for _, c in fake.started] + [" ".join(c) for c in fake.foreground]
+    assert not any("fly.py" in c for c in ran)
+
+
+def test_one_action_at_a_time_and_stop_sends_sigterm(tmp_path):
+    controls, fake, terminated, _, _ = bound(tmp_path)
+    ok, _ = controls.start_action("take_off")
+    assert ok
+    label, cmd = fake.started[-1]
+    assert label == "action:take_off" and cmd == ["python3", "fly.py", "--mode", "take_off",
+                                                    "--gain", "high"]
+    ok, msg = controls.start_action("land")
+    assert not ok and "still running" in msg
+    assert controls.status()["action"]["name"] == "take_off"
+    ok, _ = controls.stop_action()
+    assert ok and terminated == [cmd]
+    wait_for(lambda: controls.status()["action"] is None)
+    last = controls.status()["last_action"]
+    assert last["name"] == "take_off" and last["rc"] == 2 and last["stopping"]
+    assert "proc" not in last and "cmd" not in last
+    # The slot is free again.
+    assert controls.start_action("land")[0]
+
+
+def test_an_action_that_exits_shows_its_exit_code(tmp_path):
+    controls, fake, _, _, _ = bound(tmp_path)
+    controls.start_action("land")
+    fake.procs["action:land"].rc = 0
+    wait_for(lambda: controls.status()["last_action"] is not None)
+    assert controls.status()["last_action"]["rc"] == 0 and not controls.status()["last_action"]["stopping"]
+
+
+def test_only_declared_actions_run(tmp_path):
+    controls, fake, _, _, _ = bound(tmp_path)
+    ok, msg = controls.start_action("rm -rf /")
+    assert not ok and "no explore action" in msg and not any(
+        label.startswith("action:") for label, _ in fake.started)
+
+
+def test_hardware_actions_need_the_arm_checkbox(tmp_path):
+    runner = hardware("explore:\n  param_whitelist: ['^/stack\\\\.kp$']\n  actions:\n"
+                      "    - {name: land, command: 'python3 fly.py --mode land'}\n")
+    controls, fake, _, _, _ = bound(tmp_path, runner)
+    ok, msg = controls.start_action("land")
+    assert not ok and "arm" in msg
+    assert controls.start_action("land", armed=True)[0]
+
+
+def test_stopping_the_exploration_lands_the_action_before_the_stack_stops(tmp_path):
+    campaign, config = load(make_root(tmp_path, RUNNER_SIM + ACTIONS))
+    fake = ControlHooks()
+    order = []
+
+    def terminate(proc, target, cmd):
+        order.append("action")
+        proc.rc = 2
+
+    controls = ex.ExploreControls(terminate=terminate, kill=lambda *a: None)
+    original_stop = fake._stop
+    fake._stop = lambda proc, target, *, name, kind: (order.append(name),
+                                                      original_stop(proc, target, name=name, kind=kind))
+    result = ex.run_explore(campaign, config, tmp_path, dry_run=False, hooks=fake.hooks(), max_s=0,
+                            controls=controls,
+                            on_ready=lambda info: controls.start_action("take_off"))
+    assert result.status == "explored"
+    assert order[0] == "action" and order[1] == "bridge"
+    assert not controls.live and not controls.start_action("land")[0]
+
+
+EVENTS = [
+    {"node": "/stack", "name": "kp", "kind": "initial", "value": 1.0},
+    {"node": "/stack", "name": "kp", "kind": "changed", "value": 2.5},
+    {"node": "/stack", "name": "mode", "kind": "changed", "value": "fast"},
+    {"node": "/stack", "name": "ki", "kind": "initial", "value": 0.1},
+]
+
+
+def test_the_live_table_reads_the_log_while_it_runs(tmp_path):
+    controls, _, _, _, _ = bound(tmp_path, events=EVENTS)
+    changes = controls.status()["changes"]
+    rows = {r["parameter"]: r for r in changes["changed"]}
+    assert rows["kp"]["from"] == 1.0 and rows["kp"]["to"] == 2.5 and rows["kp"]["settable"]
+    # The start of `mode` is unknown, so it cannot be set back.
+    assert rows["mode"]["from"] is None and not rows["mode"]["settable"]
+
+
+def test_set_back_sets_the_starting_value(tmp_path):
+    controls, fake, _, _, _ = bound(tmp_path, events=EVENTS)
+    ok, msg = controls.set_back("/stack", "kp")
+    assert ok, msg
+    assert fake.foreground[-1] == ["ros2", "param", "set", "/stack", "kp", "1.0"]
+    assert not controls.set_back("/stack", "mode")[0]          # start unknown
+    assert not controls.set_back("/stack", "ki")[0]            # never changed
+
+
+def test_set_back_respects_the_hardware_whitelist(tmp_path):
+    runner = hardware("explore:\n  param_whitelist: ['^/stack\\\\.ki$']\n")
+    controls, fake, _, _, _ = bound(tmp_path, runner, events=EVENTS)
+    ok, msg = controls.set_back("/stack", "kp")
+    assert not ok and "whitelist" in msg and not fake.foreground
+
+
+def test_set_back_values_keep_their_type():
+    assert ex.param_value_text(True) == "true" and ex.param_value_text(4.0) == "4.0"
+    assert ex.param_value_text("1.0") == '"1.0"' and ex.param_value_text([1, 2]) == "[1, 2]"
+    assert yaml.safe_load(ex.param_value_text("fast")) == "fast"
+
+
+def test_a_recording_is_scratch_and_names_the_exploration(tmp_path):
+    from robofacts import trial_records as trec
+    controls, fake, _, root, out_dir = bound(tmp_path, events=EVENTS)
+    ok, msg = controls.start_record("gain test")
+    assert ok, msg
+    label, cmd = fake.started[-1]
+    bag = root / "expA" / "bags_scratch" / "20261017T100500_explore_gain-test"
+    assert label == "recorder" and cmd[:3] == ["ros2", "bag", "record"] and str(bag) in cmd
+    assert not controls.start_record()[0]
+    assert controls.status()["record"]["name"] == bag.name
+    # The page polls this: the parameter snapshot stays in the metadata only.
+    assert "parameters" not in controls.status()["record"]
+    ok, msg = controls.stop_record(wait_slim=True)
+    assert ok, msg
+    assert "record" in fake.stopped
+    meta = json.loads((bag / "trial_metadata.json").read_text())
+    assert meta["scratch"] is True and meta["explore"] is True
+    assert meta["explore_session"] == out_dir.name and meta["explore_condition"]["gain"] == "high"
+    assert meta["explore_parameters_at_start"]["/stack.kp"] == 2.5
+    assert [c["parameter"] for c in meta["explore_changed_at_start"]] == ["kp", "mode"]
+    [rec] = controls.status()["recordings"]
+    assert rec["name"] == bag.name and rec["slim_status"] == "done" and rec["slim"] == bag.name + "_slim"
+    # Never coverage: listed as a scratch record, never under bags/.
+    records = trec.load_records(root, "expA")
+    assert [r.kind for r in records if r.name == bag.name] == ["scratch"]
+    assert not (root / "expA" / "bags").exists()
+
+
+def test_notes_and_marks_go_to_notes_md(tmp_path):
+    controls, _, _, _, out_dir = bound(tmp_path, now=lambda: 1792245600.0)
+    assert not controls.note("   ")[0]
+    assert controls.note("the drone drifts at the partition")[0]
+    controls.start_record("x")
+    ok, line = controls.note("", mark=True)
+    assert ok and "● mark" in line and "[recording 20261017T100500_explore_x at +0.0 s]" in line
+    text = (out_dir / "notes.md").read_text()
+    assert text.startswith("# Notes: expA exploration 20261017T100000_explore_c")
+    assert "gain=high" in text and "the drone drifts at the partition" in text
+    assert len(controls.status()["notes"]) == 2
+
+
+def test_parameter_changes_lists_the_notes_and_recordings(tmp_path):
+    campaign, config = load(make_root(tmp_path, RUNNER_SIM + ACTIONS))
+    controls = ex.ExploreControls(slim=lambda *a, **k: None)
+
+    def on_ready(info):
+        controls.note("first look")
+        controls.start_record("look")
+
+    result = ex.run_explore(campaign, config, tmp_path, dry_run=False, hooks=ControlHooks().hooks(),
+                            max_s=0, controls=controls, on_ready=on_ready)
+    changes = yaml.safe_load((result.out_dir / "parameter_changes.yaml").read_text())
+    assert changes["notes"][0].endswith("first look")
+    assert len(changes["recordings"]) == 1 and "bags_scratch" in changes["recordings"][0]
+    # The recording was finalized at stop, with its metadata.
+    assert (Path(changes["recordings"][0]) / "trial_metadata.json").is_file()
