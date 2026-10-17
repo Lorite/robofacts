@@ -1204,3 +1204,52 @@ def test_the_explore_run_page_drives_actions_records_and_notes(client, root, mon
     assert d["explore"]["live"]["recordings"][0]["name"] == bag.name
     assert len(d["explore"]["live"]["notes"]) == 2
     assert client.post(ctl + "note", data={"text": "late"}, headers=auth()).status_code == 409
+
+
+def test_restart_with_another_condition_waits_for_the_old_stack(client, root, monkeypatch):
+    """#133: the run page's picker stops this exploration, then explores the picked cell."""
+    from robofacts import explore as ex
+    _simulated(root)
+    conditions, stopped = [], []
+
+    def fake_run_explore(campaign, config, experiments_root, **kw):
+        spec = next(campaign.combinations())
+        conditions.append(spec.values["trajectory"])
+        kw["on_ready"]({"url": "ws://localhost:8765", "deep_link": "foxglove://x", "web_link": "w",
+                        "tunnel": "", "host": "this machine", "port": 8765, "writable": [".*"]})
+        kw["stop"].wait(10)
+        stopped.append(spec.values["trajectory"])
+        return ex.ExploreResult(spec, "explored", "", None, [])
+
+    monkeypatch.setattr(ex, "run_explore", fake_run_explore)
+    r = client.post("/explore", data={"experiment": "expA", "campaign": "c"}, headers=auth())
+    first = r.headers["Location"].rsplit("/", 1)[1]
+    _wait_state(client, first, ("running",))
+    page = client.get(f"/run/{first}", headers=auth()).get_data(as_text=True)
+    assert 'name="f_trajectory"' in page and "hover (now)" in page and "Restart with this condition" in page
+    # Only levels of the campaign are accepted.
+    assert client.post(f"/run/{first}/explore_restart", data={"f_trajectory": "loop"},
+                       headers=auth()).status_code == 400
+    r = client.post(f"/run/{first}/explore_restart", data={"f_trajectory": "circle"}, headers=auth())
+    assert r.status_code == 302, r.data
+    second = r.headers["Location"].rsplit("/", 1)[1]
+    assert second != first
+    d = _wait_state(client, first, ("finished",))
+    deadline = time.monotonic() + 5
+    while len(conditions) < 2:
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    # The old stack was down before the new one started.
+    assert conditions == ["hover", "circle"] and stopped[0] == "hover"
+    d = client.get(f"/api/run/{second}.json", headers=auth()).get_json()
+    assert d["explore"]["condition"]["trajectory"] == "circle" and d["explore"]["after"] == first
+    assert "trajectory=circle" in d["campaign"]
+    client.post(f"/run/{second}/abort", headers=auth())
+    _wait_state(client, second, ("finished",))
+    # From a stopped exploration, the same form starts a new one at once.
+    r = client.post(f"/run/{second}/explore_restart", data={"f_trajectory": "hover"}, headers=auth())
+    third = r.headers["Location"].rsplit("/", 1)[1]
+    _wait_state(client, third, ("running",))
+    assert client.get(f"/api/run/{third}.json", headers=auth()).get_json()["explore"]["after"] == ""
+    client.post(f"/run/{third}/abort", headers=auth())
+    _wait_state(client, third, ("finished",))

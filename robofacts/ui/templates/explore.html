@@ -64,6 +64,17 @@
   </div>
 </div>
 
+{% if run.explore.picker %}
+<form method="post" action="{{ url_for('explore_restart', run_id=run.run_id) }}" class="panel" id="restartpanel">
+  <h3>🔁 Another condition <small class="muted">the campaign's swept factors</small></h3>
+  <p class="small">{% for f in run.explore.picker %}<label style="flex-direction:row;gap:.3rem;display:inline-flex;margin-right:.8rem">{{ f.name }}
+    <select name="f_{{ f.name }}">{% for l in f.levels %}<option value="{{ l }}" {{ 'selected' if l|string == f.value|string }}>{{ l }}{{ ' (now)' if l|string == f.value|string }}</option>{% endfor %}</select></label>{% endfor %}</p>
+  {% if not run.explore.simulation %}<p class="small warn"><label style="flex-direction:row;gap:.3rem;display:inline-flex"><input type="checkbox" name="explore_confirm" value="yes"> arm: the restart starts the robots' drivers again</label></p>{% endif %}
+  <p><button type="submit" class="btn-primary" id="restartbtn">🔁 Restart with this condition</button>
+    <span class="small muted" id="restarthint">Stops this exploration first (a running action lands, a recording is finalized), then starts the stack of the picked cell. Use it for a startup-only parameter or a factor.</span></p>
+</form>
+{% endif %}
+
 <div id="livechanges" style="display:none">
   <h2>Parameters changed <small>live, from the parameter log</small></h2>
   <div id="livechangestable"></div>
@@ -253,6 +264,9 @@ async function refresh() {
   const phase = document.getElementById('phase');
   const running = d.state === 'running' || d.state === 'aborting';
   if (d.awaiting_kind) phase.textContent = 'paused before the launch: confirm the operator steps.';
+  else if (d.state === 'running' && !x.ready && x.after && (d.log || []).some(e => e.text.startsWith('[explore] waiting for exploration'))
+           && !(d.log || []).some(e => e.text.includes(' is finished: starting') || e.text.includes(' is error: starting') || e.text.includes(' is aborted: starting')))
+    phase.textContent = 'waiting for the previous exploration to stop (its action lands, its recording is finalized)…';
   else if (d.state === 'running' && !x.ready) phase.textContent = 'bringing the stack up: setup steps → parameter log → stack → settle → aux launches → bridge → viewers…';
   else if (d.state === 'running') phase.textContent = 'live. The stack stays up until you stop it.';
   else if (d.state === 'aborting') phase.textContent = 'stopping: viewers, bridge, aux launches, stack, parameter log…';
@@ -268,6 +282,14 @@ async function refresh() {
     document.getElementById('tunnelcmd').textContent = x.tunnel || '';
     document.getElementById('tunnelcopy').dataset.copy = x.tunnel || '';
     if (running) autoOpen(x);
+  }
+  const rb = document.getElementById('restartbtn');
+  if (rb) {
+    rb.textContent = running ? '🔁 Restart with this condition' : '🔁 Explore again with this condition';
+    rb.disabled = d.state === 'aborting';
+    document.getElementById('restarthint').textContent = running
+      ? 'Stops this exploration first (a running action lands, a recording is finalized), then starts the stack of the picked cell. Use it for a startup-only parameter or a factor.'
+      : 'Starts a new exploration of the picked cell.';
   }
   if (!running) {
     const f = document.getElementById('stopform'); if (f) f.remove();

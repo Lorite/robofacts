@@ -388,7 +388,9 @@ class RunManager:
 
     def start_explore(self, *, experiment: str, campaign, campaign_file: str, label: str,
                       config, root: Path, journal, operator_steps=None,
-                      layouts: Optional[List[str]] = None) -> ActiveRun:
+                      layouts: Optional[List[str]] = None,
+                      picker: Optional[List[Dict[str, Any]]] = None,
+                      after: Optional[ActiveRun] = None) -> ActiveRun:
         """Run explore.run_explore off the request thread, until Stop.
 
         Same single slot as a campaign run: an exploration owns the stack, so a
@@ -403,7 +405,11 @@ class RunManager:
                         explore={"condition": dict(spec.values), "describe": spec.describe(),
                                  "settings": s.describe(), "ready": False,
                                  "actions": [a["name"] for a in s.actions],
-                                 "simulation": s.simulation, "layouts": list(layouts or [])},
+                                 "simulation": s.simulation, "layouts": list(layouts or []),
+                                 # The campaign's swept factors, for "restart with another
+                                 # condition" on the run page (#133).
+                                 "picker": list(picker or []),
+                                 "after": after.run_id if after is not None else ""},
                         controls=ex.ExploreControls())
         with self._lock:
             self._runs[run_id] = run
@@ -436,6 +442,16 @@ class RunManager:
         def worker() -> None:
             import contextlib
             try:
+                if after is not None:
+                    # A restart: the previous exploration's stack must be down first,
+                    # or two stacks would share one graph.
+                    run.append_log(f"[explore] waiting for exploration {after.run_id} to stop")
+                    deadline = time.monotonic() + 300
+                    while after.state in ("running", "aborting"):
+                        if time.monotonic() > deadline:
+                            raise RuntimeError(f"exploration {after.run_id} did not stop in 300 s")
+                        time.sleep(0.5)
+                    run.append_log(f"[explore] exploration {after.run_id} is {after.state}: starting")
                 with contextlib.redirect_stdout(_Tee(sys.stdout, run)):
                     result = ex.run_explore(campaign, config, root, dry_run=False,
                                             stop=run._stop, label=campaign_file,
@@ -1332,15 +1348,49 @@ def create_app(experiments_root: Optional[Path] = None,
                             extra_verify=campaign.verify_steps)
         return redirect(url_for("run_view", run_id=active.run_id))
 
+    def begin_explore(experiment: str, name: str, pin: str, armed: bool,
+                      after: Optional[ActiveRun] = None):
+        """Load the campaign with ``pin`` (the --set path) and start an exploration.
+
+        Shared by the 🔭 Explore buttons and the run page's restart (#133).
+        Returns the new run, or an error response.
+        """
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
+        try:
+            path = root() / experiment / "campaigns" / f"{name}.yaml"
+            campaign = cs.load_campaign(path, root(), pin.split() if pin else [])
+            base = cs.load_campaign(path, root(), [])
+            config = tr.RunnerConfig.load(experiment, root())
+        except (cs.SpecError, tr.RunnerError) as exc:
+            return error(str(exc), 400, crumbs)
+        settings = ex.settings(config)
+        if not settings.allowed:
+            return error(f"Explore is refused for {experiment}: {settings.reason}.", 400, crumbs)
+        if not config.simulation and not armed:
+            return error("This experiment runs real robots: tick “arm” next to Explore. "
+                         "Explore starts the robots' drivers, without a T-0 gate.", 400, crumbs)
+        if after is None and runs.busy():
+            return error("A campaign or an exploration is already running. Stop it first: "
+                         "two stacks on one graph would fight over every topic.", 409, crumbs)
+        spec = next(campaign.combinations())
+        picker = [{"name": f, "levels": list(levels), "value": spec.values.get(f)}
+                  for f, levels in base.sweep.items() if len(levels) > 1]
+        label = f"{name} [explore{' ' + pin if pin else ''}]"
+        return runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
+                                  label=label, config=config, root=root(), journal=journal,
+                                  operator_steps=annotate_steps(campaign.operator_steps),
+                                  layouts=cache.get(experiment).layouts, picker=picker,
+                                  after=after)
+
     @app.route("/explore", methods=["POST"])
     @requires_auth
     def explore():
         """Bring up one campaign condition with a Foxglove view that may change parameters.
 
         A client of explore.run_explore, like /run is of the runner: the picked
-        cell goes through the same `--set` path. No gate, no recorder, no
-        action. On hardware it needs the arm checkbox, like EXECUTE, because it
-        starts the robots' drivers.
+        cell goes through the same `--set` path. No gate, no trial action. On
+        hardware it needs the arm checkbox, like EXECUTE, because it starts the
+        robots' drivers.
         """
         experiment = request.form.get("experiment", "")
         if not known_experiment(experiment):
@@ -1350,28 +1400,43 @@ def create_app(experiments_root: Optional[Path] = None,
         if not name:
             return error(f"{experiment} declares no campaign that loads, so there is no "
                          f"condition to explore.", 400)
-        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
-        pin = request.form.get("pin", "").strip()
-        try:
-            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
-                                        pin.split() if pin else [])
-            config = tr.RunnerConfig.load(experiment, root())
-        except (cs.SpecError, tr.RunnerError) as exc:
-            return error(str(exc), 400, crumbs)
-        settings = ex.settings(config)
-        if not settings.allowed:
-            return error(f"Explore is refused for {experiment}: {settings.reason}.", 400, crumbs)
-        if not config.simulation and request.form.get("explore_confirm") != "yes":
-            return error("This experiment runs real robots: tick “arm” next to Explore. "
-                         "Explore starts the robots' drivers, without a T-0 gate.", 400, crumbs)
-        if runs.busy():
-            return error("A campaign or an exploration is already running. Stop it first: "
-                         "two stacks on one graph would fight over every topic.", 409, crumbs)
-        label = f"{name} [explore{' ' + pin if pin else ''}]"
-        active = runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
-                                    label=label, config=config, root=root(), journal=journal,
-                                    operator_steps=annotate_steps(campaign.operator_steps),
-                                    layouts=data.layouts)
+        active = begin_explore(experiment, name, request.form.get("pin", "").strip(),
+                               request.form.get("explore_confirm") == "yes")
+        if not isinstance(active, ActiveRun):
+            return active
+        return redirect(url_for("run_view", run_id=active.run_id))
+
+    @app.route("/run/<run_id>/explore_restart", methods=["POST"])
+    @requires_auth
+    def explore_restart(run_id: str):
+        """Explore another condition of the same campaign from the run page (#133).
+
+        The form carries one ``f_<factor>`` per swept factor. A live exploration
+        is stopped first (its action lands, its recording is finalized), and the
+        new one waits until that stack is down. A stopped one simply starts again.
+        """
+        old = runs.get(run_id)
+        if old is None or old.kind != "explore":
+            return error(f"No exploration {run_id}", 404)
+        allowed = {p["name"]: [str(v) for v in p["levels"]] for p in old.explore.get("picker", [])}
+        pins = []
+        for name, levels in allowed.items():
+            value = request.form.get(f"f_{name}", "")
+            if value not in levels:
+                return error(f"{name}={value!r} is not a level of this campaign ({', '.join(levels)})", 400)
+            pins.append(f"{name}={value}")
+        live = old.state in ("running", "aborting")
+        if not live and runs.busy():
+            return error("A campaign or an exploration is already running. Stop it first.", 409)
+        if live:
+            runs.abort(old.run_id)
+            journal.add("explore-restart", f"{old.experiment}/{old.campaign_file}: {run_id} stopped "
+                                           f"for {' '.join(pins)}")
+        active = begin_explore(old.experiment, old.campaign_file, " ".join(pins),
+                               request.form.get("explore_confirm") == "yes",
+                               after=old if live else None)
+        if not isinstance(active, ActiveRun):
+            return active
         return redirect(url_for("run_view", run_id=active.run_id))
 
     @app.route("/run/<run_id>/explore/<op>", methods=["POST"])
