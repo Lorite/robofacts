@@ -53,44 +53,59 @@
 {%- endmacro -%}
 
 {%- macro trial_cards(rows, experiment, layouts, cards_id, show_campaign=True) -%}
-{#- The same records as the table, one card each: a picture, when it started, its
-    name, class, gate, and the links to replay, analyses and files. The picture is,
-    in order, the poster frame of the trial video (trial_records.make_poster), the
-    stills of the declared camera (trial_media, #138, scrubbed on hover), or the
-    trial's plot. The play button plays the trial video, else the camera video,
-    which is labeled with the camera's name. Every image URL sits in data-src, so
-    nothing is fetched while the table is shown. -#}
+{#- The same records as the table, one card each: a picture box, when it started,
+    its name, class, gate, and the links to replay, analyses and files. The picture
+    box has one layer per source, in this order: the trial video (its poster frame,
+    trial_records.make_poster), the declared camera (trial_media, #138: its stills,
+    scrubbed on pointer move, and its video, labeled with the camera's name), and
+    the trial's result plots. With more than one, a row of tags on top switches the
+    layer. Every image URL sits in data-src: nothing is fetched while the table is
+    shown, and a hidden layer's image only when its tag is picked. -#}
 <div class="tcards" id="{{ cards_id }}" hidden>
 {%- for r in rows %}
 <article class="tcard" data-trial="{{ r.name }}">
-  {%- set play = r.videos[0] if r.videos else r.camera_video %}
-  {%- set stills = [] if r.videos else r.stills %}
-  {%- set still_urls = [] %}{% for s in stills %}{% set _ = still_urls.append(url_for('files', experiment=experiment, rel=s|relpath(experiment))) %}{% endfor %}
-  {%- if play %}
-  {%- set vrel = play|relpath(experiment) %}
-  {%- set p = poster_of(r) if r.videos else none %}
-  <button type="button" class="poster" data-video="{{ url_for('files', experiment=experiment, rel=vrel) }}"
-          data-title="{{ r.name }}{% if not r.videos %} · {{ r.camera_label }}{% endif %}" data-page="{{ url_for('trial_view', experiment=experiment, name=r.name) }}"
-          {%- if still_urls|length > 1 %} data-stills='{{ still_urls|tojson }}'{% endif %} title="play {{ vrel }}">
-    {%- if p %}<img loading="lazy" decoding="async" alt="a still from the video of {{ r.name }}" data-src="{{ url_for('files', experiment=experiment, rel=p|relpath(experiment)) }}">
-    {%- elif still_urls %}<img loading="lazy" decoding="async" alt="a still from the {{ r.camera_label }} of {{ r.name }}" data-src="{{ still_urls[0] }}">{% endif %}
-    <span class="playmark" aria-hidden="true">▶</span>
-    {%- if not r.videos %}<span class="camtag">📷 {{ r.camera_label }}</span>{% endif %}
-    {%- if still_urls|length > 1 %}<span class="scrub" aria-hidden="true"><i style="width:{{ (100 / still_urls|length)|round(2) }}%"></i></span>{% endif %}</button>
-  {%- elif still_urls %}
-  <a class="poster" href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}"{% if still_urls|length > 1 %} data-stills='{{ still_urls|tojson }}'{% endif %} title="{{ stills|length }} stills from the {{ r.camera_label }}">
-    <img loading="lazy" decoding="async" alt="a still from the {{ r.camera_label }} of {{ r.name }}" data-src="{{ still_urls[0] }}">
-    <span class="camtag">📷 {{ r.camera_label }}</span>
-    {%- if still_urls|length > 1 %}<span class="scrub" aria-hidden="true"><i style="width:{{ (100 / still_urls|length)|round(2) }}%"></i></span>{% endif %}</a>
-  {%- elif r.plot %}
-  {%- set prel = r.plot|relpath(experiment) %}
-  <a class="poster plot" href="{{ url_for('files', experiment=experiment, rel=prel) }}" target="_blank" rel="noopener"
-     title="no video of this trial: {{ 'a plot of a cohort of ' ~ r.plot_cohort ~ ' trials that includes it' if r.plot_cohort else 'its own plot' }}, {{ prel }}">
-    <img loading="lazy" decoding="async" alt="a plot of {{ r.name }}" data-src="{{ url_for('files', experiment=experiment, rel=prel) }}">
-    <span class="camtag">{{ 'cohort plot' if r.plot_cohort else 'plot' }} · {{ r.plot_analysis or r.plot.name }}</span></a>
+  {%- set layers = [] %}
+  {%- if r.videos %}{% set _ = layers.append({'kind': 'video', 'tag': '🎬 trial video'}) %}{% endif %}
+  {%- if r.stills or r.camera_video %}{% set _ = layers.append({'kind': 'camera', 'tag': '📷 ' ~ r.camera_label}) %}{% endif %}
+  {%- for pl in r.plots %}{% set _ = layers.append({'kind': 'plot', 'plot': pl, 'tag': '📈 ' ~ ('cohort · ' if pl.cohort and 'cohort' not in pl.name else '') ~ pl.name}) %}{% endfor %}
+  {%- set still_urls = [] %}{% for s in r.stills %}{% set _ = still_urls.append(url_for('files', experiment=experiment, rel=s|relpath(experiment))) %}{% endfor %}
+  <div class="pbox">
+  {%- if layers|length > 1 %}
+  <div class="ptabs" role="group" aria-label="what the picture shows">{% for l in layers %}<button type="button" class="ptab" data-layer="{{ loop.index0 }}" aria-pressed="{{ 'true' if loop.first else 'false' }}"
+    {%- if l.kind == 'plot' %} title="{{ 'a plot of a cohort of ' ~ l.plot.cohort ~ ' trials that includes this one' if l.plot.cohort else 'a plot of this trial' }}, from {{ l.plot.analysis }}: {{ l.plot.path|relpath(experiment) }}"{% endif %}>{{ l.tag }}</button>{% endfor %}</div>
+  {%- elif layers %}<span class="camtag">{{ layers[0].tag }}</span>{% endif %}
+  {%- for l in layers %}
+  {%- set hide = ' hidden' if not loop.first else '' %}
+  {%- if l.kind == 'video' %}
+  {%- set vrel = r.videos[0]|relpath(experiment) %}
+  {%- set p = poster_of(r) %}
+  <button type="button" class="poster" data-layer="{{ loop.index0 }}"{{ hide }} data-video="{{ url_for('files', experiment=experiment, rel=vrel) }}"
+          data-title="{{ r.name }}" data-page="{{ url_for('trial_view', experiment=experiment, name=r.name) }}" title="play {{ vrel }}">
+    {%- if p %}<img loading="lazy" decoding="async" alt="a still from the video of {{ r.name }}" data-src="{{ url_for('files', experiment=experiment, rel=p|relpath(experiment)) }}">{% endif %}
+    <span class="playmark" aria-hidden="true">▶</span></button>
+  {%- elif l.kind == 'camera' %}
+  {%- set scrub = still_urls|length > 1 %}
+  {%- if r.camera_video %}
+  {%- set crel = r.camera_video|relpath(experiment) %}
+  <button type="button" class="poster" data-layer="{{ loop.index0 }}"{{ hide }} data-video="{{ url_for('files', experiment=experiment, rel=crel) }}"
+          data-title="{{ r.name }} · {{ r.camera_label }}" data-page="{{ url_for('trial_view', experiment=experiment, name=r.name) }}"
+          {%- if scrub %} data-stills='{{ still_urls|tojson }}'{% endif %} title="play {{ crel }}">
+  {%- else %}
+  <a class="poster" data-layer="{{ loop.index0 }}"{{ hide }} href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}"{% if scrub %} data-stills='{{ still_urls|tojson }}'{% endif %} title="{{ r.stills|length }} stills from the {{ r.camera_label }}">
+  {%- endif %}
+    {%- if still_urls %}<img loading="lazy" decoding="async" alt="a still from the {{ r.camera_label }} of {{ r.name }}" data-src="{{ still_urls[0] }}">{% endif %}
+    {%- if r.camera_video %}<span class="playmark" aria-hidden="true">▶</span>{% endif %}
+    {%- if scrub %}<span class="scrub" aria-hidden="true"><i style="width:{{ (100 / still_urls|length)|round(2) }}%"></i></span>{% endif %}
+  {%- if r.camera_video %}</button>{% else %}</a>{% endif %}
+  {%- else %}
+  {%- set prel = l.plot.path|relpath(experiment) %}
+  <a class="poster plot" data-layer="{{ loop.index0 }}"{{ hide }} href="{{ url_for('files', experiment=experiment, rel=prel) }}" target="_blank" rel="noopener" title="open {{ prel }}">
+    <img loading="lazy" decoding="async" alt="a plot of {{ r.name }}: {{ l.plot.path.name }}" data-src="{{ url_for('files', experiment=experiment, rel=prel) }}"></a>
+  {%- endif %}
   {%- else %}
   <div class="poster none" title="nothing to show: no video, no camera frames in the bag, and no plot of this trial">no video</div>
-  {%- endif %}
+  {%- endfor %}
+  </div>
   <div class="tinfo">
     <div class="tmeta"><span class="nowrap muted">{{ r.started|when or '—' }}</span>
       {{ status_badge(r.status) }}

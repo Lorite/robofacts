@@ -383,31 +383,46 @@ def make_after_trial(slim_dir: Optional[Path], bag_dir: Optional[Path] = None) -
         print(f"[media] skipped ({exc})")
 
 
-def first_plot(analyses: Iterable[Dict[str, Any]], trial: str) -> Optional[Dict[str, Any]]:
-    """The plot a card without any video shows: {path, analysis, cohort}, or None.
+#: At most this many plots per trial: a card has a tag per plot, and a row of tags is short.
+MAX_PLOTS = 4
 
-    The trial's own plot first, newest analysis first: a per-trial folder's first
-    ``*.png``, or a cohort folder's plot named after the trial
-    (``<trial>_trajectory.png``). Only when there is none, the first plot of a
-    cohort that includes the trial, with ``cohort`` set to its number of trials so
-    the card can say the plot is about many trials.
+
+def plots_of(analyses: Iterable[Dict[str, Any]], trial: str, limit: int = MAX_PLOTS
+             ) -> List[Dict[str, Any]]:
+    """The trial's result plots for its card: [{path, name, analysis, cohort}], own plots first.
+
+    Newest analysis first. A per-trial folder gives its ``*.png``, and a cohort
+    folder's plot named after the trial (``<trial>_trajectory.png``) is the trial's
+    own too. Then the first plot of each cohort that includes the trial, with
+    ``cohort`` set to its number of trials, so the card can say the plot is about
+    many trials. ``name`` is the file's stem without the trial's name
+    (``trajectory``). An older run of the same analysis that made a plot of the
+    same name is left out: the newest one supersedes it.
     """
     analyses = list(analyses)
+    own: List[Dict[str, Any]] = []
+    cohort: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(into, png, a, n):
+        name = png.stem[len(trial):].lstrip("_-") if png.stem.startswith(trial) else png.stem
+        key = (a.get("analysis"), name or png.stem)
+        if png not in seen and key not in seen:
+            seen.update((png, key))
+            into.append({"path": png, "name": name or png.stem, "analysis": a.get("analysis"),
+                         "cohort": n})
     for a in analyses:
         path = Path(a["path"])
         if not path.is_dir():
             continue
         if a.get("per") == "cohort":
-            pngs = sorted(path.glob(f"{trial}*.png"))
+            named = sorted(path.glob(f"{trial}*.png"))
+            for png in named:
+                add(own, png, a, None)
+            rest = [p for p in sorted(path.glob("*.png")) if p not in named]
+            if rest:
+                add(cohort, rest[0], a, int(a.get("n_bags") or 0) or None)
         else:
-            pngs = sorted(path.glob("*.png")) or sorted(path.glob(f"*/{trial}*.png"))
-        if pngs:
-            return {"path": pngs[0], "analysis": a.get("analysis"), "cohort": None}
-    for a in analyses:
-        path = Path(a["path"])
-        if a.get("per") == "cohort" and path.is_dir():
-            pngs = sorted(path.glob("*.png"))
-            if pngs:
-                return {"path": pngs[0], "analysis": a.get("analysis"),
-                        "cohort": int(a.get("n_bags") or 0) or None}
-    return None
+            for png in sorted(path.glob("*.png")) or sorted(path.glob(f"*/{trial}*.png")):
+                add(own, png, a, None)
+    return (own + cohort)[:limit]

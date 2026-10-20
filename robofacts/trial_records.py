@@ -109,11 +109,9 @@ class TrialRecord:
     stills: List[Path] = field(default_factory=list)
     camera_video: Optional[Path] = None
     camera_label: Optional[str] = None
-    #: The card's picture when it has nothing else: the trial's own first plot, else
-    #: a plot of a cohort that includes it (``plot_cohort`` is then its trial count).
-    plot: Optional[Path] = None
-    plot_analysis: Optional[str] = None
-    plot_cohort: Optional[int] = None
+    #: The trial's result plots, one tag each on its card: its own first, then plots of
+    #: cohorts that include it ({path, analysis, cohort}, cohort = that cohort's size).
+    plots: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def slim_name(self) -> Optional[str]:
@@ -163,8 +161,7 @@ class TrialRecord:
             # The declared camera's stills and video (`trials records --stills`).
             "stills": [rel(p) for p in self.stills],
             "camera_video": rel(self.camera_video), "camera_label": self.camera_label,
-            "plot": rel(self.plot), "plot_analysis": self.plot_analysis,
-            "plot_cohort": self.plot_cohort,
+            "plots": [{**p, "path": rel(p["path"])} for p in self.plots],
         }
 
     def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
@@ -591,11 +588,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
         record.stills, record.camera_video, info = tm.cached(exp_dir, record.name)
         if record.stills or record.camera_video:
             record.camera_label = str(info.get("label") or (camera.label if camera else "camera"))
-        if not record.videos and not record.stills and not record.camera_video:
-            plot = tm.first_plot(record.analyses, record.name)
-            if plot:
-                record.plot, record.plot_analysis = plot["path"], plot["analysis"]
-                record.plot_cohort = plot["cohort"]
+        record.plots = tm.plots_of(record.analyses, record.name)
 
     if campaigns:
         from . import campaign_plan as cp
@@ -792,6 +785,8 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
             bits.append(f"stills={len(r.stills)}")
         if r.camera_video:
             bits.append(f"{(r.camera_label or 'camera').replace(' ', '_')}_video")
+        if r.plots:
+            bits.append(f"plots={len(r.plots)}")
         if r.analyses:
             bits.append("analyses=" + ",".join(sorted({a["analysis"] for a in r.analyses})))
         if r.gate:

@@ -56,12 +56,13 @@
     {% if r.stills %}
     <div class="stillstrip">{% for s in r.stills %}{% set srel = s|relpath(experiment) %}<a href="{{ url_for('files', experiment=experiment, rel=srel) }}" title="still {{ loop.index }} of {{ loop.length }}"><img loading="lazy" decoding="async" src="{{ url_for('files', experiment=experiment, rel=srel) }}" alt="still {{ loop.index }} from the {{ r.camera_label }}"></a>{% endfor %}</div>
     {% endif %}
-    {% elif r.plot and not r.videos %}
-    {%- set prel = r.plot|relpath(experiment) %}
-    <h3>{{ 'Cohort plot' if r.plot_cohort else 'Plot' }}</h3>
-    <p class="small muted">No video and no camera frames: {% if r.plot_cohort %}the first plot of {{ r.plot_analysis }}, a cohort of {{ r.plot_cohort }} trials that includes this one{% else %}the first plot of {{ r.plot_analysis }}{% endif %}.</p>
-    <a href="{{ url_for('files', experiment=experiment, rel=prel) }}"><img class="plotimg" loading="lazy" src="{{ url_for('files', experiment=experiment, rel=prel) }}" alt="{{ prel }}"></a>
-    <p class="small"><a href="{{ url_for('files', experiment=experiment, rel=prel) }}">{{ prel }}</a></p>
+    {% endif %}
+    {% if r.plots %}
+    <h3>📈 Plots</h3>
+    <p class="small muted">The trial's own result plots first, then the first plot of each cohort that includes it (up to four here, every file is in the analyses below).</p>
+    <div class="plotgrid">{% for pl in r.plots %}{% set prel = pl.path|relpath(experiment) %}
+      <figure><a href="{{ url_for('files', experiment=experiment, rel=prel) }}"><img class="plotimg" loading="lazy" decoding="async" src="{{ url_for('files', experiment=experiment, rel=prel) }}" alt="{{ prel }}"></a>
+        <figcaption>{% if pl.cohort %}<span class="muted">cohort of {{ pl.cohort }} trials ·</span> {% endif %}{{ pl.name }} <span class="muted">({{ pl.analysis }})</span>: <a href="{{ url_for('files', experiment=experiment, rel=prel) }}">{{ pl.path.name }}</a></figcaption></figure>{% endfor %}</div>
     {% endif %}
   </div>
   <div class="panel">

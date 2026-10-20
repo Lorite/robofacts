@@ -1445,30 +1445,38 @@ def test_stills_without_a_video_link_to_the_trial_page(client, root):
     name = "20261015T100000_rep01"
     _camera_trial(root, name, video=False)
     card = _card(client.get("/e/expA", headers=auth()).get_data(as_text=True), name)
-    assert f'<a class="poster" href="/e/expA/t/{name}"' in card and "data-video" not in card
+    assert f'<a class="poster" data-layer="0" href="/e/expA/t/{name}"' in card and "data-video" not in card
 
 
-def test_a_card_without_pictures_shows_the_plot_and_says_whose_it_is(client, root):
-    own, other = "20261015T100000_rep01", "20261015T090000_rep02"
-    _write_bag(root, own, _meta(own))
+def test_a_card_has_a_tag_per_picture_and_only_the_first_layer_shows(client, root):
+    import re
+    name, other = "20261015T100000_rep01", "20261015T090000_rep02"
+    _camera_trial(root, name)
     _write_bag(root, other, _meta(other))
-    folder = root / "expA" / "results" / "20261015T120000_vio_drift" / own
+    folder = root / "expA" / "results" / "20261015T120000_vio_drift" / name
     folder.mkdir(parents=True)
     (folder / "vio_drift.png").write_bytes(b"\x89PNG")
     cohort = root / "expA" / "results" / "20261015T130000_cohort"
     cohort.mkdir(parents=True)
     (cohort / "analysis_metadata.json").write_text(json.dumps(
-        {"analysis": "cohort", "bags": [own, other]}), encoding="utf-8")
+        {"analysis": "cohort", "bags": [name, other]}), encoding="utf-8")
     (cohort / "all.png").write_bytes(b"\x89PNG")
     body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
-    card = _card(body, own)
-    assert 'class="poster plot"' in card and "vio_drift.png" in card and ">plot · vio_drift<" in card
+    card = _card(body, name)
+    tags = re.findall(r'<button type="button" class="ptab" data-layer="(\d)" aria-pressed="(\w+)"[^>]*>([^<]+)</button>', card)
+    assert tags == [("0", "true", "📷 drone camera"), ("1", "false", "📈 vio_drift"),
+                    ("2", "false", "📈 cohort · all")], "camera first, own plot, then the cohort's"
+    layers = re.findall(r'class="poster[^"]*" data-layer="(\d)"( hidden)?', card)
+    assert layers == [("0", ""), ("1", " hidden"), ("2", " hidden")]
+    assert 'data-src="/files/expA/results/20261015T120000_vio_drift/' + name + '/vio_drift.png"' in card
     card = _card(body, other)
-    assert "all.png" in card and "cohort plot · cohort" in card and "cohort of 2 trials" in card
-    page = client.get(f"/e/expA/t/{other}", headers=auth()).get_data(as_text=True)
-    assert "Cohort plot" in page and "results/20261015T130000_cohort/all.png" in page
-    served = client.get(f"/files/expA/results/20261015T120000_vio_drift/{own}/vio_drift.png", headers=auth())
+    assert 'class="ptab"' not in card and '<span class="camtag">📈 cohort · all</span>' in card, \
+        "one picture, one plain tag"
+    assert "cohort of 2 trials" in client.get(f"/e/expA/t/{other}", headers=auth()).get_data(as_text=True)
+    served = client.get(f"/files/expA/results/20261015T120000_vio_drift/{name}/vio_drift.png", headers=auth())
     assert served.status_code == 200 and served.mimetype == "image/png"
+    js = (Path(ui.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
+    assert "closest('[data-layer][hidden]')" in js, "a hidden layer's image waits for its tag"
 
 
 def test_the_trial_page_shows_the_camera_video_and_every_still(client, root):

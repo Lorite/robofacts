@@ -134,8 +134,10 @@
       buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === (asCards ? 'cards' : 'table'))));
       if (asCards) {
         sync();
-        // Only now do the stills load, and the browser still fetches them lazily.
+        // Only now do the stills load, and the browser still fetches them lazily. A
+        // layer behind a tag (#138) loads when its tag is picked.
         cards.querySelectorAll('img[data-src]').forEach((img) => {
+          if (img.closest('[data-layer][hidden]')) return;
           img.src = img.dataset.src;
           img.removeAttribute('data-src');
         });
@@ -188,6 +190,21 @@
   document.addEventListener('pointerout', (e) => {
     const el = e.target.closest && e.target.closest('.poster[data-stills]');
     if (el && !el.contains(e.relatedTarget)) scrubTo(el, 0);
+  });
+
+  // The tags on a card's picture (#138): trial video, camera, each plot. A tag shows
+  // its layer and hides the others, and its image loads only now.
+  document.addEventListener('click', (e) => {
+    const tab = e.target.closest('.ptab');
+    if (!tab) return;
+    const box = tab.closest('.pbox');
+    box.querySelectorAll('.ptab').forEach((t) => t.setAttribute('aria-pressed', String(t === tab)));
+    box.querySelectorAll('.poster[data-layer]').forEach((layer) => {
+      const shown = layer.dataset.layer === tab.dataset.layer;
+      layer.hidden = !shown;
+      const img = shown && layer.querySelector('img[data-src]');
+      if (img) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
+    });
   });
 
   // A still that could not be made (no ffmpeg, a broken video) shows the placeholder;

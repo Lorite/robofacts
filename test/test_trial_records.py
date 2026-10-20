@@ -576,16 +576,17 @@ def test_the_record_carries_its_stills_camera_video_and_label(root):
     as_json = record.to_dict(root)
     assert as_json["stills"] == ["expA/runs/camera/t1/still_01.jpg", "expA/runs/camera/t1/still_02.jpg"]
     assert as_json["camera_video"] == "expA/runs/camera/t1/camera.mp4"
-    assert as_json["camera_label"] == "drone camera" and as_json["plot"] is None
+    assert as_json["camera_label"] == "drone camera" and as_json["plots"] == []
     assert "stills=2" in trec.render([record]) and "drone_camera_video" in trec.render([record])
 
 
-def test_a_trial_without_pictures_shows_its_own_plot_else_a_cohort_plot(root):
+def test_a_trial_lists_its_own_plots_first_then_its_cohorts_plots(root):
     for name in ("t1", "t2", "t3"):
         bag(root, name)
     own = root / "expA" / "results" / "20261015T140000_vio_drift" / "t1"
     own.mkdir(parents=True)
     (own / "vio_drift.png").write_bytes(b"png")
+    (own / "error.png").write_bytes(b"png")
     cohort = root / "expA" / "results" / "20261015T150000_registration_cohort"
     cohort.mkdir(parents=True)
     (cohort / "analysis_metadata.json").write_text(json.dumps(
@@ -593,10 +594,30 @@ def test_a_trial_without_pictures_shows_its_own_plot_else_a_cohort_plot(root):
     (cohort / "cohort_error.png").write_bytes(b"png")
     (cohort / "t3_trajectory.png").write_bytes(b"png")
     records = by_name(trec.load_records(root, "expA"))
-    assert records["t1"].plot == own / "vio_drift.png" and records["t1"].plot_cohort is None
-    assert records["t3"].plot == cohort / "t3_trajectory.png", "a cohort plot named after the trial is its own"
-    assert records["t2"].plot == cohort / "cohort_error.png" and records["t2"].plot_cohort == 3
-    assert records["t2"].plot_analysis == "registration_cohort"
+    assert [(p["path"].name, p["cohort"]) for p in records["t1"].plots] == [
+        ("error.png", None), ("vio_drift.png", None), ("cohort_error.png", 3)], \
+        "own plots first, the cohort's plot after them"
+    assert [(p["path"].name, p["cohort"]) for p in records["t3"].plots] == [
+        ("t3_trajectory.png", None), ("cohort_error.png", 3)], "a cohort plot named after the trial is its own"
+    assert [p["analysis"] for p in records["t2"].plots] == ["registration_cohort"]
+    assert records["t2"].to_dict(root)["plots"] == [{
+        "path": "expA/results/20261015T150000_registration_cohort/cohort_error.png",
+        "name": "cohort_error", "analysis": "registration_cohort", "cohort": 3}]
+    older = root / "expA" / "results" / "20261015T130000_vio_drift" / "t1"
+    older.mkdir(parents=True)
+    (older / "vio_drift.png").write_bytes(b"png")
+    (older / "speed.png").write_bytes(b"png")
+    plots = by_name(trec.load_records(root, "expA"))["t1"].plots
+    results = root / "expA" / "results"
+    assert [(p["name"], str(p["path"].relative_to(results))) for p in plots] == [
+        ("error", "20261015T140000_vio_drift/t1/error.png"),
+        ("vio_drift", "20261015T140000_vio_drift/t1/vio_drift.png"),
+        ("speed", "20261015T130000_vio_drift/t1/speed.png"),
+        ("cohort_error", "20261015T150000_registration_cohort/cohort_error.png")], \
+        "the older run's vio_drift is superseded, its other plot is kept"
+    for i in range(6):
+        (own / f"extra_{i}.png").write_bytes(b"png")
+    assert len(by_name(trec.load_records(root, "expA"))["t1"].plots) == tm.MAX_PLOTS
 
 
 def test_trials_records_stills_needs_a_declared_camera(root, capsys):
