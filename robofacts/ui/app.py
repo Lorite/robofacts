@@ -902,10 +902,12 @@ def create_app(experiments_root: Optional[Path] = None,
                 # compare_digest on both fields: a plain `!=` leaks length and
                 # content through timing, and this endpoint can start a flight.
                 expected_user = app.config.get("USER")
+                # As UTF-8 bytes: compare_digest raises TypeError on a str with
+                # non-ASCII characters, which answered 500 instead of 401.
+                eq = lambda a, b: secrets.compare_digest((a or "").encode("utf-8"), b.encode("utf-8"))
                 ok = (auth is not None
-                      and secrets.compare_digest(auth.password or "", expected)
-                      and (not expected_user
-                           or secrets.compare_digest(auth.username or "", expected_user)))
+                      and eq(auth.password, expected)
+                      and (not expected_user or eq(auth.username, expected_user)))
                 if not ok:
                     return Response(
                         "Authentication required.", 401,

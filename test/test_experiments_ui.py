@@ -154,6 +154,13 @@ def test_a_wrong_password_is_refused(client):
     assert client.get("/", headers=auth("nope")).status_code == 401
 
 
+def test_a_non_ascii_password_is_refused_not_a_server_error(client):
+    # compare_digest raised TypeError on a non-ASCII str, which answered 500.
+    import base64
+    token = base64.b64encode("x:contraseña".encode("utf-8")).decode()
+    assert client.get("/", headers={"Authorization": f"Basic {token}"}).status_code == 401
+
+
 def test_the_right_password_gets_in(client):
     assert client.get("/", headers=auth()).status_code == 200
 
