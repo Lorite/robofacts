@@ -380,3 +380,259 @@ def test_trials_records_posters_makes_them_ahead_of_the_ui(root, capsys):
     assert trec.main(["--experiments-root", str(root), "expA", "--posters"]) == 0
     assert trec.poster_path(root / "expA", video).is_file()
     assert "posters: 1 of 1" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# Stills, the camera video and the plot fallback of the card view (#138)
+# --------------------------------------------------------------------------- #
+from types import SimpleNamespace  # noqa: E402
+
+from robofacts import trial_media as tm  # noqa: E402
+
+needs_cv2 = pytest.mark.skipif(__import__("importlib").util.find_spec("cv2") is None,
+                               reason="decoding camera frames needs cv2 (present in the dev container)")
+needs_rosbag2 = pytest.mark.skipif(__import__("importlib").util.find_spec("rosbag2_py") is None,
+                                   reason="writing a real bag needs ROS (the dev container)")
+
+CAMERA_YAML = """
+camera:
+  topic: /drone/camera/image
+  label: drone camera
+  stills: 4
+"""
+
+
+def declare_camera(root: Path, text: str = CAMERA_YAML) -> None:
+    (root / "expA" / "config" / "trial_media.yaml").write_text(text, encoding="utf-8")
+
+
+def bag_metadata(bag_dir: Path, topic: str = "/drone/camera/image", count: int = 40,
+                 msg_type: str = "sensor_msgs/msg/Image", seconds: float = 4.0) -> None:
+    """The part of rosbag2's metadata.yaml that trial_media reads."""
+    import yaml
+    info = {"rosbag2_bagfile_information": {
+        "duration": {"nanoseconds": int(seconds * 1e9)},
+        "topics_with_message_count": [
+            {"topic_metadata": {"name": "/tf", "type": "tf2_msgs/msg/TFMessage"}, "message_count": 9},
+            {"topic_metadata": {"name": topic, "type": msg_type}, "message_count": count}]}}
+    (bag_dir / "metadata.yaml").write_text(yaml.safe_dump(info), encoding="utf-8")
+
+
+def mono_frame(value: int, w: int = 30, h: int = 24, pad: int = 2) -> SimpleNamespace:
+    """A mono8 sensor_msgs/Image with a padded row (step > width), as drivers send them."""
+    row = bytes([value]) * w + b"\x00" * pad
+    return SimpleNamespace(encoding="mono8", width=w, height=h, step=w + pad,
+                           is_bigendian=0, data=row * h)
+
+
+def test_an_experiment_without_trial_media_yaml_declares_no_camera(root):
+    assert tm.load_camera(root / "expA") is None
+    declare_camera(root)
+    spec = tm.load_camera(root / "expA")
+    assert spec == tm.CameraSpec(topic="/drone/camera/image", label="drone camera", stills=4)
+
+
+@pytest.mark.parametrize("text, why", [
+    ("camera: {label: x}", "camera.topic"),
+    ("camera: {topic: relative/topic}", "camera.topic"),
+    ("camera: {topic: /a, colour: red}", "unknown key"),
+    ("camera: {topic: /a, stills: 100}", "camera.stills"),
+    ("camera: [", "does not load"),
+])
+def test_a_broken_trial_media_yaml_says_what_is_wrong(root, text, why):
+    declare_camera(root, text)
+    with pytest.raises(tm.MediaConfigError, match=why):
+        tm.load_camera(root / "expA")
+    assert tm.load_camera_or_none(root / "expA") is None, "readers never fail on it"
+
+
+def test_stills_are_evenly_spaced_and_never_more_than_the_frames():
+    assert tm.still_indices(80, 8) == [5, 15, 25, 35, 45, 55, 65, 75]
+    assert tm.still_indices(3, 8) == [0, 1, 2]
+    assert tm.still_indices(0, 8) == [] and tm.still_indices(10, 0) == []
+
+
+def test_the_source_is_the_first_bag_that_records_the_topic(root):
+    full = bag(root, "t1", slim=True)
+    slim = root / "expA" / "bags_slim" / "t1_slim"
+    bag_metadata(full)
+    bag_metadata(slim, topic="/other")
+    assert tm.source_bag([slim, full], "/drone/camera/image")[0] == full
+    bag_metadata(slim)
+    source, info = tm.source_bag([slim, full], "/drone/camera/image")
+    assert source == slim and info == {"type": "sensor_msgs/msg/Image", "count": 40, "duration_s": 4.0}
+    assert tm.source_bag([None, root / "missing"], "/drone/camera/image") == (None, None)
+
+
+@needs_cv2
+def test_frames_of_every_common_encoding_decode_to_bgr():
+    import cv2
+    import numpy as np
+    assert tm.to_bgr(mono_frame(200), "sensor_msgs/msg/Image").shape == (24, 30, 3)
+    rgb = SimpleNamespace(encoding="rgb8", width=2, height=1, step=6, is_bigendian=0,
+                          data=bytes([255, 0, 0, 0, 0, 255]))
+    assert tm.to_bgr(rgb, "sensor_msgs/msg/Image")[0].tolist() == [[0, 0, 255], [255, 0, 0]]
+    deep = SimpleNamespace(encoding="16UC1", width=2, height=1, step=4, is_bigendian=0,
+                           data=np.array([0, 1000], "<u2").tobytes())
+    assert tm.to_bgr(deep, "sensor_msgs/msg/Image")[0, 1].tolist() == [255, 255, 255]
+    ok, jpg = cv2.imencode(".jpg", np.full((10, 12, 3), 128, np.uint8))
+    compressed = SimpleNamespace(format="jpeg", data=jpg.tobytes())
+    assert tm.to_bgr(compressed, "sensor_msgs/msg/CompressedImage").shape == (10, 12, 3)
+    odd = SimpleNamespace(encoding="yuv422", width=2, height=1, step=4, is_bigendian=0, data=b"\0" * 4)
+    assert tm.to_bgr(odd, "sensor_msgs/msg/Image") is None, "an unknown encoding is skipped"
+
+
+@needs_cv2
+@needs_ffmpeg
+def test_make_writes_the_stills_the_video_and_camera_json_once(root, monkeypatch):
+    declare_camera(root)
+    full = bag(root, "t1", slim=True)
+    slim = root / "expA" / "bags_slim" / "t1_slim"
+    bag_metadata(slim)
+    reads = []
+
+    def frames(source, topic):
+        reads.append(source)
+        for i in range(40):
+            yield mono_frame(i * 6)
+    monkeypatch.setattr(tm, "_read_frames", frames)
+    spec = tm.load_camera(root / "expA")
+    result = tm.make(root / "expA", "t1", [slim, full], spec)
+    assert reads == [slim], "the slim copy is read when it carries the topic"
+    assert result["stills"] == ["still_01.jpg", "still_02.jpg", "still_03.jpg", "still_04.jpg"]
+    assert result["frames"] == 40 and result["fps"] == 10.0 and result["video"] == "camera.mp4"
+    assert result["source"] == "bags_slim/t1_slim" and result["label"] == "drone camera"
+    stills, video, info = tm.cached(root / "expA", "t1")
+    assert [p.name for p in stills] == result["stills"] and video.stat().st_size > 0
+    assert info["width"] == 30 and info["height"] == 24
+    assert not [p for p in (root / "expA" / "runs" / "camera").iterdir() if p.name.startswith(".")], \
+        "no temporary folder is left behind"
+    tm.make(root / "expA", "t1", [slim, full], spec)
+    assert len(reads) == 1, "a current cache is not made again"
+    tm.make(root / "expA", "t1", [slim, full], spec, force=True)
+    assert len(reads) == 2
+
+
+@needs_cv2
+def test_a_bag_without_the_topic_gets_nothing_and_stills_need_no_video(root, monkeypatch):
+    declare_camera(root, CAMERA_YAML + "  video: false\n")
+    full = bag(root, "t1")
+    assert tm.make(root / "expA", "t1", [None, full], tm.load_camera(root / "expA")) is None
+    bag_metadata(full)
+    monkeypatch.setattr(tm, "_read_frames", lambda s, t: (mono_frame(100) for _ in range(40)))
+    result = tm.make(root / "expA", "t1", [None, full], tm.load_camera(root / "expA"))
+    assert len(result["stills"]) == 4 and result["video"] is None and result["video_error"] is None
+
+
+@needs_rosbag2
+@needs_cv2
+@needs_ffmpeg
+@pytest.mark.parametrize("compressed", [False, True])
+def test_stills_and_video_come_from_a_real_bag(tmp_path, compressed):
+    """End to end through rosbag2: a recorded Image or CompressedImage topic."""
+    import cv2
+    import numpy as np
+    import rosbag2_py
+    from rclpy.serialization import serialize_message
+    from sensor_msgs.msg import CompressedImage, Image
+    exp = tmp_path / "exp"
+    bag_dir = exp / "bags" / "t1"
+    bag_dir.parent.mkdir(parents=True)
+    writer = rosbag2_py.SequentialWriter()
+    writer.open(rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id="mcap"),
+                rosbag2_py.ConverterOptions("cdr", "cdr"))
+    msg_type = "sensor_msgs/msg/CompressedImage" if compressed else "sensor_msgs/msg/Image"
+    writer.create_topic(rosbag2_py.TopicMetadata(name="/cam", type=msg_type, serialization_format="cdr"))
+    for i in range(30):
+        pixels = np.full((24, 32), i * 8, np.uint8)
+        if compressed:
+            msg = CompressedImage(format="jpeg", data=cv2.imencode(".jpg", pixels)[1].tobytes())
+        else:
+            msg = Image(height=24, width=32, encoding="mono8", step=32, data=pixels.tobytes())
+        writer.write("/cam", serialize_message(msg), int(1e9 + i * 1e8))
+    del writer
+    spec = tm.CameraSpec(topic="/cam", label="drone camera", stills=5)
+    result = tm.make(exp, "t1", [bag_dir], spec)
+    assert result["frames"] == 30 and result["decoded"] == 30 and len(result["stills"]) == 5
+    assert result["video"] == "camera.mp4" and result["video_error"] is None
+    stills, _video, _info = tm.cached(exp, "t1")
+    means = [cv2.imread(str(p), cv2.IMREAD_GRAYSCALE).mean() for p in stills]
+    assert means == sorted(means), "the stills are in time order, spread over the topic"
+
+
+def test_the_record_carries_its_stills_camera_video_and_label(root):
+    declare_camera(root)
+    bag(root, "t1")
+    folder = root / "expA" / "runs" / "camera" / "t1"
+    folder.mkdir(parents=True)
+    for i in (1, 2):
+        (folder / f"still_0{i}.jpg").write_bytes(b"\xff\xd8")
+    (folder / "camera.mp4").write_bytes(b"v")
+    (folder / "camera.json").write_text(json.dumps({"label": "drone camera"}), encoding="utf-8")
+    record = by_name(trec.load_records(root, "expA"))["t1"]
+    assert [p.name for p in record.stills] == ["still_01.jpg", "still_02.jpg"]
+    assert record.camera_video == folder / "camera.mp4" and record.camera_label == "drone camera"
+    assert record.videos == [], "the camera video is not the trial video"
+    as_json = record.to_dict(root)
+    assert as_json["stills"] == ["expA/runs/camera/t1/still_01.jpg", "expA/runs/camera/t1/still_02.jpg"]
+    assert as_json["camera_video"] == "expA/runs/camera/t1/camera.mp4"
+    assert as_json["camera_label"] == "drone camera" and as_json["plot"] is None
+    assert "stills=2" in trec.render([record]) and "drone_camera_video" in trec.render([record])
+
+
+def test_a_trial_without_pictures_shows_its_own_plot_else_a_cohort_plot(root):
+    for name in ("t1", "t2", "t3"):
+        bag(root, name)
+    own = root / "expA" / "results" / "20261015T140000_vio_drift" / "t1"
+    own.mkdir(parents=True)
+    (own / "vio_drift.png").write_bytes(b"png")
+    cohort = root / "expA" / "results" / "20261015T150000_registration_cohort"
+    cohort.mkdir(parents=True)
+    (cohort / "analysis_metadata.json").write_text(json.dumps(
+        {"analysis": "registration_cohort", "bags": ["t1", "t2", "t3"]}), encoding="utf-8")
+    (cohort / "cohort_error.png").write_bytes(b"png")
+    (cohort / "t3_trajectory.png").write_bytes(b"png")
+    records = by_name(trec.load_records(root, "expA"))
+    assert records["t1"].plot == own / "vio_drift.png" and records["t1"].plot_cohort is None
+    assert records["t3"].plot == cohort / "t3_trajectory.png", "a cohort plot named after the trial is its own"
+    assert records["t2"].plot == cohort / "cohort_error.png" and records["t2"].plot_cohort == 3
+    assert records["t2"].plot_analysis == "registration_cohort"
+
+
+def test_trials_records_stills_needs_a_declared_camera(root, capsys):
+    bag(root, "t1")
+    assert trec.main(["--experiments-root", str(root), "expA", "--stills"]) == 2
+    assert "declares no camera" in capsys.readouterr().err
+
+
+def test_trials_records_stills_makes_them_for_every_bag_with_the_topic(root, capsys, monkeypatch):
+    declare_camera(root)
+    bag_metadata(bag(root, "t1"))
+    bag(root, "t2")
+    made = []
+
+    def fake_make(exp_dir, trial, candidates, spec, force=False):
+        made.append(trial)
+        return {"stills": ["still_01.jpg"], "video": None, "video_error": None,
+                "source": f"bags/{trial}", "seconds": 0.1}
+    monkeypatch.setattr(tm, "make", fake_make)
+    assert trec.main(["--experiments-root", str(root), "expA", "--stills", "--json"]) == 0
+    out = capsys.readouterr()
+    assert made == ["t1"]
+    assert "made 1, already current 0, failed 0, 1 trial(s) whose bag does not record it" in out.err
+    assert {r["name"] for r in json.loads(out.out)} == {"t1", "t2"}, "--json stays clean"
+
+
+def test_the_runner_hook_never_raises(root, monkeypatch, capsys):
+    tm.make_after_trial(None)
+    slim = root / "expA" / "bags_slim" / "t1_slim"
+    slim.mkdir(parents=True)
+    tm.make_after_trial(slim)
+    assert capsys.readouterr().out == "", "no camera declared, nothing said"
+    declare_camera(root)
+    monkeypatch.setattr(tm, "make", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    tm.make_after_trial(slim)
+    assert "[media] skipped (boom)" in capsys.readouterr().out
+    declare_camera(root, CAMERA_YAML + "  after_trial: false\n")
+    tm.make_after_trial(slim)
+    assert capsys.readouterr().out == ""

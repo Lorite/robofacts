@@ -1599,9 +1599,14 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     if slim:
         try:
             from .slim_bag_archive import archive_and_sync
-            archive_and_sync(bag_dir, target, project_root=cwd)
+            local_slim = archive_and_sync(bag_dir, target, project_root=cwd)
         except Exception as exc:  # noqa: BLE001
+            local_slim = None
             print(f"[runner] slim archiving skipped ({exc})")
+        # The trial card's stills and camera video (#138), from the local slim copy,
+        # when the experiment declares a camera (config/trial_media.yaml). Never fatal.
+        from .trial_media import make_after_trial
+        make_after_trial(local_slim, bag_dir if target is None else None)
 
     status = "failed" if (action_failed or detail.startswith("execution error")) else "ran"
     return TrialResult(trial, bag_dir, status, detail, commands)

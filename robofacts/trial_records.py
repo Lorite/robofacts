@@ -40,6 +40,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import roots
 from . import trial_index as ti
+from . import trial_media as tm
 
 
 #: The three classes of a trial, the words of the SAC 2027 paper (Equation 4 there,
@@ -102,6 +103,17 @@ class TrialRecord:
     videos: List[Path] = field(default_factory=list)
     code_version: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    #: Pictures from the trial's own bag (trial_media, #138): evenly spaced stills and
+    #: a video of the camera the experiment declares, named by its label ("drone
+    #: camera"), never mixed with ``videos`` (a rendered trial video).
+    stills: List[Path] = field(default_factory=list)
+    camera_video: Optional[Path] = None
+    camera_label: Optional[str] = None
+    #: The card's picture when it has nothing else: the trial's own first plot, else
+    #: a plot of a cohort that includes it (``plot_cohort`` is then its trial count).
+    plot: Optional[Path] = None
+    plot_analysis: Optional[str] = None
+    plot_cohort: Optional[int] = None
 
     @property
     def slim_name(self) -> Optional[str]:
@@ -148,6 +160,11 @@ class TrialRecord:
             # Where the trial card's still lives (made on first view, or by
             # `trials records --posters`); null without a video.
             "poster": rel(self.poster(root)) if root is not None else None,
+            # The declared camera's stills and video (`trials records --stills`).
+            "stills": [rel(p) for p in self.stills],
+            "camera_video": rel(self.camera_video), "camera_label": self.camera_label,
+            "plot": rel(self.plot), "plot_analysis": self.plot_analysis,
+            "plot_cohort": self.plot_cohort,
         }
 
     def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
@@ -569,6 +586,16 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
         record = by_name[name]
         record.analyses = entries
         record.videos = [v for e in entries for v in e["videos"]]
+    camera = tm.load_camera_or_none(exp_dir)
+    for record in records:
+        record.stills, record.camera_video, info = tm.cached(exp_dir, record.name)
+        if record.stills or record.camera_video:
+            record.camera_label = str(info.get("label") or (camera.label if camera else "camera"))
+        if not record.videos and not record.stills and not record.camera_video:
+            plot = tm.first_plot(record.analyses, record.name)
+            if plot:
+                record.plot, record.plot_analysis = plot["path"], plot["analysis"]
+                record.plot_cohort = plot["cohort"]
 
     if campaigns:
         from . import campaign_plan as cp
@@ -761,6 +788,10 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
             bits.append(f"slim={r.slim_name}")
         if r.videos:
             bits.append(f"video={len(r.videos)}")
+        if r.stills:
+            bits.append(f"stills={len(r.stills)}")
+        if r.camera_video:
+            bits.append(f"{(r.camera_label or 'camera').replace(' ', '_')}_video")
         if r.analyses:
             bits.append("analyses=" + ",".join(sorted({a["analysis"] for a in r.analyses})))
         if r.gate:
@@ -770,6 +801,51 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
             lines.append(f"      why: {r.reason.splitlines()[0][:160]}")
     lines.append(summary_line(records))
     return "\n".join(lines)
+
+
+def make_stills(root: Path, experiment: str, records: List[TrialRecord], *,
+                force: bool = False) -> int:
+    """``--stills``: the declared camera's pictures for every listed record whose bag records it.
+
+    Prints one line per trial it made (on stderr, so ``--json`` stays clean) and a
+    summary. Returns 2 when the experiment declares no camera or its file is broken.
+    """
+    exp_dir = root / experiment
+    try:
+        camera = tm.load_camera(exp_dir)
+    except tm.MediaConfigError as exc:
+        print(f"trials records: {exc}", file=sys.stderr)
+        return 2
+    if camera is None:
+        print(f"trials records: {experiment} declares no camera: add {tm.MEDIA_CONFIG} "
+              f"(camera.topic, label, stills) to give its trial cards stills", file=sys.stderr)
+        return 2
+    made = kept = without = failed = 0
+    for r in records:
+        if r.bag_dir is None and r.slim_dir is None:
+            continue
+        source, _info = tm.source_bag([r.slim_dir, r.bag_dir], camera.topic)
+        if source is None:
+            without += 1
+            continue
+        if not force and tm.is_current(exp_dir, r.name, camera, source):
+            kept += 1
+            continue
+        try:
+            result = tm.make(exp_dir, r.name, [r.slim_dir, r.bag_dir], camera, force=True)
+        except Exception as exc:  # noqa: BLE001 - one unreadable bag must not stop the rest
+            failed += 1
+            print(f"  {r.name}: failed ({exc})", file=sys.stderr)
+            continue
+        made += 1
+        print(f"  {r.name}: {len(result['stills'])} still(s)"
+              f"{', video' if result.get('video') else ''}"
+              f"{' (video: ' + result['video_error'] + ')' if result.get('video_error') else ''}"
+              f" from {result['source']} in {result['seconds']} s", file=sys.stderr, flush=True)
+    print(f"stills ({camera.topic}): made {made}, already current {kept}, failed {failed}, "
+          f"{without} trial(s) whose bag does not record it, under {exp_dir / tm.MEDIA_DIR}",
+          file=sys.stderr)
+    return 0
 
 
 def main(argv=None) -> int:
@@ -793,6 +869,12 @@ def main(argv=None) -> int:
     ap.add_argument("--posters", action="store_true",
                     help="also make the poster frames the UI's card view shows, for the "
                          "records listed (ffmpeg, cached under runs/posters/)")
+    ap.add_argument("--stills", action="store_true",
+                    help="also make the stills and the camera video of the camera that "
+                         "config/trial_media.yaml declares, for the records listed whose bag "
+                         "records it (needs ROS and cv2, cached under runs/camera/)")
+    ap.add_argument("--force", action="store_true",
+                    help="with --stills: make them again even when the cache is current")
     args = ap.parse_args(argv)
     roots.resolve_root_arguments(args)
     root = roots.experiments_root(args.experiments_root)
@@ -815,6 +897,16 @@ def main(argv=None) -> int:
         with_video = sum(1 for r in records if r.videos)
         print(f"posters: {len(made)} of {with_video} trial(s) with a video under "
               f"{root / args.experiment / POSTER_DIR}", file=sys.stderr)
+    if args.stills:
+        code = make_stills(root, args.experiment, records, force=args.force)
+        if code:
+            return code
+        # Read again, so the listing below shows what was just made.
+        names = {r.name for r in records}
+        records = [r for r in load_records(root, args.experiment,
+                                           include_scratch=not args.no_scratch,
+                                           campaigns=_load_campaigns(root, args.experiment))
+                   if r.name in names]
     if args.json:
         print(json.dumps([r.to_dict(root) for r in records], indent=2))
     else:

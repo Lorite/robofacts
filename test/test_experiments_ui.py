@@ -1386,3 +1386,106 @@ def test_no_id_is_used_twice_on_the_trials_pages(client, root):
         body = client.get(url, headers=auth()).get_data(as_text=True)
         ids = collections.Counter(re.findall(r'\sid="([^"]+)"', body))
         assert [i for i, n in ids.items() if n > 1] == [], url
+
+
+# --------------------------------------------------------------------------- #
+# Stills, the camera video and the plot fallback (#138)
+# --------------------------------------------------------------------------- #
+def _camera_trial(root: Path, name: str, n_stills: int = 3, video: bool = True) -> Path:
+    """A trial whose declared camera was already turned into stills (trial_media's cache)."""
+    _write_bag(root, name, _meta(name))
+    (root / "expA" / "config" / "trial_media.yaml").write_text(
+        "camera: {topic: /drone/camera/image, label: drone camera, stills: 3}\n", encoding="utf-8")
+    folder = root / "expA" / "runs" / "camera" / name
+    folder.mkdir(parents=True)
+    for i in range(1, n_stills + 1):
+        (folder / f"still_{i:02d}.jpg").write_bytes(b"\xff\xd8 still")
+    if video:
+        (folder / "camera.mp4").write_bytes(b"MP4")
+    (folder / "camera.json").write_text(json.dumps({"label": "drone camera"}), encoding="utf-8")
+    return folder
+
+
+def _card(body: str, name: str) -> str:
+    card = body[body.index(f'<article class="tcard" data-trial="{name}">'):]
+    return card[:card.index("</article>")]
+
+
+def test_a_card_scrubs_the_stills_and_plays_the_labeled_camera_video(client, root):
+    import html
+    import re
+    name = "20261015T100000_rep01"
+    _camera_trial(root, name)
+    card = _card(client.get("/e/expA", headers=auth()).get_data(as_text=True), name)
+    base = f"/files/expA/runs/camera/{name}"
+    assert f'data-video="{base}/camera.mp4"' in card, "no trial video: the camera video plays"
+    assert "📷 drone camera" in card, "labeled, so nobody takes it for the trial video"
+    stills = json.loads(html.unescape(re.search(r"data-stills='([^']+)'", card).group(1)))
+    assert stills == [f"{base}/still_0{i}.jpg" for i in (1, 2, 3)]
+    assert f'data-src="{base}/still_01.jpg"' in card and f'src="{base}' not in card.replace("data-src", ""), \
+        "the first still waits in data-src like a poster"
+    assert 'class="scrub"' in card and "· drone camera" in card, "the dialog title names the camera"
+
+
+def test_a_trial_video_still_wins_over_the_camera_on_the_card(client, root):
+    name = "20261015T100000_rep01"
+    _video_trial(root, name)
+    _camera_trial(root, "20261015T090000_rep02")
+    folder = root / "expA" / "runs" / "camera" / name
+    folder.mkdir(parents=True)
+    (folder / "camera.mp4").write_bytes(b"MP4")
+    (folder / "camera.json").write_text("{}", encoding="utf-8")
+    card = _card(client.get("/e/expA", headers=auth()).get_data(as_text=True), name)
+    assert "trial_video_h264.mp4" in card.split('data-video="')[1].split('"')[0]
+    assert "data-stills" not in card and 'class="camtag"' not in card
+    assert "📷 drone camera" in card, "the camera video is still one link away"
+
+
+def test_stills_without_a_video_link_to_the_trial_page(client, root):
+    name = "20261015T100000_rep01"
+    _camera_trial(root, name, video=False)
+    card = _card(client.get("/e/expA", headers=auth()).get_data(as_text=True), name)
+    assert f'<a class="poster" href="/e/expA/t/{name}"' in card and "data-video" not in card
+
+
+def test_a_card_without_pictures_shows_the_plot_and_says_whose_it_is(client, root):
+    own, other = "20261015T100000_rep01", "20261015T090000_rep02"
+    _write_bag(root, own, _meta(own))
+    _write_bag(root, other, _meta(other))
+    folder = root / "expA" / "results" / "20261015T120000_vio_drift" / own
+    folder.mkdir(parents=True)
+    (folder / "vio_drift.png").write_bytes(b"\x89PNG")
+    cohort = root / "expA" / "results" / "20261015T130000_cohort"
+    cohort.mkdir(parents=True)
+    (cohort / "analysis_metadata.json").write_text(json.dumps(
+        {"analysis": "cohort", "bags": [own, other]}), encoding="utf-8")
+    (cohort / "all.png").write_bytes(b"\x89PNG")
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    card = _card(body, own)
+    assert 'class="poster plot"' in card and "vio_drift.png" in card and ">plot · vio_drift<" in card
+    card = _card(body, other)
+    assert "all.png" in card and "cohort plot · cohort" in card and "cohort of 2 trials" in card
+    page = client.get(f"/e/expA/t/{other}", headers=auth()).get_data(as_text=True)
+    assert "Cohort plot" in page and "results/20261015T130000_cohort/all.png" in page
+    served = client.get(f"/files/expA/results/20261015T120000_vio_drift/{own}/vio_drift.png", headers=auth())
+    assert served.status_code == 200 and served.mimetype == "image/png"
+
+
+def test_the_trial_page_shows_the_camera_video_and_every_still(client, root):
+    name = "20261015T100000_rep01"
+    _camera_trial(root, name)
+    page = client.get(f"/e/expA/t/{name}", headers=auth()).get_data(as_text=True)
+    base = f"/files/expA/runs/camera/{name}"
+    assert "📷 Drone camera" in page and "not the trial video" in page
+    assert f'src="{base}/camera.mp4" poster="{base}/still_01.jpg"' in page
+    assert page.count('class="stillstrip"') == 1 and all(
+        f'src="{base}/still_0{i}.jpg"' in page for i in (1, 2, 3))
+    assert client.get(f"{base}/camera.mp4", headers=auth()).mimetype == "video/mp4"
+    assert client.get(f"{base}/still_02.jpg").status_code == 401, "behind auth like every file"
+
+
+def test_the_script_scrubs_stills_on_pointer_move():
+    js = (Path(ui.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
+    scrub = js[js.index("Stills of the declared camera (#138)"):]
+    assert "pointermove" in scrub and "data-stills" in scrub and "pointerout" in scrub
+    assert "img.hasAttribute('data-src')" in scrub, "no still is fetched before the cards are shown"

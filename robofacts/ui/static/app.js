@@ -164,6 +164,32 @@
     show(urlView || storedView() || 'table', Boolean(urlView));
   });
 
+  // Stills of the declared camera (#138): moving the pointer across a card's picture
+  // scrubs through them, and leaving it shows the first again. The bar shows where.
+  const stillsOf = (el) => {
+    if (!el._stills) { try { el._stills = JSON.parse(el.dataset.stills); } catch (e) { el._stills = []; } }
+    return el._stills;
+  };
+  const scrubTo = (el, k) => {
+    const list = stillsOf(el);
+    const img = el.querySelector('img');
+    if (!img || !list.length || img.hasAttribute('data-src')) return;
+    k = Math.max(0, Math.min(list.length - 1, k));
+    if (img.getAttribute('src') !== list[k]) img.src = list[k];
+    const bar = el.querySelector('.scrub i');
+    if (bar) bar.style.marginLeft = `${(100 * k) / list.length}%`;
+  };
+  document.addEventListener('pointermove', (e) => {
+    const el = e.target.closest && e.target.closest('.poster[data-stills]');
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    scrubTo(el, Math.floor(((e.clientX - box.left) / box.width) * stillsOf(el).length));
+  });
+  document.addEventListener('pointerout', (e) => {
+    const el = e.target.closest && e.target.closest('.poster[data-stills]');
+    if (el && !el.contains(e.relatedTarget)) scrubTo(el, 0);
+  });
+
   // A still that could not be made (no ffmpeg, a broken video) shows the placeholder;
   // the card still plays the video.
   document.addEventListener('error', (e) => {
