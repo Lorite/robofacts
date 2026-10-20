@@ -74,7 +74,7 @@ MAX_COPY_BYTES = 1_000_000
 #: describes the source.
 DECLARATIONS = ("config/factors.yaml", "config/trial_metadata_schema.yaml",
                 "config/preflight_checklist.json", "config/runner.yaml",
-                "config/analyses.yaml", "RUNBOOK.md",
+                "config/analyses.yaml", "config/trial_media.yaml", "RUNBOOK.md",
                 "trial_metadata.template.json", "analysis_metadata.template.json")
 
 README_DERIVED = """# {name}
