@@ -866,13 +866,17 @@ def experiment_names(root: Path) -> List[str]:
 # --------------------------------------------------------------------------- #
 def create_app(experiments_root: Optional[Path] = None,
                password: Optional[str] = None,
-               repo_root: Optional[Path] = None) -> Flask:
+               repo_root: Optional[Path] = None,
+               user: Optional[str] = None) -> Flask:
     experiments_root = roots.experiments_root(experiments_root)
     repo_root = roots.project_root(repo_root, experiments=experiments_root)
     app = Flask(__name__)
     app.config["EXPERIMENTS_ROOT"] = Path(experiments_root)
     app.config["REPO_ROOT"] = Path(repo_root)
     app.config["PASSWORD"] = password
+    # Optional user name (EXPERIMENTS_UI_USER). Unset means any user name, as before
+    # 2026-10-20, so existing setups keep working.
+    app.config["USER"] = user
     journal = RunJournal()
     app.config["JOURNAL"] = journal
     runs = RunManager()
@@ -888,8 +892,11 @@ def create_app(experiments_root: Optional[Path] = None,
                 auth = request.authorization
                 # compare_digest on both fields: a plain `!=` leaks length and
                 # content through timing, and this endpoint can start a flight.
+                expected_user = app.config.get("USER")
                 ok = (auth is not None
-                      and secrets.compare_digest(auth.password or "", expected))
+                      and secrets.compare_digest(auth.password or "", expected)
+                      and (not expected_user
+                           or secrets.compare_digest(auth.username or "", expected_user)))
                 if not ok:
                     return Response(
                         "Authentication required.", 401,
@@ -1967,7 +1974,8 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
     finally:
         probe.close()
 
-    app = create_app(args.experiments_root, password)
+    user = os.environ.get("EXPERIMENTS_UI_USER") or None
+    app = create_app(args.experiments_root, password, user=user)
     try:
         app.run(host=args.host, port=args.port, threaded=True)
     except KeyboardInterrupt:

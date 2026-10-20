@@ -137,9 +137,9 @@ def client(root: Path):
     return app.test_client()
 
 
-def auth(password: str = PASSWORD) -> dict:
+def auth(password: str = PASSWORD, user: str = "x") -> dict:
     import base64
-    token = base64.b64encode(f"x:{password}".encode()).decode()
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
     return {"Authorization": f"Basic {token}"}
 
 
@@ -166,6 +166,21 @@ def test_actions_are_also_behind_auth(client):
 def test_healthz_needs_no_auth(client):
     """So a tunnel can be probed without handing over the password."""
     assert client.get("/healthz").status_code == 200
+
+
+def test_a_configured_user_name_is_checked(root):
+    """EXPERIMENTS_UI_USER (2026-10-20): the user name must match too."""
+    app = ui.create_app(root, PASSWORD, repo_root=root.parent, user="lori")
+    app.config["TESTING"] = True
+    c = app.test_client()
+    assert c.get("/", headers=auth(user="lori")).status_code == 200
+    assert c.get("/", headers=auth(user="admin")).status_code == 401
+    assert c.get("/", headers=auth("nope", user="lori")).status_code == 401
+
+
+def test_no_user_configured_accepts_any_user_name(client):
+    """Unset EXPERIMENTS_UI_USER keeps the old behavior: only the password counts."""
+    assert client.get("/", headers=auth(user="anyone")).status_code == 200
 
 
 def test_no_password_configured_means_open(root):
