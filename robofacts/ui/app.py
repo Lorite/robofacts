@@ -867,7 +867,14 @@ def experiment_names(root: Path) -> List[str]:
 def create_app(experiments_root: Optional[Path] = None,
                password: Optional[str] = None,
                repo_root: Optional[Path] = None,
-               user: Optional[str] = None) -> Flask:
+               user: Optional[str] = None,
+               view_only: bool = False,
+               cache_dir: Optional[Path] = None) -> Flask:
+    """The UI app. ``view_only`` registers none of the routes that act (runs,
+    stops, robot actions, kill ROS, quarantine), for an archive viewer such as
+    the home server's: those URLs answer 404 and the pages show no button for
+    them. ``cache_dir`` is where poster frames go when the experiments tree
+    itself is read-only (default: ``runs/posters/`` inside the tree)."""
     experiments_root = roots.experiments_root(experiments_root)
     repo_root = roots.project_root(repo_root, experiments=experiments_root)
     app = Flask(__name__)
@@ -877,6 +884,8 @@ def create_app(experiments_root: Optional[Path] = None,
     # Optional user name (EXPERIMENTS_UI_USER). Unset means any user name, as before
     # 2026-10-20, so existing setups keep working.
     app.config["USER"] = user
+    app.config["VIEW_ONLY"] = bool(view_only)
+    app.config["CACHE_DIR"] = Path(cache_dir) if cache_dir else None
     journal = RunJournal()
     app.config["JOURNAL"] = journal
     runs = RunManager()
@@ -903,6 +912,20 @@ def create_app(experiments_root: Optional[Path] = None,
                         {"WWW-Authenticate": 'Basic realm="experiments"'})
             return view(*args, **kwargs)
         return wrapper
+
+    def action(rule: str):
+        """A POST route that changes something: a run, a stop, a robot action, a move.
+
+        A view-only app does not register it at all, so the URL answers 404 rather
+        than relying on a hidden button. Templates guard their forms with
+        ``view_only``, and a url_for() of an unregistered action fails loudly in
+        the view-only page tests.
+        """
+        def register(view):
+            if app.config["VIEW_ONLY"]:
+                return view
+            return app.route(rule, methods=["POST"])(view)
+        return register
 
     def root() -> Path:
         return app.config["EXPERIMENTS_ROOT"]
@@ -931,6 +954,8 @@ def create_app(experiments_root: Optional[Path] = None,
             "base_url": base_url(), "code_cell": code_cell,
             "where_string": where_string,
             "poster_of": lambda record: record.poster(root()),
+            "view_only": app.config["VIEW_ONLY"],
+            "archive_status": archive_status(root()) if app.config["VIEW_ONLY"] else None,
         }
 
     @app.template_filter("when")
@@ -969,8 +994,10 @@ def create_app(experiments_root: Optional[Path] = None,
                 "explore_campaign": next(iter(data.campaigns), ""),
             })
         rows.sort(key=lambda r: r["last"], reverse=True)
-        return render_template("index.html", rows=rows, robots=load_robots(app),
-                               robot_actions=load_robot_actions(app),
+        view_only = app.config["VIEW_ONLY"]
+        return render_template("index.html", rows=rows,
+                               robots=[] if view_only else load_robots(app),
+                               robot_actions={} if view_only else load_robot_actions(app),
                                journal=journal.snapshot()[:8], crumbs=[])
 
     # ---------------------------------------------------------- experiment --
@@ -1206,9 +1233,10 @@ def create_app(experiments_root: Optional[Path] = None,
                     served = vparts[0] in FILE_ROOTS and vparts[:2] != trec.POSTER_DIR.parts
                 except ValueError:
                     served = False
-            if not served or trec.make_poster(base, video) is None:
+            made = trec.make_poster(base, video, cache_dir=app.config["CACHE_DIR"]) if served else None
+            if made is None:
                 return error(f"no poster frame for {rel!r}", 404, crumbs)
-            resp = send_file(target, mimetype="image/jpeg", conditional=True)
+            resp = send_file(made, mimetype="image/jpeg", conditional=True)
             resp.headers["Cache-Control"] = "private, max-age=3600"
             return resp
         if not target.is_file():
@@ -1274,7 +1302,7 @@ def create_app(experiments_root: Optional[Path] = None,
         return redirect(url_for("analyses_view", experiment=experiment))
 
     # -------------------------------------------------------------- actions --
-    @app.route("/run", methods=["POST"])
+    @action("/run")
     @requires_auth
     def run():
         """Plan first, execute only on an explicit confirm; then show progress."""
@@ -1408,7 +1436,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                   layouts=cache.get(experiment).layouts, picker=picker,
                                   after=after)
 
-    @app.route("/explore", methods=["POST"])
+    @action("/explore")
     @requires_auth
     def explore():
         """Bring up one campaign condition with a Foxglove view that may change parameters.
@@ -1432,7 +1460,7 @@ def create_app(experiments_root: Optional[Path] = None,
             return active
         return redirect(url_for("run_view", run_id=active.run_id))
 
-    @app.route("/run/<run_id>/explore_restart", methods=["POST"])
+    @action("/run/<run_id>/explore_restart")
     @requires_auth
     def explore_restart(run_id: str):
         """Explore another condition of the same campaign from the run page (#133).
@@ -1465,7 +1493,7 @@ def create_app(experiments_root: Optional[Path] = None,
             return active
         return redirect(url_for("run_view", run_id=active.run_id))
 
-    @app.route("/run/<run_id>/explore/<op>", methods=["POST"])
+    @action("/run/<run_id>/explore/<op>")
     @requires_auth
     def explore_control(run_id: str, op: str):
         """The Explore run page's buttons (#133), answered as JSON for the page's fetch.
@@ -1510,7 +1538,7 @@ def create_app(experiments_root: Optional[Path] = None,
                         f"{run.experiment}/{run.campaign_file}: {'OK' if ok else 'refused'}, {msg}")
         return {"ok": ok, "message": msg}, (200 if ok else 400)
 
-    @app.route("/preflight/<experiment>", methods=["POST"])
+    @action("/preflight/<experiment>")
     @requires_auth
     def preflight(experiment: str):
         """Run the #87 gate on the trial host, WITHOUT running anything else.
@@ -1549,7 +1577,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                host=host_level or "local", ok=ok, output=output,
                                back=back, crumbs=crumbs)
 
-    @app.route("/operator_step", methods=["POST"])
+    @action("/operator_step")
     @requires_auth
     def operator_step():
         """Run ONE operator step's declared command on the trial's host.
@@ -1628,14 +1656,14 @@ def create_app(experiments_root: Optional[Path] = None,
             return {"error": "unknown run"}, 404
         return run.to_dict()
 
-    @app.route("/run/<run_id>/abort", methods=["POST"])
+    @action("/run/<run_id>/abort")
     @requires_auth
     def abort_run(run_id: str):
         ok = runs.abort(run_id)
         journal.add("abort", f"{run_id}: {'requested' if ok else 'not running'}")
         return redirect(url_for("run_view", run_id=run_id))
 
-    @app.route("/run/<run_id>/proceed", methods=["POST"])
+    @action("/run/<run_id>/proceed")
     @requires_auth
     def proceed(run_id: str):
         """The browser's Enter key for the runner's operator waits.
@@ -1654,7 +1682,7 @@ def create_app(experiments_root: Optional[Path] = None,
             run._go.set()
         return redirect(url_for("run_view", run_id=run_id))
 
-    @app.route("/stop", methods=["POST"])
+    @action("/stop")
     @requires_auth
     def stop():
         """Soft-stop or e-stop, via scripts/estop.sh — a narrow allowlist."""
@@ -1690,7 +1718,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                output=(completed.stdout or "") + (completed.stderr or "") + extra,
                                crumbs=[("stop", None)])
 
-    @app.route("/robot_action", methods=["POST"])
+    @action("/robot_action")
     @requires_auth
     def robot_action():
         """One declared operator action (posture/status) via scripts/robot_action.sh.
@@ -1715,7 +1743,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                lease_owners=lease_owners(completed.stdout or ""),
                                crumbs=[("robot action", None)])
 
-    @app.route("/kill_ros", methods=["POST"])
+    @action("/kill_ros")
     @requires_auth
     def kill_ros():
         """Clean slate on the rig hosts — recovery BETWEEN trials.
@@ -1758,7 +1786,7 @@ def create_app(experiments_root: Optional[Path] = None,
         return render_template("stop.html", action="kill ROS", robot="all rig hosts",
                                ok=ok, output=output, crumbs=[("kill ROS", None)])
 
-    @app.route("/quarantine/<experiment>/<name>", methods=["POST"])
+    @action("/quarantine/<experiment>/<name>")
     @requires_auth
     def quarantine_bag(experiment: str, name: str):
         """Move a recorded bag out of coverage, into its `_issues` sibling.
@@ -1882,6 +1910,22 @@ def robot_hosts(app) -> List[Dict[str, str]]:
     return out
 
 
+#: The archive's merge step (scripts/archive/merge_view.py in the PhD repo) writes
+#: this file at the top of the merged experiments root: when it ran, how each
+#: host's last sync went, and how many files two hosts disagreed on.
+ARCHIVE_STATUS_FILE = ".archive_status.json"
+
+
+def archive_status(experiments_root: Path) -> Optional[Dict[str, Any]]:
+    """The archive's status for the view-only banner, or None when there is none."""
+    import json
+    try:
+        data = json.loads((Path(experiments_root) / ARCHIVE_STATUS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def load_robots(app) -> List[str]:
     import yaml
     path = app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
@@ -1952,17 +1996,20 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     roots.resolve_root_arguments(args)
 
+    view_only = args.view_only or os.environ.get("TRIALS_UI_VIEW_ONLY", "") not in ("", "0")
     password = os.environ.get("EXPERIMENTS_UI_PASSWORD")
     if not password and not args.no_auth:
         print("ERROR: set EXPERIMENTS_UI_PASSWORD, or pass --no-auth.\n"
-              "This UI can start a flight; it will not run unauthenticated by accident.",
+              + ("A view-only UI still shows every trial, so it asks for a password too."
+                 if view_only else
+                 "This UI can start a flight; it will not run unauthenticated by accident."),
               file=sys.stderr)
         return 2
     if args.host != "127.0.0.1" and not password:
         print("ERROR: refusing to bind a non-localhost address without a password.",
               file=sys.stderr)
         return 2
-    if args.host != "127.0.0.1":
+    if args.host != "127.0.0.1" and not view_only:
         print(f"WARNING: binding {args.host} exposes this on the network. "
               f"The SSH-tunnel setup (127.0.0.1) is safer.", file=sys.stderr)
 
@@ -1993,7 +2040,11 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
         probe.close()
 
     user = os.environ.get("EXPERIMENTS_UI_USER") or None
-    app = create_app(args.experiments_root, password, user=user)
+    app = create_app(args.experiments_root, password, user=user, view_only=view_only,
+                     cache_dir=args.cache_dir)
+    if view_only:
+        print("view-only: no route that runs, stops or moves anything is registered",
+              file=sys.stderr)
     try:
         app.run(host=args.host, port=args.port, threaded=True)
     except KeyboardInterrupt:

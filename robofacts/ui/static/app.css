@@ -85,6 +85,9 @@ footer { max-width: 92rem; margin: 0 auto; padding: 1rem 1.25rem 2rem; color: va
            background: color-mix(in srgb, var(--bad) 7%, var(--bg)); border-bottom: 1px solid var(--bad); }
 .stopbar.pinned { position: sticky; top: 0; z-index: 30; box-shadow: 0 .25rem .7rem var(--shadow); }
 .stopbar form { margin: 0; }
+/* The view-only archive's banner, in place of the stop bar (no control in it). */
+.archivebar { display: flex; gap: .4rem 1rem; align-items: baseline; flex-wrap: wrap; padding: .45rem 1.25rem;
+           background: var(--warn-bg); border-bottom: 1px solid var(--warn); }
 .stopbar .note { font-size: .8rem; color: var(--muted); flex: 1 1 18rem; }
 .stopbar .pintoggle { background: transparent; border: 0; color: var(--muted); font-size: .8rem; padding: .2rem .4rem; }
 

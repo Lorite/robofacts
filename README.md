@@ -83,6 +83,7 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials check <campaign>` | the expanded plan of one campaign, `--factors <exp>` the factor space |
 | `trials metadata` | audit the recorded metadata against the contract |
 | `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required, `EXPERIMENTS_UI_USER` optional: when set, the user name must match too). Every trials list is a table or, with the switch above it, cards with a still from each trial's video that play it in place (ffmpeg makes the stills on first view, cached in `runs/posters/`). A card's picture can show several things, one tag each above it: the trial video, the declared camera's stills (hover to scrub, the play button plays the camera video, labeled with the camera's name) and up to four result plots |
+| `trials ui --view-only` | the same interface as an archive viewer: the routes that run a trial, stop a robot, kill ROS or quarantine a bag are not registered (they answer 404) and the pages show no control for them. `--cache-dir` keeps the poster stills out of a read-only experiments tree. A `.archive_status.json` at the top of the experiments root, when present, fills the banner with the time of the last merge and of each host's last sync. Also `TRIALS_UI_VIEW_ONLY=1`. A password is still required |
 | `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
 

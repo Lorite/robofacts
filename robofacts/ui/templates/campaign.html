@@ -94,7 +94,7 @@
 {% else %}
 <p class="small muted">No gate run logged for this campaign yet (<code>runs/preflight_gate.jsonl</code>).</p>
 {% endif %}
-{% if has_gate %}
+{% if has_gate and not view_only %}
 <form method="post" action="{{ url_for('preflight', experiment=experiment) }}" class="cmdline">
   <input type="hidden" name="host" value="{{ plan.cells[0].values.get('execution_host', '') if plan.cells else '' }}">
   <input type="hidden" name="back" value="{{ url_for('campaign_view', experiment=experiment, name=name) }}">
@@ -115,6 +115,7 @@
 </details>
 {% endif %}
 
+{% if not view_only %}
 <h2 id="run">Run</h2>
 <form method="post" action="{{ url_for('run') }}" id="runform" class="panel">
   <input type="hidden" name="experiment" value="{{ experiment }}">
@@ -170,6 +171,7 @@
   <div class="cmdline small" style="margin-top:.8rem"><span class="muted">A scratch recording (a diagnostic, never coverage) is CLI-only:</span>
     <code>{{ scratch_cli }}</code><button type="button" class="btn-small" data-copy="{{ scratch_cli }}">⧉</button></div>
 </form>
+{% endif %}
 
 <h2 id="trials">Trials of this campaign <small>run by it, or counted by its plan</small></h2>
 {% if table.all_count %}

@@ -78,6 +78,13 @@ NON_FACTOR_FIELDS = {
 }
 
 
+#: An archive view (a copy of the trial records without the heavy recordings,
+#: such as the home server's) puts this file in a bag directory to say that the
+#: recording exists on a trial host: which host, which files, how many bytes.
+#: The trial then has bag data although no .mcap is in this copy.
+RECORDINGS_ELSEWHERE = "recordings_elsewhere.json"
+
+
 @dataclass
 class Trial:
     experiment: str
@@ -101,6 +108,8 @@ class Trial:
         """
         if not self.bag_dir.is_dir():
             return False
+        if (self.bag_dir / RECORDINGS_ELSEWHERE).is_file():
+            return True
         return any(p.suffix in (".mcap", ".db3") for p in self.bag_dir.iterdir())
 
     @property

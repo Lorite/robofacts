@@ -123,7 +123,7 @@
 </details>
 {% endif %}
 
-{% if quarantinable %}
+{% if quarantinable and not view_only %}
 <h2>Quarantine</h2>
 <form method="post" action="{{ url_for('quarantine_bag', experiment=experiment, name=r.name) }}"
       onsubmit="return confirm('Move {{ r.name }} to bags_issues? It stops counting as coverage but is NOT deleted.')">

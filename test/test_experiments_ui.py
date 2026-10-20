@@ -1497,3 +1497,84 @@ def test_the_script_scrubs_stills_on_pointer_move():
     scrub = js[js.index("Stills of the declared camera (#138)"):]
     assert "pointermove" in scrub and "data-stills" in scrub and "pointerout" in scrub
     assert "img.hasAttribute('data-src')" in scrub, "no still is fetched before the cards are shown"
+
+
+# --------------------------------------------------------------------------- #
+# View-only mode: the home server's archive viewer (2026-10-20)
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def poster_cache(tmp_path_factory) -> Path:
+    return tmp_path_factory.mktemp("poster_cache")
+
+
+@pytest.fixture
+def viewer(root: Path, poster_cache: Path):
+    app = ui.create_app(root, PASSWORD, repo_root=root.parent, view_only=True,
+                        cache_dir=poster_cache)
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+ACTING_POSTS = ["/run", "/explore", "/run/r1/explore_restart", "/run/r1/explore/set",
+                "/preflight/expA", "/operator_step", "/run/r1/abort", "/run/r1/proceed",
+                "/stop", "/robot_action", "/kill_ros", "/quarantine/expA/t1"]
+
+
+def test_view_only_registers_no_route_that_changes_anything(root):
+    """The guarantee is the URL map itself, not hidden buttons: nothing but GET."""
+    app = ui.create_app(root, PASSWORD, repo_root=root.parent, view_only=True)
+    for rule in app.url_map.iter_rules():
+        assert rule.methods <= {"GET", "HEAD", "OPTIONS"}, (rule.rule, rule.methods)
+    full = ui.create_app(root, PASSWORD, repo_root=root.parent)
+    posts = {r.rule for r in full.url_map.iter_rules() if "POST" in r.methods}
+    assert len(posts) == len(ACTING_POSTS), "a new acting route must join ACTING_POSTS"
+
+
+@pytest.mark.parametrize("url", ACTING_POSTS)
+def test_view_only_answers_every_action_with_not_found(viewer, url):
+    resp = viewer.post(url, headers=auth(), data={"action": "estop", "confirm": "yes",
+                                                  "go": "execute", "experiment": "expA",
+                                                  "campaign": "c.yaml"})
+    assert resp.status_code in (404, 405), (url, resp.status_code)
+
+
+def test_view_only_pages_render_without_any_control(viewer, root):
+    name = "20261015T100000_rep01"
+    _write_bag(root, name, _meta(name))
+    _slim(root, name)
+    pages = ["/", "/e/expA", "/e/expA/c/c", f"/e/expA/t/{name}", "/e/expA/analyses",
+             "/viewers", "/journal", "/files/expA/"]
+    for url in pages:
+        resp = viewer.get(url, headers=auth())
+        assert resp.status_code == 200, (url, resp.status_code)
+        body = resp.get_data(as_text=True)
+        assert 'method="post"' not in body.lower(), url
+        for word in ("E-STOP ALL", "🧹 Kill ROS", "▶ EXECUTE", "🗑 Quarantine", "🔭 Explore"):
+            assert word not in body, (url, word)
+        assert "View only." in body, url
+
+
+def test_view_only_still_needs_the_password(viewer):
+    assert viewer.get("/").status_code == 401
+
+
+def test_the_view_only_banner_shows_the_archive_status(viewer, root):
+    (root / ui.ARCHIVE_STATUS_FILE).write_text(json.dumps({
+        "merged": "2026-10-20T03:20:00", "collisions": 2,
+        "hosts": {"laptop": {"ok": True, "finished": "2026-10-20T02:00:00"},
+                  "orin": {"ok": False, "finished": "2026-10-18T03:15:00", "note": "unreachable"}}}),
+        encoding="utf-8")
+    body = viewer.get("/", headers=auth()).get_data(as_text=True)
+    assert "Merged 2026-10-20 03:20 UTC" in body and "2 file(s) skipped" in body
+    assert "laptop: 2026-10-20 02:00" in body and "orin: 2026-10-18 03:15 ⚠" in body
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
+def test_view_only_posters_go_to_the_cache_dir_not_the_tree(viewer, root, poster_cache):
+    name = "20261015T100000_rep01"
+    _video_trial(root, name)
+    rel = f"runs/posters/results/20261015T110000_quick_look/{name}/trial_video_h264.mp4.jpg"
+    resp = viewer.get(f"/files/expA/{rel}", headers=auth())
+    assert resp.status_code == 200 and resp.get_data()[:2] == b"\xff\xd8"
+    assert (poster_cache / "expA" / rel).is_file()
+    assert not (root / "expA" / "runs" / "posters").exists(), "the archive tree stays untouched"

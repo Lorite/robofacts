@@ -265,6 +265,7 @@
    the campaign page, where the arm checkbox is. Refused experiments show why. #}
 {% macro explore_button(experiment, campaign, settings) -%}
 {% if not campaign %}<span class="muted" title="no campaign that loads">—</span>
+{% elif view_only %}<span class="muted small" title="this UI is view-only">—</span>
 {% elif not settings.allowed %}<span class="muted small" title="{{ settings.reason }}">🔭 not available</span>
 {% elif settings.simulation %}<form method="post" action="{{ url_for('explore') }}" style="display:inline" title="bring up {{ campaign }}'s first condition with a live Foxglove view; {{ settings.describe() }}">
   <input type="hidden" name="experiment" value="{{ experiment }}"><input type="hidden" name="campaign" value="{{ campaign }}">

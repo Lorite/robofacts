@@ -350,14 +350,29 @@ def video_of_poster(exp_dir: Path, poster: Path) -> Optional[Path]:
     return Path(exp_dir) / rel.parent / rel.name[:-len(".jpg")]
 
 
+def poster_store(exp_dir: Path, video: Path, cache_dir: Optional[Path] = None) -> Path:
+    """Where the poster file of ``video`` is actually written.
+
+    :func:`poster_path` without ``cache_dir``. With it (a read-only archive tree),
+    ``<cache_dir>/<experiment>/<the same path>``, while URLs keep naming the
+    poster by :func:`poster_path`.
+    """
+    logical = poster_path(exp_dir, video)
+    if cache_dir is None:
+        return logical
+    return Path(cache_dir) / Path(exp_dir).name / logical.relative_to(Path(exp_dir))
+
+
 def make_poster(exp_dir: Path, video: Path, *, at: float = POSTER_AT_S,
-                ffmpeg: str = "ffmpeg", timeout: float = 30.0) -> Optional[Path]:
+                ffmpeg: str = "ffmpeg", timeout: float = 30.0,
+                cache_dir: Optional[Path] = None) -> Optional[Path]:
     """The poster frame of ``video``, made once with ffmpeg and cached; None when it cannot be made.
 
     A poster older than its video is made again (the video was re-rendered). The
     frame is written to a temporary file and renamed, so two requests for the same
     poster never serve a half-written JPEG. No ffmpeg, a broken video, or a timeout
-    return None, and the caller shows its placeholder instead.
+    return None, and the caller shows its placeholder instead. ``cache_dir`` moves
+    the file out of the experiment (see :func:`poster_store`).
     """
     import os
     import subprocess
@@ -365,7 +380,7 @@ def make_poster(exp_dir: Path, video: Path, *, at: float = POSTER_AT_S,
     video = Path(video)
     if not video.is_file():
         return None
-    out = poster_path(exp_dir, video)
+    out = poster_store(exp_dir, video, cache_dir)
     if out.is_file() and out.stat().st_size > 0 and out.stat().st_mtime >= video.stat().st_mtime:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -621,7 +636,8 @@ def _scratch_records(root: Path, experiment: str, factors: List[str],
             if d.name.endswith("_slim"):
                 if any(d.glob("*.mcap")):
                     names.setdefault(d.name[:-len("_slim")], {})["slim"] = d
-            elif (d / "trial_metadata.json").is_file() or any(d.glob("*.mcap")):
+            elif ((d / "trial_metadata.json").is_file() or any(d.glob("*.mcap"))
+                  or (d / ti.RECORDINGS_ELSEWHERE).is_file()):
                 names.setdefault(d.name, {})["full"] = d
     out = []
     for name, found in names.items():

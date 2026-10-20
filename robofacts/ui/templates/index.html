@@ -40,6 +40,7 @@
   Start one from the nearest existing experiment: <code>trials new &lt;name&gt; --from &lt;existing&gt;</code>, then <code>trials validate experiments/&lt;name&gt;</code>.</div>
 {% endif %}
 
+{% if not view_only %}
 <h2>Rig</h2>
 {% if robots %}<p class="small">Robots the stop bar reaches (<code>common/config/robots.yaml</code>): {{ robots|join(', ') }}.</p>
 {% else %}<p class="small muted">No <code>common/config/robots.yaml</code>: the stop bar has no robot to reach.</p>{% endif %}
@@ -62,7 +63,9 @@
 {% endfor %}
 </tbody></table></div>
 {% endif %}
+{% endif %}
 
+{% if not view_only %}
 <h2>Recent actions <small><a href="{{ url_for('journal_view') }}">the whole journal</a></small></h2>
 {% if journal %}
 <div class="tablewrap"><table>
@@ -71,5 +74,6 @@
 </table></div>
 {% else %}
 <p class="muted small">Nothing yet in this session. The journal lists what this UI did (runs, stops, operator steps, quarantines) since it started; the durable record of a trial is its bag and its <code>trial_metadata.json</code>.</p>
+{% endif %}
 {% endif %}
 {% endblock %}

@@ -578,6 +578,20 @@ def test_a_metadata_only_directory_is_not_counted_as_a_trial(tmp_path):
     assert trial.status == "excluded"
 
 
+def test_an_archive_view_counts_a_recording_kept_on_a_trial_host(tmp_path):
+    """The home server's archive copies the records without the heavy .mcap and
+    says where the recording is. The same trial must keep its class there."""
+    bag = tmp_path / "bags" / "20260101T000000_rep01"
+    bag.mkdir(parents=True)
+    (bag / "trial_metadata.json").write_text("{}", encoding="utf-8")
+    (bag / ti.RECORDINGS_ELSEWHERE).write_text(
+        '{"copies": [{"host": "orin", "files": [{"name": "x_0.mcap", "bytes": 1}]}]}',
+        encoding="utf-8")
+    trial = ti.Trial(experiment="x", bag_dir=bag, metadata={})
+    assert trial.has_bag_data
+    assert trial.status != "excluded"
+
+
 def test_trial_id_is_the_bag_directory_name(root, pieces):
     """The id inside the bag must identify the bag it is inside. It used to be
     re-derived from the clock when the metadata was written, so it drifted by

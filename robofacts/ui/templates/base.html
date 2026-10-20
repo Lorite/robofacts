@@ -36,6 +36,16 @@
   <button type="button" class="themetoggle" id="themetoggle" title="theme: Auto follows the OS">◐ Auto</button>
 </header>
 
+{% if view_only %}
+<div class="archivebar">
+  <b>View only.</b> This UI runs nothing and stops nothing: it shows the archive of every trial host.
+  {%- if archive_status %} Merged {{ archive_status.merged|when }} UTC{% if archive_status.collisions %}, {{ archive_status.collisions }} file(s) skipped because two hosts disagree (<code>collisions.txt</code>){% endif %}.
+  {%- for h, st in (archive_status.hosts or {}).items() %}
+  <span class="small {{ '' if st.ok else 'warn' }}" title="{{ st.note or '' }}">{{ h }}: {{ (st.finished or 'never')|when }}{{ '' if st.ok else ' ⚠' }}</span>
+  {%- endfor %}
+  {%- else %} <span class="small muted">No archive status file.</span>{% endif %}
+</div>
+{% else %}
 <div class="stopbar pinned" id="stopbar">
   <form method="post" action="{{ url_for('stop') }}">
     <input type="hidden" name="action" value="estop">
@@ -53,6 +63,7 @@
     <b>Kill ROS</b> is for a wedged rig <i>between</i> trials, never to stop an aircraft.</span>
   <button type="button" class="pintoggle" id="pintoggle" title="pin or unpin this bar"></button>
 </div>
+{% endif %}
 
 <main>
   {% if crumbs %}
