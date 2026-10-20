@@ -145,7 +145,19 @@ class TrialRecord:
                           "videos": [rel(v) for v in a.get("videos", [])]}
                          for a in self.analyses],
             "videos": [rel(v) for v in self.videos],
+            # Where the trial card's still lives (made on first view, or by
+            # `trials records --posters`); null without a video.
+            "poster": rel(self.poster(root)) if root is not None else None,
         }
+
+    def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
+        """The cache path of the first video's poster frame (it may not exist yet), or None."""
+        if not self.videos or experiments_root is None:
+            return None
+        try:
+            return poster_path(Path(experiments_root) / self.experiment, self.videos[0])
+        except ValueError:
+            return None
 
 
 # --------------------------------------------------------------------------- #
@@ -291,14 +303,88 @@ def _videos_in(path: Path) -> List[Path]:
     return sorted(found, key=lambda p: (0 if "h264" in p.name else 1, str(p)))
 
 
+# --------------------------------------------------------------------------- #
+# Poster frames: the still a trial card shows before its video plays (#137)
+# --------------------------------------------------------------------------- #
+#: Where the poster frames live, inside the experiment: ``runs/`` is git-ignored
+#: and served read-only by the UI's files route, so no new route and no new root.
+POSTER_DIR = Path("runs") / "posters"
+#: The poster is the frame this many seconds in: the first frames of a recorded
+#: trial are usually a black or a still scene. A shorter video falls back to 0 s.
+POSTER_AT_S = 3.0
+POSTER_WIDTH = 480
+
+
+def poster_path(exp_dir: Path, video: Path) -> Path:
+    """Where the poster of ``video`` is cached: ``runs/posters/<video's path>.jpg``.
+
+    The path mirrors the video's own path inside the experiment, so two videos with
+    the same file name in different result folders never share a poster.
+    """
+    rel = Path(video).resolve().relative_to(Path(exp_dir).resolve())
+    return Path(exp_dir) / POSTER_DIR / (rel.as_posix() + ".jpg")
+
+
+def video_of_poster(exp_dir: Path, poster: Path) -> Optional[Path]:
+    """The video a poster path stands for (the inverse of :func:`poster_path`), or None."""
+    try:
+        rel = Path(poster).relative_to(Path(exp_dir) / POSTER_DIR)
+    except ValueError:
+        return None
+    if not rel.name.endswith(".mp4.jpg"):
+        return None
+    return Path(exp_dir) / rel.parent / rel.name[:-len(".jpg")]
+
+
+def make_poster(exp_dir: Path, video: Path, *, at: float = POSTER_AT_S,
+                ffmpeg: str = "ffmpeg", timeout: float = 30.0) -> Optional[Path]:
+    """The poster frame of ``video``, made once with ffmpeg and cached; None when it cannot be made.
+
+    A poster older than its video is made again (the video was re-rendered). The
+    frame is written to a temporary file and renamed, so two requests for the same
+    poster never serve a half-written JPEG. No ffmpeg, a broken video, or a timeout
+    return None, and the caller shows its placeholder instead.
+    """
+    import os
+    import subprocess
+    import tempfile
+    video = Path(video)
+    if not video.is_file():
+        return None
+    out = poster_path(exp_dir, video)
+    if out.is_file() and out.stat().st_size > 0 and out.stat().st_mtime >= video.stat().st_mtime:
+        return out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(suffix=".jpg", dir=out.parent)
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        for start in ((at, 0.0) if at > 0 else (0.0,)):
+            cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:g}",
+                   "-i", str(video), "-frames:v", "1",
+                   "-vf", f"scale='min({POSTER_WIDTH},iw)':-2", "-q:v", "5", str(tmp)]
+            try:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=timeout, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            # A seek past the end exits 0 and writes nothing: try the first frame.
+            if tmp.is_file() and tmp.stat().st_size > 0:
+                os.replace(tmp, out)
+                return out
+        return None
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def _associate_results(folders: List[Dict[str, Any]], names: Iterable[str]
                        ) -> Dict[str, List[Dict[str, Any]]]:
     """Which result folders include which trial, by name.
 
     Three ways, most explicit first: the folder's ``analysis_metadata.json``
     lists the bag; the folder has a subfolder named after the bag (a per-bag
-    analysis); or the folder is named after the bag (``<bag>_<what>``, the shape
-    of a video made by hand for one scratch recording).
+    analysis); or the folder is named after the bag (``<bag>_<what>``, or the bag's
+    name alone, the shapes of a video made by hand for one scratch recording).
     """
     known = set(names)
     out: Dict[str, List[Dict[str, Any]]] = {}
@@ -314,13 +400,14 @@ def _associate_results(folders: List[Dict[str, Any]], names: Iterable[str]
                 if sub.is_dir() and sub.name in known and sub.name not in hits:
                     hits[sub.name] = (sub, "subfolder")
             for bag in known:
-                if bag not in hits and folder.name.startswith(bag + "_"):
+                if bag not in hits and (folder.name == bag or folder.name.startswith(bag + "_")):
                     hits[bag] = (folder, "named")
         cohort = len(f["bags"]) > 1 or (not f["has_metadata"] and len(hits) > 1)
         for bag, (path, how) in hits.items():
             analysis = f["analysis"]
             if how == "named":
-                analysis = folder.name[len(bag) + 1:]
+                # results/<bag>_<what>/ names its analysis; results/<bag>/ does not.
+                analysis = folder.name[len(bag) + 1:] or ("video" if _videos_in(path) else "result")
             out.setdefault(bag, []).append({
                 "analysis": analysis, "folder": folder, "path": path,
                 "per": "cohort" if cohort and path == folder else "bag",
@@ -703,6 +790,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-scratch", action="store_true", help="leave out scratch recordings")
     ap.add_argument("--scratch-only", action="store_true", help="only scratch recordings")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the table")
+    ap.add_argument("--posters", action="store_true",
+                    help="also make the poster frames the UI's card view shows, for the "
+                         "records listed (ffmpeg, cached under runs/posters/)")
     args = ap.parse_args(argv)
     roots.resolve_root_arguments(args)
     root = roots.experiments_root(args.experiments_root)
@@ -719,6 +809,12 @@ def main(argv=None) -> int:
                            campaigns=_load_campaigns(root, args.experiment))
     records = filter_records(records, campaign=args.campaign, status=args.status, where=where,
                              kind="scratch" if args.scratch_only else None)
+    if args.posters:
+        made = [r for r in records
+                if r.videos and make_poster(root / args.experiment, r.videos[0]) is not None]
+        with_video = sum(1 for r in records if r.videos)
+        print(f"posters: {len(made)} of {with_video} trial(s) with a video under "
+              f"{root / args.experiment / POSTER_DIR}", file=sys.stderr)
     if args.json:
         print(json.dumps([r.to_dict(root) for r in records], indent=2))
     else:

@@ -184,6 +184,9 @@ def test_analyses_are_joined_by_metadata_subfolder_or_name_and_videos_stay_per_t
     (per_bag / "trial_video.mp4").write_bytes(b"v")
     (results / "t2_video").mkdir()   # a folder named <bag>_<what>, made by hand
     (results / "t2_video" / "clip.mp4").write_bytes(b"v")
+    bag(root, "t3")
+    (results / "t3").mkdir()   # a folder named exactly like the bag (2026-10-19, by hand)
+    (results / "t3" / "trial_video.mp4").write_bytes(b"v")
 
     records = by_name(trec.load_records(root, "expA"))
     t1 = {a["analysis"]: a for a in records["t1"].analyses}
@@ -196,6 +199,9 @@ def test_analyses_are_joined_by_metadata_subfolder_or_name_and_videos_stay_per_t
     named = [a for a in records["t2"].analyses if a["folder"].name == "t2_video"]
     assert named and named[0]["analysis"] == "video"
     assert [v.name for v in records["t2"].videos] == ["clip.mp4"]
+    assert [a["analysis"] for a in records["t3"].analyses] == ["video"]
+    assert [v.name for v in records["t3"].videos] == ["trial_video.mp4"], \
+        "results/<bag>/ is that trial's folder too (the card showed no video, 2026-10-20)"
 
 
 def test_filters_are_the_cli_flags(root):
@@ -279,3 +285,98 @@ def test_every_record_has_the_papers_class_or_none_for_an_attempt(root):
         "5 record(s): 1 usable, 3 excluded (1 aborted, 1 quarantined, 1 scratch), "
         "1 attempt(s) without a trial (1 blocked)")
     assert records["t_abort"].to_dict()["class"] == "excluded"
+
+
+# --------------------------------------------------------------------------- #
+# Poster frames of the card view (#137)
+# --------------------------------------------------------------------------- #
+needs_ffmpeg = pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None,
+                                  reason="poster frames need ffmpeg (present in the dev container)")
+
+
+def make_video(path: Path, seconds: float = 4.0) -> Path:
+    """A real, tiny H.264 test video, so the poster is made by the real ffmpeg."""
+    import subprocess
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                    "-i", f"testsrc=size=320x180:rate=10:duration={seconds}",
+                    "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def test_the_poster_path_mirrors_the_video_path_and_maps_back(root):
+    exp = root / "expA"
+    video = exp / "results" / "20261015T140000_video" / "t1" / "trial_video_h264.mp4"
+    poster = trec.poster_path(exp, video)
+    assert poster == exp / "runs" / "posters" / "results" / "20261015T140000_video" / "t1" \
+        / "trial_video_h264.mp4.jpg", "two videos with one file name never share a poster"
+    assert trec.video_of_poster(exp, poster) == video
+    assert trec.video_of_poster(exp, exp / "runs" / "t1.log") is None
+    assert trec.video_of_poster(exp, exp / "runs" / "posters" / "x.png.jpg") is None
+
+
+@needs_ffmpeg
+def test_a_poster_is_made_once_and_cached(root):
+    exp = root / "expA"
+    video = make_video(exp / "results" / "r" / "t1" / "v_h264.mp4")
+    poster = trec.make_poster(exp, video)
+    assert poster is not None and poster.read_bytes()[:2] == b"\xff\xd8", "a JPEG"
+    stamp = poster.stat().st_mtime_ns
+    assert trec.make_poster(exp, video, ffmpeg="/nonexistent/ffmpeg") == poster, \
+        "the cached poster is served without running ffmpeg again"
+    assert poster.stat().st_mtime_ns == stamp
+    assert not list(poster.parent.glob("tmp*")), "no temporary file is left behind"
+
+
+@needs_ffmpeg
+def test_a_video_shorter_than_the_poster_time_falls_back_to_its_first_frame(root):
+    exp = root / "expA"
+    video = make_video(exp / "results" / "r" / "short.mp4", seconds=1.0)
+    assert trec.make_poster(exp, video, at=3.0) is not None
+
+
+@needs_ffmpeg
+def test_a_re_rendered_video_gets_a_new_poster(root):
+    import os
+    exp = root / "expA"
+    video = make_video(exp / "results" / "r" / "v.mp4")
+    poster = trec.make_poster(exp, video)
+    old = poster.stat().st_mtime - 100
+    os.utime(poster, (old, old))
+    assert trec.make_poster(exp, video).stat().st_mtime > old
+
+
+def test_no_poster_without_ffmpeg_or_from_a_broken_video(root):
+    exp = root / "expA"
+    broken = exp / "results" / "r" / "broken.mp4"
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"not a video")
+    assert trec.make_poster(exp, broken, ffmpeg="/nonexistent/ffmpeg") is None
+    assert trec.make_poster(exp, exp / "results" / "r" / "missing.mp4") is None
+    if __import__("shutil").which("ffmpeg"):
+        assert trec.make_poster(exp, broken) is None
+    assert not trec.poster_path(exp, broken).exists()
+
+
+def test_the_record_names_its_poster_and_the_json_carries_it(root):
+    bag(root, "t1")
+    bag(root, "t2")
+    d = root / "expA" / "results" / "20261015T140000_video" / "t1"
+    d.mkdir(parents=True)
+    (d / "v_h264.mp4").write_bytes(b"v")
+    records = by_name(trec.load_records(root, "expA"))
+    assert records["t1"].poster(root) == trec.poster_path(root / "expA", d / "v_h264.mp4")
+    assert records["t2"].poster(root) is None, "no video, no poster"
+    as_json = {r["name"]: r for r in json.loads(json.dumps(
+        [r.to_dict(root) for r in records.values()]))}
+    assert as_json["t1"]["poster"] == "expA/runs/posters/results/20261015T140000_video/t1/v_h264.mp4.jpg"
+    assert as_json["t2"]["poster"] is None
+
+
+@needs_ffmpeg
+def test_trials_records_posters_makes_them_ahead_of_the_ui(root, capsys):
+    bag(root, "t1")
+    video = make_video(root / "expA" / "results" / "20261015T140000_video" / "t1" / "v.mp4")
+    assert trec.main(["--experiments-root", str(root), "expA", "--posters"]) == 0
+    assert trec.poster_path(root / "expA", video).is_file()
+    assert "posters: 1 of 1" in capsys.readouterr().err

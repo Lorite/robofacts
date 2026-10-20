@@ -1272,3 +1272,117 @@ def test_restart_with_another_condition_waits_for_the_old_stack(client, root, mo
     assert client.get(f"/api/run/{third}.json", headers=auth()).get_json()["explore"]["after"] == ""
     client.post(f"/run/{third}/abort", headers=auth())
     _wait_state(client, third, ("finished",))
+
+
+# --------------------------------------------------------------------------- #
+# Table or cards (#137): the same records, one card each, with the video's still
+# --------------------------------------------------------------------------- #
+def _video(path: Path, seconds: float = 4.0) -> Path:
+    import shutil
+    import subprocess
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("ffmpeg") is None:
+        path.write_bytes(b"MP4")
+        return path
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                    "-i", f"testsrc=size=320x180:rate=10:duration={seconds}",
+                    "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def _video_trial(root: Path, name: str) -> Path:
+    _write_bag(root, name, _meta(name))
+    res = root / "expA" / "results" / "20261015T110000_quick_look"
+    video = _video(res / name / "trial_video_h264.mp4")
+    meta = res / "analysis_metadata.json"
+    bags = json.loads(meta.read_text())["bags"] if meta.is_file() else []
+    meta.write_text(json.dumps({"analysis": "quick_look", "bags": bags + [name],
+                                "generated_at": "20261015T110000"}), encoding="utf-8")
+    return video
+
+
+def test_the_trials_list_offers_a_card_per_row_and_the_table_stays_the_default(client, root):
+    import re
+    _video_trial(root, "20261015T100000_rep01")
+    _write_bag(root, "20261015T090000_rep02", _meta("20261015T090000_rep02"))
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert '<div class="viewbar" data-views="triallist" hidden>' in body, \
+        "the switch appears only once app.js runs, so the page without it is the table"
+    assert re.search(r'<div class="tcards" id="triallist-cards" hidden>', body), "cards start hidden"
+    rows = re.findall(r'<tr data-trial="([^"]+)">', body)
+    cards = re.findall(r'<article class="tcard" data-trial="([^"]+)">', body)
+    assert rows == cards == ["20261015T100000_rep01", "20261015T090000_rep02"], \
+        "one card per row, in the table's order (the script keeps it on sort)"
+    poster = ("/files/expA/runs/posters/results/20261015T110000_quick_look/"
+              "20261015T100000_rep01/trial_video_h264.mp4.jpg")
+    assert f'data-src="{poster}"' in body and 'loading="lazy"' in body
+    assert f'src="{poster}"' not in body.replace(f'data-src="{poster}"', ""), \
+        "no still is fetched while the table is shown"
+    assert 'data-video="/files/expA/results/20261015T110000_quick_look/20261015T100000_rep01/trial_video_h264.mp4"' in body
+    assert '<div class="poster none"' in body, "a trial without video still has its card"
+    card = body[body.index('<article class="tcard" data-trial="20261015T100000_rep01">'):]
+    card = card[:card.index("</article>")]
+    for piece in ("/e/expA/t/20261015T100000_rep01", "b-usable", "quick_look",
+                  "/files/expA/bags/20261015T100000_rep01/trial_metadata.json"):
+        assert piece in card, piece
+
+
+def test_the_campaign_page_and_the_scratch_list_have_the_switch_too(client, root):
+    _video_trial(root, "20261015T100000_rep01")
+    scratch = root / "expA" / "bags_scratch" / "20261015T120000_scratch_x"
+    scratch.mkdir(parents=True)
+    (scratch / "x_0.mcap").write_bytes(b"x")
+    camp = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert 'data-views="triallist"' in camp and 'id="triallist-cards"' in camp
+    exp = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert 'data-views="scratchlist"' in exp and 'id="scratchlist-cards"' in exp
+    assert '<article class="tcard" data-trial="20261015T120000_scratch_x">' in exp
+
+
+def test_the_switch_is_remembered_per_viewer_and_survives_a_private_window():
+    js = (Path(ui.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
+    assert "localStorage.getItem(VIEW_KEY)" in js and "localStorage.setItem(VIEW_KEY" in js
+    view = js[js.index("table or cards (#137)"):]
+    view = view[:view.index("Click a still")]
+    assert view.count("try {") >= 2, "every storage access is guarded: a private window throws"
+    assert "get('view')" in view, "?view=cards (or table) wins, so a link can open the cards"
+    assert "trials:changed" in js, "sorting and the find box tell the cards to follow"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
+def test_the_files_route_makes_the_poster_on_first_request_and_caches_it(client, root):
+    name = "20261015T100000_rep01"
+    _video_trial(root, name)
+    url = (f"/files/expA/runs/posters/results/20261015T110000_quick_look/{name}/"
+           "trial_video_h264.mp4.jpg")
+    assert client.get(url).status_code == 401, "behind auth like every file"
+    first = client.get(url, headers=auth())
+    assert first.status_code == 200 and first.mimetype == "image/jpeg"
+    assert first.get_data()[:2] == b"\xff\xd8"
+    cached = (root / "expA" / url.removeprefix("/files/expA/"))
+    assert cached.is_file(), "cached under runs/posters/, which git ignores"
+    page = client.get(f"/e/expA/t/{name}", headers=auth()).get_data(as_text=True)
+    assert f'poster="{url}"' in page, "the trial page's player shows the same still"
+
+
+def test_a_poster_is_only_made_for_a_served_video(client, root):
+    (root / "expA" / "scripts").mkdir(parents=True)
+    (root / "expA" / "scripts" / "x.mp4").write_bytes(b"MP4")
+    for rel in ("runs/posters/results/none.mp4.jpg",          # no such video
+                "runs/posters/scripts/x.mp4.jpg",             # not a served folder
+                "runs/posters/runs/posters/a.mp4.jpg",        # a poster of a poster
+                "runs/posters/..%2f..%2fsecret.mp4.jpg"):
+        assert client.get(f"/files/expA/{rel}", headers=auth()).status_code in (403, 404), rel
+
+
+def test_no_id_is_used_twice_on_the_trials_pages(client, root):
+    """Regression (2026-10-20): the heading <h2 id="trials"> and the table id="trials"
+    shared one id, so getElementById found the heading: the find box matched nothing
+    and the card switch could not hide the table."""
+    import collections
+    import re
+    _video_trial(root, "20261015T100000_rep01")
+    for url in ("/e/expA", "/e/expA/c/c"):
+        body = client.get(url, headers=auth()).get_data(as_text=True)
+        ids = collections.Counter(re.findall(r'\sid="([^"]+)"', body))
+        assert [i for i, n in ids.items() if n > 1] == [], url

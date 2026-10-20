@@ -79,10 +79,10 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials lint` | every declaration against the rules (pytest), `--experiment <exp>` for one experiment |
 | `trials gate --checklist <json>` | a T-0 gate by hand, `--validate` and `--list` for the checklist |
 | `trials analyze <exp> <name>` | a named analysis over a cohort of usable bags |
-| `trials records <exp>` | every trial with its campaign, gate verdict, slim bag, run log, analyses and video; `--campaign`, `--status`, `--where`, `--json` |
+| `trials records <exp>` | every trial with its campaign, gate verdict, slim bag, run log, analyses and video; `--campaign`, `--status`, `--where`, `--json`, and `--posters` to make the stills of the UI's card view ahead of time |
 | `trials check <campaign>` | the expanded plan of one campaign, `--factors <exp>` the factor space |
 | `trials metadata` | audit the recorded metadata against the contract |
-| `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required, `EXPERIMENTS_UI_USER` optional: when set, the user name must match too) |
+| `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required, `EXPERIMENTS_UI_USER` optional: when set, the user name must match too). Every trials list is a table or, with the switch above it, cards with a still from each trial's video that play it in place (ffmpeg makes the stills on first view, cached in `runs/posters/`) |
 | `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
 

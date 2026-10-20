@@ -39,7 +39,8 @@
     {% for v in r.videos %}
       {% set vrel = v|relpath(experiment) %}
       {% if loop.first and 'h264' in v.name or loop.first and r.videos|length == 1 %}
-      <video controls preload="metadata" src="{{ url_for('files', experiment=experiment, rel=vrel) }}"></video>
+      {%- set p = poster_of(r) if loop.first else none %}
+      <video controls preload="metadata" src="{{ url_for('files', experiment=experiment, rel=vrel) }}"{% if p %} poster="{{ url_for('files', experiment=experiment, rel=p|relpath(experiment)) }}"{% endif %}></video>
       {% endif %}
       <p class="small"><a href="{{ url_for('files', experiment=experiment, rel=vrel) }}">🎬 {{ vrel }}</a></p>
     {% endfor %}

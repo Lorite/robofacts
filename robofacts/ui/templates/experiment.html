@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import trials_table, filter_bar, table_hint, status_badge, replay, gate_badge, explore_button with context %}
+{% from "_macros.html" import trials_table, filter_bar, table_hint, status_badge, replay, gate_badge, explore_button, view_toggle, trial_cards with context %}
 {% set section = 'experiments' %}
 {% block title %}{{ experiment }} · Trials{% endblock %}
 {% block body %}
@@ -55,12 +55,13 @@
 
 <h2 id="scratch">Scratch recordings <small>diagnostic trials run with <code>--scratch</code>: replayable, never coverage</small></h2>
 {% if scratch %}
+{{ view_toggle('scratchlist') }}
 <div class="tablewrap">
-<table class="sortable">
+<table class="sortable" id="scratchlist">
 <thead><tr><th>started</th><th>recording</th><th>class</th><th data-nosort>replay</th><th>video</th><th>analyses</th><th>gate</th><th data-nosort>files</th></tr></thead>
 <tbody>
 {% for r in scratch %}
-<tr>
+<tr data-trial="{{ r.name }}">
   <td class="nowrap" data-sort="{{ r.started }}">{{ r.started|when }}</td>
   <td class="trial"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a></td>
   <td>{{ status_badge(r.status, r.reason) }}{% if r.status in ('aborted','blocked','failed') and r.reason %}<div class="small muted" style="max-width:18rem" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:100] }}</div>{% endif %}</td>
@@ -72,6 +73,7 @@
 </tr>
 {% endfor %}
 </tbody></table></div>
+{{ trial_cards(scratch, experiment, data.layouts, 'scratchlist-cards', show_campaign=False) }}
 <p class="small muted">A scratch recording lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what Foxglove opens.</p>
 {% else %}
 <div class="empty">No scratch recording. Make one with the campaign's stack and gate, outside coverage:

@@ -190,3 +190,42 @@ td.statuscol .why { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-
                padding: .25rem .6rem; font-size: .85rem; border-radius: 1rem; }
 .topbar .themetoggle { margin-left: auto; }
 .topbar .runpill + .themetoggle { margin-left: .5rem; }
+
+/* ------------------------------------------------- table or cards (#137) -- */
+/* The hidden attribute must win over a display set by a class (.tcards is a grid). */
+[hidden] { display: none !important; }
+.viewbar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .4rem 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: .4rem; overflow: hidden; }
+.seg .segbtn { border: 0; border-radius: 0; background: var(--bg); color: var(--muted); padding: .3rem .75rem; }
+.seg .segbtn + .segbtn { border-left: 1px solid var(--line); }
+.seg .segbtn[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.cardsort { display: inline-flex; gap: .35rem; align-items: center; color: var(--muted); }
+.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .75rem; margin: .5rem 0; }
+.tcard { border: 1px solid var(--line); border-radius: .5rem; background: var(--panel); overflow: hidden;
+         display: flex; flex-direction: column; min-width: 0; }
+.tcard .poster { position: relative; display: flex; align-items: center; justify-content: center; width: 100%;
+                 aspect-ratio: 16 / 9; padding: 0; border: 0; border-radius: 0; background: #000; color: #c9ced6; overflow: hidden; }
+.tcard .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tcard .poster.none { background: var(--panel2); color: var(--muted); font-size: .85rem; }
+.tcard .poster.nostill img { display: none; }
+.tcard .poster.nostill::before { content: "no still yet"; font-size: .85rem; }
+.tcard .playmark { position: absolute; width: 3rem; height: 3rem; border-radius: 50%; background: rgba(0,0,0,.55);
+                   color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.tcard .poster:hover .playmark, .tcard .poster:focus-visible .playmark { background: var(--solid-accent); }
+.tcard .tinfo { padding: .5rem .65rem .6rem; display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.tcard .tmeta { display: flex; gap: .3rem; flex-wrap: wrap; align-items: center; font-size: .82rem; }
+.tcard .tname { font-family: var(--mono); font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere; }
+.tcard .why { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tcard .tlinks { display: flex; gap: .2rem .55rem; flex-wrap: wrap; align-items: center; }
+.tcard .tlinks br { display: none; }
+.videodlg { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem; background: var(--bg); color: var(--fg);
+            width: min(64rem, calc(100vw - 2rem)); max-width: none; }
+.videodlg::backdrop { background: rgba(0,0,0,.7); }
+.videodlg .dlghead { display: flex; gap: .5rem; align-items: center; justify-content: space-between; margin-bottom: .4rem; }
+.videodlg .dlgtitle { font-family: var(--mono); font-size: .8rem; overflow-wrap: anywhere; }
+.videodlg video { width: 100%; max-height: 80vh; display: block; }
+@media (max-width: 40rem) {
+  .tcards { grid-template-columns: 1fr; }
+  .tcard .poster.none { aspect-ratio: auto; padding: .5rem; }
+  .videodlg { width: calc(100vw - 1rem); padding: .35rem; }
+}

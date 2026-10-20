@@ -930,6 +930,7 @@ def create_app(experiments_root: Optional[Path] = None,
             "fox_link": foxglove_link, "fox_web_link": foxglove_web_link,
             "base_url": base_url(), "code_cell": code_cell,
             "where_string": where_string,
+            "poster_of": lambda record: record.poster(root()),
         }
 
     @app.template_filter("when")
@@ -1193,6 +1194,23 @@ def create_app(experiments_root: Optional[Path] = None,
             parent = str(inside.parent) if inside.parts else None
             return render_template("files.html", experiment=experiment, rel=str(inside) if inside.parts else "",
                                    listing=listing, parent=parent, crumbs=crumbs)
+        if inside.parts[:2] == trec.POSTER_DIR.parts and target.suffix == ".jpg":
+            # A trial card's poster frame (#137): made on its first request and
+            # cached, so the page itself never waits for ffmpeg. The video it stands
+            # for must be a served file of this experiment too.
+            video = trec.video_of_poster(base, target)
+            served = False
+            if video is not None:
+                try:
+                    vparts = video.resolve().relative_to(base).parts
+                    served = vparts[0] in FILE_ROOTS and vparts[:2] != trec.POSTER_DIR.parts
+                except ValueError:
+                    served = False
+            if not served or trec.make_poster(base, video) is None:
+                return error(f"no poster frame for {rel!r}", 404, crumbs)
+            resp = send_file(target, mimetype="image/jpeg", conditional=True)
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
         if not target.is_file():
             return error(f"no file {rel!r} in {experiment}", 404, crumbs)
         if target.suffix in RECORDING_SUFFIXES:
