@@ -657,3 +657,40 @@ def test_the_runner_hook_never_raises(root, monkeypatch, capsys):
     declare_camera(root, CAMERA_YAML + "  after_trial: false\n")
     tm.make_after_trial(slim)
     assert capsys.readouterr().out == ""
+
+
+def test_the_first_alternative_a_bag_records_wins_with_its_own_label(root, monkeypatch):
+    declare_camera(root, """
+camera:
+  label: drone camera
+  stills: 2
+  video: false
+  topic:
+    - {topic: /cam/overlay/compressed, label: detector overlay}
+    - /cam/image_raw
+""")
+    spec = tm.load_camera(root / "expA")
+    assert spec.alternatives == (("/cam/overlay/compressed", "detector overlay"),
+                                 ("/cam/image_raw", "drone camera"))
+    assert (spec.topic, spec.label) == ("/cam/overlay/compressed", "detector overlay")
+    full = bag(root, "t1", slim=True)
+    slim = root / "expA" / "bags_slim" / "t1_slim"
+    bag_metadata(slim, topic="/cam/image_raw")
+    bag_metadata(full, topic="/cam/overlay/compressed", msg_type="sensor_msgs/msg/CompressedImage")
+    assert tm.find_source([slim, full], spec)[2:] == ("/cam/overlay/compressed", "detector overlay"), \
+        "the declared order wins over the slim copy"
+    bag_metadata(full, topic="/other")
+    source, _info, topic, label = tm.find_source([slim, full], spec)
+    assert (source, topic, label) == (slim, "/cam/image_raw", "drone camera")
+    monkeypatch.setattr(tm, "_read_frames", lambda s, t: (mono_frame(9) for _ in range(40)))
+    if __import__("importlib").util.find_spec("cv2") is not None:
+        result = tm.make(root / "expA", "t1", [slim, full], spec)
+        assert result["topic"] == "/cam/image_raw" and result["label"] == "drone camera"
+        assert by_name(trec.load_records(root, "expA"))["t1"].camera_label == "drone camera"
+
+
+@pytest.mark.parametrize("topic", ["[relative/x]", "[{topic: /a, colour: red}]", "[]"])
+def test_a_broken_alternative_is_refused(root, topic):
+    declare_camera(root, f"camera: {{topic: {topic}}}\n")
+    with pytest.raises(tm.MediaConfigError):
+        tm.load_camera(root / "expA")

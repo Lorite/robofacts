@@ -13,6 +13,15 @@ wants its trial cards filled declares that camera once, in
       video: true                      # also an H.264 mp4 of the whole topic
       after_trial: true                # the runner makes them right after the slim copy
 
+``topic`` may also be a list of alternatives, the first one a bag records wins:
+a name, or ``{topic, label}`` when an alternative needs its own label (a camera
+that streams raw frames or JPEG, a detector overlay or the plain camera)::
+
+    camera:
+      topic:
+        - {topic: /markerless_position_node/debug/overlay/compressed, label: detector overlay}
+        - {topic: /spot/camera/hand/compressed, label: hand camera}
+
 No topic lives in the code: an experiment without the file has no stills, and the
 UI falls back to the spectator video's poster or to a plot of the trial.
 
@@ -59,12 +68,21 @@ class MediaConfigError(ValueError):
 
 @dataclass(frozen=True)
 class CameraSpec:
-    """The one camera topic an experiment shows on its trial cards."""
+    """The one camera an experiment shows on its trial cards.
+
+    ``topic`` and ``label`` are the first alternative, ``alternatives`` all of them
+    as (topic, label) in the declared order (just the first when there is one).
+    """
     topic: str
     label: str = "camera"
     stills: int = 8
     video: bool = True
     after_trial: bool = True
+    alternatives: Tuple[Tuple[str, str], ...] = ()
+
+    def __post_init__(self):
+        if not self.alternatives:
+            object.__setattr__(self, "alternatives", ((self.topic, self.label),))
 
 
 def load_camera(exp_dir: Path) -> Optional[CameraSpec]:
@@ -77,7 +95,7 @@ def load_camera(exp_dir: Path) -> Optional[CameraSpec]:
     except (OSError, yaml.YAMLError) as exc:
         raise MediaConfigError(f"{path}: does not load ({exc})") from exc
     camera = raw.get("camera") if isinstance(raw, dict) else None
-    if not isinstance(camera, dict) or not str(camera.get("topic") or "").startswith("/"):
+    if not isinstance(camera, dict) or not camera.get("topic"):
         raise MediaConfigError(f"{path}: needs camera.topic, an absolute topic name")
     unknown = sorted(set(camera) - set(CAMERA_KEYS))
     if unknown:
@@ -86,9 +104,25 @@ def load_camera(exp_dir: Path) -> Optional[CameraSpec]:
     stills = camera.get("stills", 8)
     if not isinstance(stills, int) or isinstance(stills, bool) or not 0 <= stills <= MAX_STILLS:
         raise MediaConfigError(f"{path}: camera.stills must be a whole number from 0 to {MAX_STILLS}")
-    return CameraSpec(topic=str(camera["topic"]), label=str(camera.get("label") or "camera"),
+    label = str(camera.get("label") or "camera")
+    alternatives = []
+    for item in camera["topic"] if isinstance(camera["topic"], list) else [camera["topic"]]:
+        if isinstance(item, dict):
+            extra = sorted(set(item) - {"topic", "label"})
+            if extra:
+                raise MediaConfigError(f"{path}: a camera.topic alternative has unknown key(s) "
+                                       f"{', '.join(extra)}; the known ones are topic, label")
+            topic, alt_label = item.get("topic"), str(item.get("label") or label)
+        else:
+            topic, alt_label = item, label
+        if not str(topic or "").startswith("/"):
+            raise MediaConfigError(f"{path}: needs camera.topic, an absolute topic name "
+                                   f"(or a list of them), got {topic!r}")
+        alternatives.append((str(topic), alt_label))
+    return CameraSpec(topic=alternatives[0][0], label=alternatives[0][1],
                       stills=stills, video=bool(camera.get("video", True)),
-                      after_trial=bool(camera.get("after_trial", True)))
+                      after_trial=bool(camera.get("after_trial", True)),
+                      alternatives=tuple(alternatives))
 
 
 def load_camera_or_none(exp_dir: Path) -> Optional[CameraSpec]:
@@ -151,10 +185,26 @@ def source_bag(candidates: Iterable[Optional[Path]], topic: str
     return None, None
 
 
-def is_current(exp_dir: Path, trial: str, spec: CameraSpec, source: Path) -> bool:
+def find_source(candidates: Iterable[Optional[Path]], spec: CameraSpec
+                ) -> Tuple[Optional[Path], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+    """(bag, topic info, topic, label) of the first alternative that a candidate bag records.
+
+    The alternatives are tried in their declared order, and for each the bags in the
+    caller's order (slim copy first): the declared order says which picture is wanted.
+    """
+    candidates = list(candidates)
+    for topic, label in spec.alternatives:
+        bag, info = source_bag(candidates, topic)
+        if bag is not None:
+            return bag, info, topic, label
+    return None, None, None, None
+
+
+def is_current(exp_dir: Path, trial: str, spec: CameraSpec, source: Path,
+               topic: Optional[str] = None) -> bool:
     """Whether the cache was made from this source with this spec and is not older than the bag."""
     _stills, video, info = cached(exp_dir, trial)
-    if not info or info.get("topic") != spec.topic or info.get("stills_wanted") != spec.stills:
+    if not info or info.get("topic") != (topic or spec.topic) or info.get("stills_wanted") != spec.stills:
         return False
     if spec.video and video is None and not info.get("video_error"):
         return False
@@ -285,10 +335,10 @@ def make(exp_dir: Path, trial: str, candidates: Iterable[Optional[Path]], spec: 
     """
     import cv2
     exp_dir = Path(exp_dir)
-    source, info = source_bag(candidates, spec.topic)
+    source, info, topic, label = find_source(candidates, spec)
     if source is None:
         return None
-    if not force and is_current(exp_dir, trial, spec, source):
+    if not force and is_current(exp_dir, trial, spec, source, topic):
         return cached(exp_dir, trial)[2]
     folder = media_dir(exp_dir, trial)
     folder.parent.mkdir(parents=True, exist_ok=True)
@@ -305,7 +355,7 @@ def make(exp_dir: Path, trial: str, candidates: Iterable[Optional[Path]], spec: 
     frames = decoded = 0
     size = None
     try:
-        for index, msg in enumerate(_read_frames(source, spec.topic)):
+        for index, msg in enumerate(_read_frames(source, topic)):
             frames += 1
             if index not in wanted and not want_video:
                 continue
@@ -334,7 +384,7 @@ def make(exp_dir: Path, trial: str, candidates: Iterable[Optional[Path]], spec: 
         elif want_video:
             video_error = "no frame could be decoded"
         result = {
-            "trial": trial, "topic": spec.topic, "label": spec.label, "type": info["type"],
+            "trial": trial, "topic": topic, "label": label, "type": info["type"],
             "source": str(source.relative_to(exp_dir)) if source.is_relative_to(exp_dir)
             else str(source),
             "frames": frames, "decoded": decoded, "fps": fps,
@@ -374,10 +424,10 @@ def make_after_trial(slim_dir: Optional[Path], bag_dir: Optional[Path] = None) -
         trial = slim_dir.name[:-len("_slim")] if slim_dir.name.endswith("_slim") else slim_dir.name
         result = make(exp_dir, trial, [slim_dir, bag_dir], spec)
         if result is None:
-            print(f"[media] {spec.topic} is not in the bag: no stills")
+            print(f"[media] {', '.join(t for t, _ in spec.alternatives)} not in the bag: no stills")
         else:
             print(f"[media] {len(result['stills'])} still(s)"
-                  f"{' and a ' + spec.label + ' video' if result.get('video') else ''}"
+                  f"{' and a ' + result['label'] + ' video' if result.get('video') else ''}"
                   f" in {result['seconds']} s under {MEDIA_DIR / trial}")
     except Exception as exc:  # noqa: BLE001 - never lose a finished trial
         print(f"[media] skipped ({exc})")

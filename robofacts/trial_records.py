@@ -819,11 +819,11 @@ def make_stills(root: Path, experiment: str, records: List[TrialRecord], *,
     for r in records:
         if r.bag_dir is None and r.slim_dir is None:
             continue
-        source, _info = tm.source_bag([r.slim_dir, r.bag_dir], camera.topic)
+        source, _info, topic, _label = tm.find_source([r.slim_dir, r.bag_dir], camera)
         if source is None:
             without += 1
             continue
-        if not force and tm.is_current(exp_dir, r.name, camera, source):
+        if not force and tm.is_current(exp_dir, r.name, camera, source, topic):
             kept += 1
             continue
         try:
@@ -837,7 +837,7 @@ def make_stills(root: Path, experiment: str, records: List[TrialRecord], *,
               f"{', video' if result.get('video') else ''}"
               f"{' (video: ' + result['video_error'] + ')' if result.get('video_error') else ''}"
               f" from {result['source']} in {result['seconds']} s", file=sys.stderr, flush=True)
-    print(f"stills ({camera.topic}): made {made}, already current {kept}, failed {failed}, "
+    print(f"stills ({', '.join(t for t, _ in camera.alternatives)}): made {made}, already current {kept}, failed {failed}, "
           f"{without} trial(s) whose bag does not record it, under {exp_dir / tm.MEDIA_DIR}",
           file=sys.stderr)
     return 0
