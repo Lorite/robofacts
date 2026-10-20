@@ -422,3 +422,72 @@ def test_the_gate_also_receives_the_resolved_launch_arguments(root):
     tr.run_trial(trial, factors, config, root / "expE" / "bags", gate=Gate(), dry_run=False,
                  hooks=Hooks().hooks(), slim=False, pause_before_action=False)
     assert seen["arg_symmetric_ns"] == "true" and seen["layout"] == "sym"
+
+
+# --------------------------------------------------------------------------- #
+# The step trace and the failure report (2026-10-20, after ASPIRE's traces)
+# --------------------------------------------------------------------------- #
+class FailingAction(Hooks):
+    """The action exits 3 with a traceback-like tail, every other command passes."""
+
+    def _fg(self, cmd, target, *, cwd, check=True):
+        if "fly" in " ".join(cmd):
+            self.foreground.append(cmd)
+            out = "\n".join(f"line {i}" for i in range(20)) + "\nRuntimeError: arming refused"
+            return SimpleNamespace(returncode=3, stdout=out)
+        return super()._fg(cmd, target, cwd=cwd, check=check)
+
+
+def _run(root, level, hooks):
+    factors = cs.load_factors("expE", root)
+    config = tr.RunnerConfig.load("expE", root)
+    trial = cs.TrialSpec("expE", {"execution_host": "laptop", "gate": level,
+                                  "fault": "a"}, [], 1)
+    return tr.run_trial(trial, factors, config, root / "expE" / "bags", gate=ModalGate(),
+                        dry_run=False, hooks=hooks.hooks(), slim=False,
+                        pause_before_action=False, campaign_name="ablation")
+
+
+def test_the_ledger_line_carries_a_step_trace(root):
+    _run(root, "off", Hooks())
+    (ran,) = _ledger(root)
+    steps = {s["step"]: s for s in ran["trace"]}
+    assert [s["kind"] for s in ran["trace"]][:3] == ["setup", "launch", "gate"]
+    assert steps["setup:inject"]["ok"] and steps["setup:inject"]["rc"] == 0
+    assert "output_tail" not in steps["setup:inject"], "a passing step keeps no output"
+    # The shadow gate said NO-GO and let the trial run: failing, but not blocking.
+    assert steps["gate"]["ok"] is False and steps["gate"]["blocking"] is False
+    assert steps["gate"]["note"].startswith("NO-GO (shadow)")
+    assert steps["action"]["ok"] and "duration_s" in steps["action"]
+
+
+def test_a_trial_that_ran_gets_no_failure_report(root):
+    _run(root, "off", Hooks())
+    assert not list((root / "expE" / "runs").glob("*.failure.md"))
+    assert tr.failure_report({"status": "ran", "aborted": False}) is None
+
+
+def test_a_failed_action_gets_a_report_that_names_it_first(root):
+    result = _run(root, "off", FailingAction())
+    assert result.status == "failed"
+    (row,) = _ledger(root)
+    action = next(s for s in row["trace"] if s["step"] == "action")
+    assert action["rc"] == 3 and len(action["output_tail"]) == tr.TRACE_TAIL_LINES
+    (report,) = (root / "expE" / "runs").glob("*.failure.md")
+    assert report.name == f"{row['trial_label']}.failure.md"
+    text = report.read_text()
+    first = text.split("## First failing step")[1].split("##")[0]
+    assert "**action** (action)" in first and "rc = 3" in first
+    assert "RuntimeError: arming refused" in first
+    assert "gate (gate), did not block" in text, "the shadow NO-GO is listed, not blamed"
+    assert f"runs/{row['trial_label']}.log" in text and "## Findings" in text
+
+
+def test_a_blocked_attempt_gets_a_report_that_names_the_gate(root):
+    result = _run(root, "on", Hooks())
+    assert result.status == "blocked"
+    (row,) = _ledger(root)
+    assert [s["step"] for s in row["trace"]][-1] == "gate"
+    text = (root / "expE" / "runs" / f"{row['trial_label']}.failure.md").read_text()
+    assert "**gate** (gate)" in text and "NO-GO: topic_rate" in text
+    assert "preflight_gate.jsonl" in text

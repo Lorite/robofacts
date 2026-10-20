@@ -102,6 +102,7 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 | campaign | which factors to sweep, which to fix, how many repetitions | `campaigns/<name>.yaml` |
 | trial | one run of one cell: a recording (a ROS 2 bag) and a metadata record | `bags/<trial>/` with `trial_metadata.json` |
 | attempt | a started trial, whether the gate refused it or not | a line of `runs/attempts.jsonl`, the ledger |
+| step trace, failure report | what each step of an attempt ran, how long, how it ended and a failing step's output tail; for an attempt that did not run, its first failing step, the evidence and empty findings | `trace` in the ledger line; `runs/<trial>.failure.md` |
 | gate | machine checks and operator confirmations, run seconds before every trial (the T-0 gate) | `config/preflight_checklist.json`, `scripts/preflight.sh`, `trials gate`; every verdict in `runs/preflight_gate.jsonl`, the gate log |
 | verify steps | checks on the recording after the trial; a failure aborts it | `verify_steps:` in `runner.yaml` or in a campaign |
 | class | usable (counts), unverified (breaks the contract) or excluded (aborted, quarantined, no data) | `Trial.status` in `trial_index`; `trials records` adds the reason of an excluded trial and the outcome of an attempt that left no trial (blocked, failed, interrupted) |

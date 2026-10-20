@@ -947,6 +947,35 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         _ctx.setdefault("wall", {})[stage] = datetime.now(timezone.utc).isoformat(
             timespec="milliseconds")
 
+    trace: List[Dict[str, Any]] = _ctx.setdefault("trace", [])
+
+    def trace_step(name: str, kind: str, *, ok: bool, since: Optional[float] = None,
+             rc: Optional[int] = None, output: str = "", note: str = "",
+             blocking: bool = True) -> None:
+        """One record of the step trace, for the ledger and the failure report.
+
+        The idea is ASPIRE's (Lu et al. 2026, arXiv 2607.00272), whose agent finds
+        a failing program step from a per-call trace: what ran, when, how long, how
+        it ended, and the evidence of a failure. Only a failing step keeps its
+        output tail, so a passing trial costs a few short lines in the ledger.
+        """
+        now = time.monotonic()
+        record: Dict[str, Any] = {"step": name, "kind": kind, "ok": ok,
+                                  "t_s": round((since if since is not None else now)
+                                               - _t_start, 2)}
+        if since is not None:
+            record["duration_s"] = round(now - since, 2)
+        if rc is not None:
+            record["rc"] = rc
+        if note:
+            record["note"] = note[:500]
+        if not ok and not blocking:
+            record["blocking"] = False   # recorded, but the trial went on
+        lines = (output or "").strip().splitlines()
+        if not ok and lines:
+            record["output_tail"] = lines[-TRACE_TAIL_LINES:]
+        trace.append(record)
+
     mark("start")
     target = config.remote_target(trial.host(factors))
     hooks = hooks or ProcessHooks.default()
@@ -1208,9 +1237,13 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # a flight whose rig was never actually configured.
         for name, cmd, required in setup_cmds:
             print(f"[setup] {name}")
+            _t_step = time.monotonic()
             completed = hooks.run_foreground(cmd, target, cwd=cwd, check=False)
             rc = getattr(completed, "returncode", 0)
             mark(f"setup:{name}")
+            trace_step(f"setup:{name}", "setup", ok=rc == 0, since=_t_step, rc=rc,
+                 output=getattr(completed, "stdout", "") or "", blocking=required,
+                 note="" if rc == 0 or required else "optional, the trial continued")
             if rc != 0 and required:
                 raise RunnerError(f"setup step {name!r} failed (rc={rc})")
             if rc != 0:
@@ -1221,6 +1254,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 launch_cmd, target, cwd=cwd, label="stack",
                 quiet_sink=log_file if quiet_children else None)
             mark("launch")
+            trace_step("launch", "launch", ok=True, note="started in the background")
             time.sleep(config.settle_s)
             mark("settled")
         for name, cmd in aux_cmds:
@@ -1229,6 +1263,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 cmd, target, cwd=cwd, label=name,
                 quiet_sink=log_file if quiet_children else None)
             mark(f"aux:{name}")
+            trace_step(f"aux:{name}", "aux", ok=True, note="started in the background")
         # T-0 GATE, here and not earlier: most of what it checks — camera
         # frames, mocap continuity, EKF convergence, battery, e-stop
         # reachability — only exists once the stack is UP. Running it before
@@ -1255,6 +1290,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             if factor_checks:
                 trial_gate = trial_gate.with_extra(factor_checks)
             mark("gate_start")
+            _t_gate = time.monotonic()
             try:
                 # The trial's factor values go with it: a gate that cannot see what
                 # kind of trial this is has to be either too strict or too lax.
@@ -1270,6 +1306,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 last = getattr(trial_gate, "last_result", None)
                 if last is not None and hasattr(last, "as_metadata"):
                     _ctx["gate"] = last.as_metadata()
+                trace_step("gate", "gate", ok=False, since=_t_gate, output=str(exc),
+                     note=_gate_note(_ctx.get("gate")))
                 print(_c("31;1", "[runner] GATE NO-GO - not recording, the action does not run"))
                 announce("gate_blocked")
                 _note_gate_refusal(bag_dir, _ctx.get("gate"), str(exc))
@@ -1277,6 +1315,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             mark("gate_done")
             if hasattr(gate_result, "as_metadata"):
                 _ctx["gate"] = gate_result.as_metadata()
+            # A shadow gate (a gate factor's "off" level) records a NO-GO and lets the
+            # trial run: a failing, non-blocking step in the trace.
+            trace_step("gate", "gate", ok=(_ctx.get("gate") or {}).get("verdict") != "NO-GO",
+                 since=_t_gate, note=_gate_note(_ctx.get("gate")), blocking=False)
 
         # CALIBRATION MEASUREMENTS (factor_checks: calibration, scratch only):
         # the stack is up and the gate passed, so the condition a factor check
@@ -1340,6 +1382,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 record_cmd, target, cwd=cwd, label="recorder",
                 quiet_sink=log_file if quiet_children else None)
             mark("record")
+            trace_step("record", "record", ok=True, note="recorder started in the background")
             time.sleep(1.0)
             announce("record_start")
         # The campaign's cue timeline, t0 = now: the recorder has had its 1 s to
@@ -1350,6 +1393,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             _ctx["voice_timeline"] = voice.CueTimeline(vplan["cues"]).start()
         if action_cmd:
             mark("action_start")
+            _t_action = time.monotonic()
             timed_out = {"yes": False}
             timer = None
             if config.action_timeout_s:
@@ -1386,6 +1430,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                     detail += f" (action_timeout_s={config.action_timeout_s:.0f} expired)"
                 if tail:
                     detail += "\n" + "\n".join(tail[-8:])
+            trace_step("action", "action", ok=rc == 0, since=_t_action, rc=rc,
+                 output=getattr(completed, "stdout", "") or "",
+                 note=(f"action_timeout_s={config.action_timeout_s:.0f} expired"
+                       if timed_out["yes"] else ""))
         elif not steps["action"] and (steps["launch"] or steps["record"]):
             # Manual window: the operator flies/works by hand while the stack
             # (and recorder, if enabled) stay up for a bounded time. With
@@ -1394,6 +1442,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             time.sleep(hold_s)
     except Exception as exc:  # noqa: BLE001
         detail = f"execution error: {exc}"
+        trace_step("execution error", "error", ok=False, output=str(exc),
+             note=type(exc).__name__)
     finally:
         timeline = _ctx.pop("voice_timeline", None)
         if timeline is not None:
@@ -1424,6 +1474,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 hooks.stop_process(proc, target, name=name, kind=kind)
             except Exception as exc:  # noqa: BLE001
                 detail = f"{detail} | stop {name} failed: {exc}".strip(" |")
+                trace_step(f"stop:{name}", "teardown", ok=False, output=str(exc))
             if name == "record":
                 time.sleep(config.stop_grace_s)
                 announce("record_end")
@@ -1490,6 +1541,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     if not recorded:
         detail = f"{detail} | no bag recorded: {why}".strip(" |") if detail else \
             f"no bag recorded: {why}"
+        trace_step("bag check", "record", ok=False, output=str(why),
+             note="the recorder left no data, so no trial_metadata.json was written")
         print(f"[runner] TRIAL FAILED - {detail}")
         print("[runner] no trial_metadata.json written: an empty bag must never "
               "count as coverage")
@@ -1514,6 +1567,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         completed = hooks.run_foreground(cmd, target, cwd=cwd, check=False)
         rc = getattr(completed, "returncode", 0)
         print(f"[verify] {step['name']} rc={rc} in {time.monotonic() - _t_step:.1f} s")
+        trace_step(f"verify:{step['name']}", "verify", ok=rc == 0, since=_t_step, rc=rc,
+                   output=getattr(completed, "stdout", "") or "")
         if rc != 0:
             tail = (getattr(completed, "stdout", "") or "").strip().splitlines()
             reason = f"verify step {step['name']!r} failed (rc={rc}) — the trial did not happen"
@@ -1637,6 +1692,119 @@ def export_rosout(bag_dir: Path, target, hooks: "ProcessHooks", project_root: Pa
 #: The attempt ledger's file name, under experiments/<name>/runs/.
 ATTEMPT_LEDGER_NAME = "attempts.jsonl"
 
+#: Output lines a failing step keeps in the step trace (2026-10-20).
+TRACE_TAIL_LINES = 12
+
+
+def _gate_note(gate: Optional[Dict[str, Any]]) -> str:
+    """The gate's verdict, mode and failed checks in one line, for the step trace."""
+    if not isinstance(gate, dict):
+        return ""
+    from .trial_records import _failed_names
+    note = f"{gate.get('verdict') or '?'} ({gate.get('mode') or 'binding'})"
+    failed = _failed_names(gate.get("failed_checks"))
+    if failed:
+        note += ": " + "; ".join(failed)
+    return note
+
+
+def failure_report(record: Dict[str, Any]) -> Optional[str]:
+    """The failure report of one attempt, as markdown, or None for a trial that ran.
+
+    Written for whoever debugs the attempt next, a person or a coding agent: the
+    first failing step with its evidence, the step trace, and where the rest of
+    the evidence is. It ends with empty findings headings in the shape of
+    ASPIRE's findings file (Lu et al. 2026), so a diagnosis is written down next
+    to the attempt it explains. Pure, so tests can assert its content.
+    """
+    status = record.get("status")
+    if status == "ran" and not record.get("aborted"):
+        return None
+    label = record.get("trial_label") or "unlabeled attempt"
+    trace = [s for s in record.get("trace") or [] if isinstance(s, dict)]
+    failing = [s for s in trace if not s.get("ok")]
+    first = next((s for s in failing if s.get("blocking", True)), None)
+    values = ", ".join(f"{k}={v}" for k, v in sorted((record.get("values") or {}).items()))
+    lines = [
+        f"# Failure report: {label}",
+        "",
+        f"Written by the trial runner at {record.get('ts_end')}. Read this first, then the "
+        f"evidence it points to. Fill in the findings at the end once the cause is known.",
+        "",
+        f"- **Status:** {status}" + (" (aborted)" if record.get("aborted") else ""),
+        f"- **Experiment:** {record.get('experiment')}, campaign {record.get('campaign')}, "
+        f"host {record.get('host')}",
+        f"- **Condition:** {values or 'all defaults'}, repetition {record.get('repetition')}",
+    ]
+    if record.get("abort_reason"):
+        lines.append(f"- **Abort reason:** {record['abort_reason'].splitlines()[0]}")
+    lines += ["", "## First failing step", ""]
+    if first is None:
+        lines.append("No step in the trace failed. The runner's detail says:")
+        lines += ["", "```text", (record.get("detail") or "(no detail)").strip(), "```"]
+    else:
+        where = f"at t = {first.get('t_s')} s"
+        if "duration_s" in first:
+            where += f", after {first['duration_s']} s"
+        lines.append(f"**{first.get('step')}** ({first.get('kind')}), {where}"
+                     + (f", rc = {first['rc']}" if "rc" in first else "") + ".")
+        if first.get("note"):
+            lines += ["", first["note"]]
+        if first.get("output_tail"):
+            lines += ["", "```text", *first["output_tail"], "```"]
+    others = [s for s in failing if s is not first]
+    if others:
+        lines += ["", "Other failing steps:"]
+        lines += [f"- {s.get('step')} ({s.get('kind')})"
+                  + (", did not block" if s.get("blocking") is False else "")
+                  + (f": {s['note']}" if s.get("note") else "") for s in others]
+    gate = record.get("gate")
+    if isinstance(gate, dict):
+        lines += ["", "## T-0 gate", "", f"- {_gate_note(gate)}"]
+    if trace:
+        lines += ["", "## Step trace", "", "| t (s) | step | kind | rc | result |",
+                  "|---|---|---|---|---|"]
+        for s in trace:
+            result = "ok" if s.get("ok") else ("failed, did not block"
+                                               if s.get("blocking") is False else "FAILED")
+            lines.append(f"| {s.get('t_s')} | {s.get('step')} | {s.get('kind')} | "
+                         f"{s.get('rc', '')} | {result} |")
+    bag = record.get("bag_dir")
+    lines += ["", "## Evidence", "",
+              f"- Run log: `runs/{label}.log`",
+              f"- Ledger line: `runs/{ATTEMPT_LEDGER_NAME}`, ts_start {record.get('ts_start')}"]
+    if bag:
+        lines += [f"- Bag: `{bag}`, with `trial_metadata.json` and `rosout.txt` beside it "
+                  f"(on the host that recorded it)"]
+    elif status == "blocked":
+        lines += [f"- Gate log: `runs/preflight_gate.jsonl`, and `bags/{label}/gate_refusal.json` "
+                  f"if the aux launches left a directory"]
+    lines += ["", "## Findings", "",
+              "- **Symptom:**",
+              "- **Root cause:**",
+              "- **Fix:**",
+              "- **Verified by:**",
+              "- **Lesson to keep** (a gate check, a verify step, a lint rule or a note):",
+              ""]
+    return "\n".join(lines)
+
+
+def write_failure_report(record: Dict[str, Any], runs_dir: Path) -> Optional[Path]:
+    """Write ``runs/<label>.failure.md`` for an attempt that did not run. Never raises."""
+    try:
+        text = failure_report(record)
+        if text is None:
+            return None
+        label = record.get("trial_label") or f"attempt_{record.get('ts_start', '')}"
+        path = Path(runs_dir) / f"{label}.failure.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        print(f"[runner] failure report: {path}")
+        return path
+    except Exception as exc:  # noqa: BLE001 - a report never outranks a trial
+        print(f"[runner] failure report not written ({exc}) - continuing")
+        return None
+
 
 def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: RunnerConfig,
               bags_dir: Path, *, campaign_name: Optional[str] = None,
@@ -1687,6 +1855,7 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
             handle.write(json.dumps(record) + "\n")
     except Exception as exc:  # noqa: BLE001 - a ledger line never outranks a trial
         print(f"[runner] attempt ledger not written ({exc}) - continuing")
+    write_failure_report(record, bags_dir.parent / "runs")
     return result
 
 
@@ -1761,6 +1930,7 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
+        write_failure_report(record, path.parent)
         return written
     except Exception as exc:  # noqa: BLE001 - never mask the interrupt
         print(f"[runner] interrupted trial not finalized ({exc})")
@@ -1801,6 +1971,9 @@ def attempt_record(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                                            "factor_checks")}
                  if isinstance(gate, dict) else None),
         "timings_s": dict(ctx.get("marks") or {}),
+        # What ran, how long, how it ended, and a failing step's output tail
+        # (2026-10-20). The failure report is written from this.
+        "trace": list(ctx.get("trace") or []),
         "action_window": window,
         # What the laptop was asked to say, and when (2026-10-13). "sent" means
         # a datagram left the runner, not that anyone heard it.
