@@ -134,26 +134,43 @@ class Plan:
 # Matching
 # --------------------------------------------------------------------------- #
 def _match_keys(campaign: cs.Campaign) -> Tuple[Dict[str, str], List[str]]:
-    """factor name -> metadata key, plus the factors that cannot be matched."""
+    """factor name -> metadata key, plus the factors that cannot be matched.
+
+    Every factor of the experiment that has a metadata key takes part, not only
+    the ones the campaign names: a factor the campaign leaves out is planned at
+    its default, so a trial recorded at another level of it is not this
+    campaign's trial (2026-10-21: ``combined_map`` names no ``world`` and claimed
+    the industrial-world flights). Unmatchable factors are reported only when
+    the campaign names them, since only then could they narrow the match."""
     mapping: Dict[str, str] = {}
     unmatchable: List[str] = []
     considered = set(campaign.sweep) | set(campaign.fixed)
-    for name in sorted(considered):
-        factor = campaign.factors.get(name)
-        if factor is None:
-            continue
+    for name in sorted(campaign.factors):
+        factor = campaign.factors[name]
         if factor.metadata_key:
             mapping[name] = factor.metadata_key
-        else:
+        elif name in considered:
             # Not fatal: it just cannot narrow the match, so the cell will match
             # more broadly. Reported so the number is never quietly optimistic.
             unmatchable.append(name)
     return mapping, unmatchable
 
 
+def _recorded_level(factor: cs.Factor, recorded: Any, named: bool) -> str:
+    """A trial's level of one factor. A key the trial does not record means it
+    predates the factor: for a factor the campaign does not name that is the
+    factor's default, unless an alias maps the missing key elsewhere (``None``),
+    as when a factor's default changed after older trials were recorded."""
+    level = factor.canonical(recorded)
+    if recorded is None and not named and level == "None":
+        return str(factor.default)
+    return level
+
+
 def build_plan(campaign: cs.Campaign, trials: List[ti.Trial],
                include_unverified: bool = False) -> Plan:
     mapping, unmatchable = _match_keys(campaign)
+    named = set(campaign.sweep) | set(campaign.fixed)
 
     # Bucket the recorded trials by the campaign's own match key, once.
     buckets: Dict[Tuple[Tuple[str, str], ...], List[ti.Trial]] = defaultdict(list)
@@ -161,7 +178,7 @@ def build_plan(campaign: cs.Campaign, trials: List[ti.Trial],
         if trial.experiment != campaign.experiment:
             continue
         key = tuple(sorted(
-            (name, campaign.factors[name].canonical(trial.metadata.get(meta_key)))
+            (name, _recorded_level(campaign.factors[name], trial.metadata.get(meta_key), name in named))
             for name, meta_key in mapping.items()))
         buckets[key].append(trial)
 

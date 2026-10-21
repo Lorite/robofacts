@@ -141,12 +141,52 @@ def test_include_unverified_counts_them(root):
 # --------------------------------------------------------------------------- #
 # Matching semantics
 # --------------------------------------------------------------------------- #
-def test_only_swept_and_fixed_factors_narrow_the_match(root):
-    """A factor the campaign never mentions must not narrow the match — if you
-    said nothing about it, you do not care about it."""
+def test_a_factor_without_a_metadata_key_never_narrows_the_match(root):
+    """A factor the trial cannot record (no metadata key) cannot narrow the match."""
     add_trial(root, "expA", "t1", dict(GOOD, trajectory="hover", knob="b"))
     hover = next(c for c in plan_for(root).cells if c.values["trajectory"] == "hover")
     assert hover.usable == 1
+
+
+def test_an_unnamed_factor_at_another_level_does_not_match(root):
+    """A campaign plans every factor it does not name at its default, so a trial
+    recorded at another level of it is not the campaign's (2026-10-21: a campaign
+    that named no ``world`` claimed the flights of another world)."""
+    add_trial(root, "expA", "t1", dict(GOOD, execution_host="laptop", trajectory="hover"))
+    assert plan_for(root).covered == 0
+
+
+def test_an_unnamed_factor_the_trial_never_recorded_counts_as_its_default(root):
+    """A trial recorded before a factor existed has no key for it: it ran at the default."""
+    contract = root / "common" / "config" / "trial_metadata_core.yaml"
+    contract.write_text(contract.read_text(encoding="utf-8").replace(
+        "execution_host: {required: true", "execution_host: {required: false"), encoding="utf-8")
+    meta = dict(GOOD, trajectory="hover")
+    meta.pop("execution_host", None)
+    add_trial(root, "expA", "t1", meta)
+    hover = next(c for c in plan_for(root).cells if c.values["trajectory"] == "hover")
+    assert hover.usable == 1
+
+
+def test_a_none_alias_keeps_older_trials_apart_when_a_default_changes(root):
+    """A factor whose default changed maps the missing key of older trials to the
+    old level with a ``None`` alias, so they stop counting for the new default."""
+    core = (root / "common" / "config" / "factors.yaml").read_text(encoding="utf-8")
+    core = core.replace("""    maps_to: {kind: launch_arg, name: trajectory}
+""", """    maps_to: {kind: launch_arg, name: trajectory}
+  ceiling:
+    levels: ["off", "on"]
+    default: "on"
+    metadata_key: ceiling
+    aliases:
+      "off": ["None"]
+    maps_to: {kind: launch_arg, name: ceiling}
+""")
+    (root / "common" / "config" / "factors.yaml").write_text(core, encoding="utf-8")
+    add_trial(root, "expA", "old", dict(GOOD, trajectory="hover"))
+    add_trial(root, "expA", "new", dict(GOOD, trajectory="hover", ceiling="on"))
+    hover = next(c for c in plan_for(root).cells if c.values["trajectory"] == "hover")
+    assert hover.usable == 1 and hover.matched_bags == ["new"]
 
 
 def test_a_fixed_factor_does_narrow_the_match(root):
