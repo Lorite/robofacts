@@ -1601,3 +1601,21 @@ def test_view_only_serves_a_heavy_recording_behind_the_password(viewer, client, 
     listing = viewer.get(f"/files/expA/bags/{name}/", headers=auth()).get_data(as_text=True)
     assert f'href="/files/expA/bags/{name}/{name}_0.mcap"' in listing
     assert client.get(url, headers=auth()).status_code == 403
+
+
+def test_card_first_plots_puts_the_trials_plots_before_its_camera(client, root):
+    """card: {first: plots} in trial_media.yaml (2026-10-22): a mapping experiment's
+    cards open on the map, the camera one tag away; a trial without a plot keeps its camera."""
+    import re
+    name, other = "20261015T100000_rep01", "20261015T090000_rep02"
+    _camera_trial(root, name)
+    _camera_trial(root, other)
+    media = root / "expA" / "config" / "trial_media.yaml"
+    media.write_text(media.read_text(encoding="utf-8") + "card: {first: plots}\n", encoding="utf-8")
+    folder = root / "expA" / "results" / "20261015T120000_maps" / name
+    folder.mkdir(parents=True)
+    (folder / "maps.png").write_bytes(b"\x89PNG")
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    tags = re.findall(r'class="ptab" data-layer="(\d)" aria-pressed="(\w+)"[^>]*>([^<]+)</button>', _card(body, name))
+    assert tags == [("0", "true", "📈 maps"), ("1", "false", "📷 drone camera")]
+    assert 'class="ptab"' not in _card(body, other) and "📷 drone camera" in _card(body, other)

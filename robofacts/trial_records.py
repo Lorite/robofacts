@@ -112,6 +112,8 @@ class TrialRecord:
     #: The trial's result plots, one tag each on its card: its own first, then plots of
     #: cohorts that include it ({path, analysis, cohort}, cohort = that cohort's size).
     plots: List[Dict[str, Any]] = field(default_factory=list)
+    #: The experiment's trial_media.yaml asks for the plots first on the card.
+    plots_first: bool = False
 
     @property
     def slim_name(self) -> Optional[str]:
@@ -162,6 +164,7 @@ class TrialRecord:
             "stills": [rel(p) for p in self.stills],
             "camera_video": rel(self.camera_video), "camera_label": self.camera_label,
             "plots": [{**p, "path": rel(p["path"])} for p in self.plots],
+            "plots_first": self.plots_first,
         }
 
     def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
@@ -599,11 +602,13 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
         record.analyses = entries
         record.videos = [v for e in entries for v in e["videos"]]
     camera = tm.load_camera_or_none(exp_dir)
+    plots_first = tm.load_card_first(exp_dir) == "plots"
     for record in records:
         record.stills, record.camera_video, info = tm.cached(exp_dir, record.name)
         if record.stills or record.camera_video:
             record.camera_label = str(info.get("label") or (camera.label if camera else "camera"))
         record.plots = tm.plots_of(record.analyses, record.name)
+        record.plots_first = plots_first and bool(record.plots)
 
     if campaigns:
         from . import campaign_plan as cp

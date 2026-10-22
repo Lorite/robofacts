@@ -58,7 +58,8 @@
     box has one layer per source, in this order: the trial video (its poster frame,
     trial_records.make_poster), the declared camera (trial_media, #138: its stills,
     scrubbed on pointer move, and its video, labeled with the camera's name), and
-    the trial's result plots. With more than one, a row of tags on top switches the
+    the trial's result plots (first instead, when trial_media.yaml says card: {first:
+    plots}). With more than one, a row of tags on top switches the
     layer. Every image URL sits in data-src: nothing is fetched while the table is
     shown, and a hidden layer's image only when its tag is picked. -#}
 <div class="tcards" id="{{ cards_id }}" hidden>
@@ -67,7 +68,9 @@
   {%- set layers = [] %}
   {%- if r.videos %}{% set _ = layers.append({'kind': 'video', 'tag': '🎬 trial video'}) %}{% endif %}
   {%- if r.stills or r.camera_video %}{% set _ = layers.append({'kind': 'camera', 'tag': '📷 ' ~ r.camera_label}) %}{% endif %}
-  {%- for pl in r.plots %}{% set _ = layers.append({'kind': 'plot', 'plot': pl, 'tag': '📈 ' ~ ('cohort · ' if pl.cohort and 'cohort' not in pl.name else '') ~ pl.name}) %}{% endfor %}
+  {%- set plot_layers = [] %}
+  {%- for pl in r.plots %}{% set _ = plot_layers.append({'kind': 'plot', 'plot': pl, 'tag': '📈 ' ~ ('cohort · ' if pl.cohort and 'cohort' not in pl.name else '') ~ pl.name}) %}{% endfor %}
+  {%- if r.plots_first %}{% set layers = plot_layers + layers %}{% else %}{% set layers = layers + plot_layers %}{% endif %}
   {%- set still_urls = [] %}{% for s in r.stills %}{% set _ = still_urls.append(url_for('files', experiment=experiment, rel=s|relpath(experiment))) %}{% endfor %}
   <div class="pbox">
   {%- if layers|length > 1 %}

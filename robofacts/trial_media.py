@@ -25,6 +25,13 @@ that streams raw frames or JPEG, a detector overlay or the plain camera)::
 No topic lives in the code: an experiment without the file has no stills, and the
 UI falls back to the spectator video's poster or to a plot of the trial.
 
+A card shows its pictures in this order: the trial video, the camera, then the
+result plots. An experiment whose result is a plot (a map, a trajectory) puts
+the plots first, when a trial has one (2026-10-22)::
+
+    card:
+      first: plots      # or camera, the default
+
 The pictures are a cache, never data: ``runs/camera/<trial>/`` (``runs/`` is
 git-ignored and already served read-only by the UI) holds ``still_01.jpg`` and
 up, ``camera.mp4`` and ``camera.json``, which records what was read (the bag, the
@@ -123,6 +130,22 @@ def load_camera(exp_dir: Path) -> Optional[CameraSpec]:
                       stills=stills, video=bool(camera.get("video", True)),
                       after_trial=bool(camera.get("after_trial", True)),
                       alternatives=tuple(alternatives))
+
+
+CARD_FIRST = ("camera", "plots")
+
+
+def load_card_first(exp_dir: Path) -> str:
+    """What a trial card shows first: ``camera`` (the trial video, then the
+    camera, then the plots) or ``plots``. A missing or broken file means camera."""
+    path = Path(exp_dir) / MEDIA_CONFIG
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return "camera"
+    card = raw.get("card") if isinstance(raw, dict) else None
+    first = str((card or {}).get("first", "camera")) if isinstance(card, dict) else "camera"
+    return first if first in CARD_FIRST else "camera"
 
 
 def load_camera_or_none(exp_dir: Path) -> Optional[CameraSpec]:
