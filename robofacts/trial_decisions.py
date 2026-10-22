@@ -98,6 +98,11 @@ def apply_corrections(metadata: Dict[str, Any], corrections: Sequence[Dict[str, 
     out = dict(metadata)
     for entry in corrections:
         out[str(entry["field"])] = entry["corrected"]
+        # The runner's summary of the plan follows the corrected level too.
+        factor, nondefault = entry.get("factor"), out.get("non_default_factors")
+        if factor and "default" in entry and isinstance(nondefault, list):
+            rest = [f for f in nondefault if f != factor]
+            out["non_default_factors"] = rest + ([factor] if str(entry["corrected"]) != str(entry["default"]) else [])
     return out
 
 
@@ -396,7 +401,8 @@ def amend(experiments_root: Path, experiment: str, trial: str, assignments: Sequ
             raise DecisionError(f"{dirs.name} already has {key}={level}"
                                 f"{' (corrected before)' if key in {e['field'] for e in entries} else ''}")
         entry = {"field": key, "factor": factor.name, "recorded": recorded.get(key),
-                 "corrected": level, "date": date, "by": by or default_by(), "reason": reason}
+                 "corrected": level, "default": factor.default, "date": date,
+                 "by": by or default_by(), "reason": reason}
         if key in current and current.get(key) != recorded.get(key):
             entry["replaces"] = current.get(key)
         new.append(entry)

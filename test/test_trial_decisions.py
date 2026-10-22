@@ -71,7 +71,8 @@ def root(tmp_path: Path) -> Path:
 
 
 def bag(root: Path, name: str, folder: str = "bags", slim: bool = True, **metadata) -> Path:
-    meta = {"trial_id": name, "execution_host": "laptop", "aborted": False, "route": "block_loop"}
+    meta = {"trial_id": name, "execution_host": "laptop", "aborted": False, "route": "block_loop",
+            "non_default_factors": []}
     meta.update(metadata)
     d = root / "expA" / folder / name
     d.mkdir(parents=True)
@@ -223,6 +224,7 @@ def test_the_index_the_plan_and_the_records_read_the_corrected_value(root):
     td.amend(root, "expA", "t1", ["route=building_loop"], reason="video", now=LATER)
     t = trials(root)["t1"]
     assert t.metadata["route"] == "building_loop" and t.recorded["route"] == "block_loop"
+    assert t.metadata["non_default_factors"] == ["route"] and t.recorded["non_default_factors"] == []
     assert t.status == "usable" and len(t.corrections) == 1
 
     campaign = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
