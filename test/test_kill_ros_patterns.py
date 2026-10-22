@@ -3,6 +3,7 @@ an orphaned OpenVINS run_subscribe_msckf from ~/ov_ws survived the clean slate).
 import os
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -11,11 +12,34 @@ from robofacts import tools
 pytestmark = pytest.mark.skipif(shutil.which("ps") is None, reason="needs ps")
 
 
+def _spawn(argv0, env=None):
+    """A sleeping process whose command line starts with `argv0`, once it does.
+
+    Popen returns after the fork, before bash has run `exec -a`, so a scan right away can
+    see `bash -c ...` instead (2026-10-22: two failures on CI, green on the rerun). Wait
+    for the new command line before the test scans for it.
+    """
+    proc = subprocess.Popen(["bash", "-c", f"exec -a {argv0} sleep 30"], env=env)
+    cmdline = f"/proc/{proc.pid}/cmdline"
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with open(cmdline, "rb") as f:
+                if f.read().split(b"\0", 1)[0] == argv0.encode():
+                    return proc
+        except FileNotFoundError:
+            break
+        time.sleep(0.01)
+    proc.kill()
+    proc.wait()
+    pytest.fail(f"the process never took the command line {argv0}")
+
+
 @pytest.mark.parametrize("argv0", ["/home/vscode/ov_ws/install/ov_msckf/lib/ov_msckf/run_subscribe_msckf",
                                    "/workspaces/x/ros2_ws/install/pkg/lib/pkg/node"])
 def test_dry_run_lists_a_node_of_an_overlay_workspace(argv0):
     # exec -a gives the sleeping process the command line a workspace node would have.
-    proc = subprocess.Popen(["bash", "-c", f"exec -a {argv0} sleep 30"])
+    proc = _spawn(argv0)
     try:
         out = subprocess.run(["bash", str(tools.path("kill_ros.sh")), "--dry-run", "--verbose"],
                              capture_output=True, text=True, timeout=30)
@@ -28,7 +52,7 @@ def test_dry_run_lists_a_node_of_an_overlay_workspace(argv0):
 
 
 def test_dry_run_leaves_an_unrelated_process_alone():
-    proc = subprocess.Popen(["bash", "-c", "exec -a /home/vscode/notes/install_guide sleep 30"])
+    proc = _spawn("/home/vscode/notes/install_guide")
     try:
         out = subprocess.run(["bash", str(tools.path("kill_ros.sh")), "--dry-run", "--verbose"],
                              capture_output=True, text=True, timeout=30)
@@ -50,7 +74,7 @@ def _fake_node(domain):
     env = {k: v for k, v in os.environ.items() if k != "ROS_DOMAIN_ID"}
     if domain is not None:
         env["ROS_DOMAIN_ID"] = str(domain)
-    return subprocess.Popen(["bash", "-c", f"exec -a {FAKE_NODE} sleep 30"], env=env)
+    return _spawn(FAKE_NODE, env=env)
 
 
 def _kill_ros(caller_domain, *args):
