@@ -1619,3 +1619,31 @@ def test_card_first_plots_puts_the_trials_plots_before_its_camera(client, root):
     tags = re.findall(r'class="ptab" data-layer="(\d)" aria-pressed="(\w+)"[^>]*>([^<]+)</button>', _card(body, name))
     assert tags == [("0", "true", "📈 maps"), ("1", "false", "📷 drone camera")]
     assert 'class="ptab"' not in _card(body, other) and "📷 drone camera" in _card(body, other)
+
+
+def test_campaign_sections_fold_where_they_do_not_matter(client, viewer, root):
+    """The run checklist folds on the archive, and the T-0 gate history folds into
+    one summary line, opened only by a NO-GO on an operating UI (2026-10-22)."""
+    import re
+    runs = root / "expA" / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "preflight_gate.jsonl").write_text(
+        json.dumps({"ts": "2026-10-22T10:00:00", "campaign": "c", "verdict": "GO"}) + "\n"
+        + json.dumps({"ts": "2026-10-22T11:00:00", "campaign": "c", "verdict": "NO-GO",
+                      "failed": [{"check": "watchdog_health"}]}) + "\n", encoding="utf-8")
+    full = client.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    view = viewer.get("/e/expA/c/c", headers=auth()).get_data(as_text=True)
+    assert re.search(r'<details class="section" id="before" open>', full)
+    assert re.search(r'<details class="section" id="before">', view)
+    assert re.search(r'<details class="section" id="gate" open>', full), "a NO-GO opens it"
+    assert re.search(r'<details class="section" id="gate">', view)
+    assert "2 verdict(s) logged: 1 GO, 1 NO-GO" in full and "b-NO-GO\">NO-GO</span>" in full
+
+
+def test_every_page_gets_an_outline_on_wide_screens():
+    """app.js builds the left outline from a page's h2/h3 headings, app.css shows it
+    only on wide screens (2026-10-22)."""
+    static = Path(ui.__file__).parent / "static"
+    js, css = (static / "app.js").read_text(encoding="utf-8"), (static / "app.css").read_text(encoding="utf-8")
+    assert "page outline (2026-10-22)" in js and "querySelectorAll('h2, h3')" in js
+    assert "has-outline" in css and "@media (min-width: 75rem)" in css

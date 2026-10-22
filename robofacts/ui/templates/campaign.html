@@ -49,7 +49,9 @@
 <div class="empty">This campaign has no cell: its sweep is empty.</div>
 {% endif %}
 
-<h2>Before you run</h2>
+{#- On the archive (view only) nothing runs, so the run checklist starts collapsed. -#}
+<details class="section" id="before"{{ '' if view_only else ' open' }}>
+<summary><h2>Before you run</h2></summary>
 <div class="cols">
   <div class="panel">
     <h3>👤 You do this, before EXECUTE</h3>
@@ -77,8 +79,13 @@
     {% else %}<p class="small bad">No sequence: the runner configuration does not load.</p>{% endif %}
   </div>
 </div>
+</details>
 
-<h3 id="gate">T-0 gate <small>its recent verdicts for this campaign</small></h3>
+{%- set last = gates.recent[0] if gates.recent else none %}
+<details class="section" id="gate"{{ ' open' if last and last.verdict != 'GO' and not view_only }}>
+<summary><h3>T-0 gate <small>
+  {%- if last %} {{ gates.total }} verdict(s) logged: {% for v, n in gates.counts|dictsort %}{{ n }} {{ v }}{{ ', ' if not loop.last }}{% endfor %} · last <span class="badge b-{{ 'GO' if last.verdict == 'GO' else 'NO-GO' }}">{{ last.verdict }}</span> {{ last.ts|when }}
+  {%- else %} no verdict logged yet{% endif %}</small></h3></summary>
 {% if gates.recent %}
 <div class="tablewrap"><table>
 <thead><tr><th>time (UTC)</th><th>trial</th><th>verdict</th><th>failed checks</th><th>host</th></tr></thead>
@@ -114,6 +121,7 @@
   {% if checklist_vars %}<p class="small">variables: {% for k, v in checklist_vars.items() %}<code>{{ k }}={{ v }}</code> {% endfor %}</p>{% endif %}
 </details>
 {% endif %}
+</details>
 
 {% if not view_only %}
 <h2 id="run">Run</h2>

@@ -296,3 +296,51 @@
     btn.disabled = false; btn.textContent = '▶ run';
   });
 })();
+
+// ------------------------------------------------- page outline (2026-10-22) --
+// A list of the page's sections on the left, from its h2 and h3 headings, with the
+// current one marked while scrolling. Wide screens only (app.css); a page with
+// fewer than three headings gets none. A heading inside a closed section opens it.
+(() => {
+  const main = document.querySelector('main');
+  if (!main) return;
+  const heads = [...main.querySelectorAll('h2, h3')].filter((h) => !h.closest('.tcard, .panel table, .outline'));
+  if (heads.length < 3) return;
+  // A heading without an id gets one from its text, unique on the page.
+  const idFor = (text) => {
+    const base = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'section';
+    let id = base, n = 1;
+    while (document.getElementById(id)) id = `${base}-${++n}`;
+    return id;
+  };
+  const nav = document.createElement('nav');
+  nav.className = 'outline';
+  nav.setAttribute('aria-label', 'on this page');
+  nav.innerHTML = '<div class="otitle">On this page</div>';
+  const links = [];
+  heads.forEach((h) => {
+    const target = h.closest('details.section') && h.parentElement.tagName === 'SUMMARY' ? h.closest('details.section') : h;
+    if (!target.id) target.id = idFor(h.textContent);
+    const label = (h.firstChild && h.firstChild.nodeType === 3 ? h.firstChild.textContent : h.textContent).trim();
+    const a = document.createElement('a');
+    a.href = `#${target.id}`;
+    a.textContent = label || h.textContent.trim();
+    a.className = h.tagName === 'H3' ? 'l3' : 'l2';
+    a.addEventListener('click', () => { const d = target.closest('details'); if (d) d.open = true; });
+    nav.appendChild(a);
+    links.push([target, a]);
+  });
+  document.body.appendChild(nav);
+  document.body.classList.add('has-outline');
+  if ('IntersectionObserver' in window) {
+    const mark = () => {
+      let current = links[0];
+      for (const pair of links) { if (pair[0].getBoundingClientRect().top < 120) current = pair; }
+      links.forEach(([, a]) => a.classList.toggle('here', a === current[1]));
+    };
+    const io = new IntersectionObserver(mark, { rootMargin: '0px 0px -60% 0px' });
+    links.forEach(([t]) => io.observe(t));
+    window.addEventListener('scroll', mark, { passive: true });
+    mark();
+  }
+})();

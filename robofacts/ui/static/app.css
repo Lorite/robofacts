@@ -252,3 +252,24 @@ td.statuscol .why { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-
   .tcard .poster.none { aspect-ratio: auto; padding: .5rem; }
   .videodlg { width: calc(100vw - 1rem); padding: .35rem; }
 }
+
+/* Collapsible page sections (2026-10-22): the heading is the summary. */
+details.section > summary { list-style: none; cursor: pointer; }
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary > h2, details.section > summary > h3 { display: inline; }
+details.section > summary::before { content: "▸ "; color: var(--muted); }
+details.section[open] > summary::before { content: "▾ "; }
+details.section > summary { margin: 1rem 0 .4rem; }
+
+/* The page outline (2026-10-22): built by app.js from the page's headings, on wide screens only. */
+.outline { display: none; }
+@media (min-width: 75rem) {
+  body.has-outline .outline { display: block; position: fixed; top: 4.5rem; left: .75rem; width: 12rem;
+    max-height: calc(100vh - 6rem); overflow-y: auto; font-size: .82rem; line-height: 1.35; }
+  body.has-outline main, body.has-outline footer { margin-left: max(13.5rem, calc((100vw - 92rem) / 2)); }
+  .outline .otitle { color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-size: .7rem; margin-bottom: .3rem; }
+  .outline a { display: block; color: var(--muted); padding: .15rem .4rem; border-left: 2px solid transparent; text-decoration: none; }
+  .outline a.l3 { padding-left: 1.1rem; font-size: .78rem; }
+  .outline a:hover { color: var(--accent); }
+  .outline a.here { color: var(--fg); border-left-color: var(--accent); }
+}

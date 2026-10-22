@@ -4,6 +4,7 @@
 
 The framework of the robotics lab's experiments, extracted into an installable ROS 2 package (`ament_python`, also `pip install`).
 
+- Every page has an outline of its sections on the left on wide screens, built from its headings, with the current section marked (2026-10-22). On a campaign page the T-0 gate history folds into one summary line (counts and the last verdict), opened by a NO-GO on an operating UI, and in `--view-only` mode the "Before you run" checklist starts folded, so the trial cards come right after the plan.
 - `card: {first: plots}` in `config/trial_media.yaml` puts a trial's result plots before its camera and video on its card (2026-10-22), for an experiment whose result is a plot, such as a map. A trial without a plot keeps its camera first.
 - The trial lists open as cards by default (2026-10-22): `?view=` in the URL still wins, then the viewer's last choice, then the cards. Without JavaScript the table remains the whole page.
 - A run marker (2026-10-22, `run_marker.py`): while the runner executes a trial or a campaign (never a dry run), `<experiments root>/.robofacts_trial_running.json` exists, with the host, the process, the experiment, the campaign and the start time. A campaign holds one marker across all its trials, so the gaps between flights are covered too. Tools that move data off a trial host wait while it exists, so a copy never competes with a flight for the network. A marker older than 12 hours is a leftover of a killed runner and counts as absent.
