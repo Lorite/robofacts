@@ -40,12 +40,12 @@
 {%- endmacro -%}
 
 {%- macro view_toggle(table_id) -%}
-{#- Table or cards (#137). Hidden until app.js shows it: without the script the
-    table is the whole page, as before. -#}
+{#- Table or cards (#137), the cards by default since 2026-10-22. Hidden until
+    app.js shows it: without the script the table is the whole page. -#}
 <div class="viewbar" data-views="{{ table_id }}" hidden>
   <span class="seg" role="group" aria-label="show the trials as">
-    <button type="button" class="segbtn" data-view="table" aria-pressed="true" title="one row per trial (the default)">☰ table</button>
-    <button type="button" class="segbtn" data-view="cards" aria-pressed="false" title="one card per trial with a still from its video: click the still to play it here">▦ cards</button>
+    <button type="button" class="segbtn" data-view="table" aria-pressed="true" title="one row per trial">☰ table</button>
+    <button type="button" class="segbtn" data-view="cards" aria-pressed="false" title="one card per trial with a still from its video: click the still to play it here (the default)">▦ cards</button>
   </span>
   <label class="cardsort small" hidden>sort the cards
     <select data-sort-for="{{ table_id }}"><option value="">as listed</option></select></label>

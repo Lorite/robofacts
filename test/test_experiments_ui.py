@@ -1353,6 +1353,7 @@ def test_the_switch_is_remembered_per_viewer_and_survives_a_private_window():
     view = view[:view.index("Click a still")]
     assert view.count("try {") >= 2, "every storage access is guarded: a private window throws"
     assert "get('view')" in view, "?view=cards (or table) wins, so a link can open the cards"
+    assert "storedView() || 'cards'" in view, "without a choice the cards show (2026-10-22)"
     assert "trials:changed" in js, "sorting and the find box tell the cards to follow"
 
 

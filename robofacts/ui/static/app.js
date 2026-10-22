@@ -104,7 +104,7 @@
   // the table's order and narrowed by the same find box, so switching views keeps
   // the filters (in the URL) and the sort (on the table). The choice is a per-viewer
   // preference: ?view=cards or ?view=table wins and is remembered, else the last
-  // choice, else the table.
+  // choice, else the cards (the default since 2026-10-22, Alejandro).
   const VIEW_KEY = 'trialsView';
   const storedView = () => { try { return localStorage.getItem(VIEW_KEY); } catch (e) { return null; } };
   const urlView = new URLSearchParams(location.search).get('view');
@@ -163,7 +163,7 @@
     table.addEventListener('trials:changed', () => { if (!cards.hidden) sync(); });
     buttons.forEach((b) => b.addEventListener('click', () => show(b.dataset.view, true)));
     bar.hidden = false;
-    show(urlView || storedView() || 'table', Boolean(urlView));
+    show(urlView || storedView() || 'cards', Boolean(urlView));
   });
 
   // Stills of the declared camera (#138): moving the pointer across a card's picture
