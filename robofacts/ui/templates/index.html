@@ -73,7 +73,7 @@
 <tbody>{% for e in journal %}<tr><td class="nowrap">{{ e.at }}</td><td>{{ e.kind }}</td><td>{{ e.summary }}</td></tr>{% endfor %}</tbody>
 </table></div>
 {% else %}
-<p class="muted small">Nothing yet in this session. The journal lists what this UI did (runs, stops, operator steps, quarantines) since it started; the durable record of a trial is its bag and its <code>trial_metadata.json</code>.</p>
+<p class="muted small">Nothing yet in this session. The journal lists what this UI did (runs, stops, operator steps, exclusions) since it started; the durable record of a trial is its bag and its <code>trial_metadata.json</code>.</p>
 {% endif %}
 {% endif %}
 {% endblock %}

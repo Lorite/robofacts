@@ -60,9 +60,11 @@ SLIM_SUFFIX = "_slim"
 # commanded_waypoints.json (2026-08-13) is the flight script's own record of
 # the commanded reference. It must survive into the slim copy: the heavy bag
 # is what gets offloaded, and the slim tree is what the laptop and the
-# analyses keep.
+# analyses keep. exclusion.json and corrections.json (2026-10-22) are a
+# person's decisions about the trial (trial_decisions.py): the slim copy must
+# count, or not count, exactly as its bag does.
 SIDECAR_NAMES = ("trial_metadata.json", "rosout.txt", "analysis_metadata.json",
-                 "commanded_waypoints.json")
+                 "commanded_waypoints.json", "exclusion.json", "corrections.json")
 PROVENANCE_NAME = "slim_provenance.json"
 RECORD_DIR_NAMES = ("bags", "bags_issues")
 

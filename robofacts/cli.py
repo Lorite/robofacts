@@ -5,6 +5,9 @@
     trials explore experiments/<exp>/campaigns/<c>.yaml   one condition's stack, live in Foxglove, never coverage
     trials index   --experiment <exp> --summary            the coverage index
     trials records <exp> [--campaign <c>] [--status <s>]   every trial with its bag, gate, analyses, video
+    trials exclude <exp> <trial> --reason ... --category c  move a trial out of coverage, with its reason
+    trials restore <exp> <trial>                           move an excluded trial back
+    trials amend   <exp> <trial> <factor>=<level> --reason  correct a recorded level, beside the metadata
     trials lint    [--experiment <exp>]                    the declarations against the rules
     trials validate <exp | campaign.yaml>                  is it ready: check, plan, gate, lint, tests, dry run
     trials gate    --checklist <path>                      the T-0 gate, by hand
@@ -50,6 +53,21 @@ def _index(argv):
 def _records(argv):
     from . import trial_records
     return trial_records.main(argv)
+
+
+def _exclude(argv):
+    from . import trial_decisions
+    return trial_decisions.main_exclude(argv)
+
+
+def _restore(argv):
+    from . import trial_decisions
+    return trial_decisions.main_restore(argv)
+
+
+def _amend(argv):
+    from . import trial_decisions
+    return trial_decisions.main_amend(argv)
 
 
 def _check(argv):
@@ -191,6 +209,11 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
                           "parameters (dry run without --execute, never coverage)"),
     "index": (_index, "the coverage index over the recorded trials"),
     "records": (_records, "every trial of an experiment with its campaign, gate, slim bag, analyses, video"),
+    "exclude": (_exclude, "move a trial out of coverage into bags_issues, with exclusion.json "
+                          "(its reason)"),
+    "restore": (_restore, "move an excluded trial back into coverage, keeping its old reason"),
+    "amend": (_amend, "correct a recorded factor level in corrections.json; "
+                      "trial_metadata.json is never edited"),
     "lint": (_lint, "check every declaration against the rules (pytest)"),
     "validate": (_validate, "is an experiment ready: check, plan, gate, lint, its tests, dry run"),
     "gate": (_gate, "run a T-0 gate checklist by hand"),

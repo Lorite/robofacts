@@ -46,6 +46,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 from . import roots
+from . import trial_decisions as td
 
 
 def __getattr__(name):
@@ -92,6 +93,17 @@ class Trial:
     metadata: Dict[str, Any]
     problems: List[str] = field(default_factory=list)
     is_issue_bag: bool = False
+    #: A person's decisions beside the bag (trial_decisions.py, 2026-10-22).
+    #: ``metadata`` is the recorded metadata with ``corrections`` applied on
+    #: top; ``recorded`` is trial_metadata.json as the runner wrote it.
+    corrections: List[Dict[str, Any]] = field(default_factory=list)
+    exclusion: Optional[Dict[str, Any]] = None
+    recorded: Optional[Dict[str, Any]] = None
+
+    @property
+    def excluded_by_hand(self) -> bool:
+        """In bags_issues*, or carries an exclusion.json: a person said it must not count."""
+        return self.is_issue_bag or self.exclusion is not None
 
     @property
     def aborted(self) -> bool:
@@ -126,7 +138,7 @@ class Trial:
         analyse, so counting it as coverage would leave a cell that can never
         be filled because it already looks full.
         """
-        if self.aborted or self.is_issue_bag or not self.has_bag_data:
+        if self.aborted or self.excluded_by_hand or not self.has_bag_data:
             return "excluded"
         # A scratch flight (trial_runner --scratch) is recorded for the
         # operator's ad-hoc question and must never count as coverage. Its home
@@ -190,6 +202,12 @@ def load_trials(experiments_root: Optional[Path] = None,
             continue
         if not isinstance(metadata, dict):
             continue
+        # A person's corrections (corrections.json, `trials amend`) apply on top
+        # of what the runner wrote, which is never edited, so every reader of
+        # Trial.metadata (the plan, the records, the UI) sees the corrected cell.
+        corrections = td.read_corrections(meta_path.parent)
+        recorded = metadata
+        metadata = td.apply_corrections(metadata, corrections)
         # Dedupe ONLY a slim copy against its own full bag. A slim copy is
         # named after its full bag plus "_slim" (slim_bag.py), so the key is the
         # experiment plus the directory name without that suffix. Keying on
@@ -218,6 +236,9 @@ def load_trials(experiments_root: Optional[Path] = None,
             # exact match let a usable-by-metadata bag in bags_issues_slim keep
             # counting as coverage (2026-07-31, the retune-quarantined cv trial).
             is_issue_bag=any(p.startswith("bags_issues") for p in meta_path.parts),
+            corrections=corrections,
+            exclusion=td.read_exclusion(meta_path.parent),
+            recorded=recorded,
         ))
     return trials
 
@@ -351,7 +372,8 @@ def render_report(trials: List[Trial], experiments_root: Path,
     out.append(f"**{len(trials)} recorded trials** — {counts['usable']} usable, "
                f"{counts['unverified']} unverified, {counts['excluded']} excluded.")
     out.append("")
-    out.append("_**usable** = satisfies the metadata contract, not aborted, not in `bags_issues/`. "
+    out.append("_**usable** = satisfies the metadata contract, not aborted, not excluded by a person "
+               "(`trials exclude`, `bags_issues/`). "
                "**unverified** = the data may be fine but the metadata does not prove it (most of "
                "these simply predate the contract). **excluded** = aborted or already triaged into "
                "`bags_issues/`. They are kept apart deliberately: a cell reading 22 bags that are "
@@ -381,6 +403,21 @@ def render_report(trials: List[Trial], experiments_root: Path,
             tally = Counter(p.split(":", 1)[0] for t in broken for p in t.problems)
             out.append(f"⚠️ {len(broken)} trial(s) violate the metadata contract — "
                        + ", ".join(f"`{k}` ×{v}" for k, v in tally.most_common(5)))
+            out.append("")
+        corrected = [t for t in subset if t.corrections]
+        if corrected:
+            out.append(f"✎ {len(corrected)} trial(s) counted with a person's correction "
+                       f"(`corrections.json`, `trials amend`):")
+            for t in corrected:
+                out.append(f"- `{t.bag_dir.name}`: "
+                           + "; ".join(td.describe_correction(e) for e in t.corrections))
+            out.append("")
+        excluded = [t for t in subset if t.exclusion is not None]
+        if excluded:
+            out.append(f"{len(excluded)} trial(s) excluded by a person (`exclusion.json`, "
+                       f"`trials exclude`):")
+            for t in excluded:
+                out.append(f"- `{t.bag_dir.name}`: {td.describe_exclusion(t.exclusion)}")
             out.append("")
     return "\n".join(out)
 

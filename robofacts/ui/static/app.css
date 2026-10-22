@@ -143,6 +143,7 @@ details > summary { cursor: pointer; padding: .2rem 0; }
 .b-aborted, .b-blocked, .b-failed, .b-interrupted, .b-NO-GO, .b-bad { background: var(--bad-bg); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .b-quarantined, .b-no-data, .b-excluded, .b-info { background: var(--info-bg); color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
 .b-scratch { background: var(--accent-bg); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.b-corrected { background: var(--warn-bg); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
 .chip { display: inline-block; font-family: var(--mono); font-size: .76rem; background: var(--panel2);
         border-radius: .3rem; padding: 0 .3rem; margin: .05rem .15rem .05rem 0; white-space: nowrap; }
 .chip.nd { color: var(--nd); }

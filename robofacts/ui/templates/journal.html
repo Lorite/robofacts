@@ -3,7 +3,7 @@
 {% block title %}Journal · Trials{% endblock %}
 {% block body %}
 <h1>Journal</h1>
-<p class="small muted">What this UI did since it started: runs, stops, operator steps, gate checks, quarantines. It lives in memory only, on purpose: the durable record of a trial is its bag, its <code>trial_metadata.json</code> and the attempt ledger (<code>runs/attempts.jsonl</code>).</p>
+<p class="small muted">What this UI did since it started: runs, stops, operator steps, gate checks, exclusions. It lives in memory only, on purpose: the durable record of a trial is its bag, its <code>trial_metadata.json</code> and the attempt ledger (<code>runs/attempts.jsonl</code>).</p>
 
 <h2>Runs</h2>
 {% if runs %}

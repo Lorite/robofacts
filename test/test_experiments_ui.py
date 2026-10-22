@@ -1003,16 +1003,51 @@ def test_the_cohort_preview_is_a_dry_run(client, root):
     assert not (root / "expA" / "results").exists(), "a preview writes nothing"
 
 
-def test_quarantine_moves_the_slim_copy_with_its_bag(client, root):
+def test_exclude_moves_the_slim_copy_with_its_bag_and_keeps_the_reason(client, root, monkeypatch):
+    """The page's form is `trials exclude`: the same move, and an exclusion.json with the reason."""
+    from robofacts import trial_decisions as td
+    monkeypatch.setattr(td, "WRITE_QUIET_S", 0)
     _write_bag(root, "t1", _meta("t1"))
     _slim(root, "t1")
-    response = client.post("/quarantine/expA/t1", headers=auth(), data={"back": "/e/expA"})
+    page = client.get("/e/expA/t/t1", headers=auth()).get_data(as_text=True)
+    assert "Exclude this trial" in page and 'name="reason"' in page
+    response = client.post("/exclude/expA/t1", headers=auth(),
+                           data={"back": "/e/expA", "reason": "DDS stalled for 40 s",
+                                 "category": "infrastructure", "by": "Alejandro"})
     assert response.status_code == 302
-    assert (root / "expA" / "bags_issues" / "t1").is_dir()
-    assert (root / "expA" / "bags_issues_slim" / "t1_slim").is_dir()
+    assert (root / "expA" / "bags_issues" / "t1" / "exclusion.json").is_file()
+    assert (root / "expA" / "bags_issues_slim" / "t1_slim" / "exclusion.json").is_file()
     assert not (root / "expA" / "bags_slim" / "t1_slim").exists()
     body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
     assert "b-quarantined" in body, "the page shows it at once, not after the cache expires"
+    assert "infrastructure: DDS stalled for 40 s" in body
+    page = client.get("/e/expA/t/t1", headers=auth()).get_data(as_text=True)
+    assert "Excluded by Alejandro" in page and "Restore this trial" in page
+    assert client.post("/restore/expA/t1", headers=auth(),
+                       data={"reason": "it was fine"}).status_code == 302
+    assert (root / "expA" / "bags" / "t1").is_dir()
+
+
+def test_exclude_without_a_reason_is_refused_and_moves_nothing(client, root, monkeypatch):
+    from robofacts import trial_decisions as td
+    monkeypatch.setattr(td, "WRITE_QUIET_S", 0)
+    _write_bag(root, "t1", _meta("t1"))
+    response = client.post("/exclude/expA/t1", headers=auth(),
+                           data={"reason": "", "category": "other"})
+    assert response.status_code == 409
+    assert (root / "expA" / "bags" / "t1").is_dir()
+
+
+def test_a_corrected_trial_shows_the_correction(client, root, monkeypatch):
+    from robofacts import trial_decisions as td
+    monkeypatch.setattr(td, "WRITE_QUIET_S", 0)
+    _write_bag(root, "t1", _meta("t1"))
+    td.amend(root, "expA", "t1", ["trajectory=circle"], reason="the video shows a circle", by="A")
+    body = client.get("/e/expA", headers=auth()).get_data(as_text=True)
+    assert "b-corrected" in body
+    page = client.get("/e/expA/t/t1", headers=auth()).get_data(as_text=True)
+    assert "Corrected by a person" in page and "the video shows a circle" in page
+    assert "<s>hover</s>" in page and "<b>circle</b>" in page
 
 
 def test_a_dry_run_of_a_covered_campaign_says_so(client, root):
@@ -1525,7 +1560,7 @@ def viewer(root: Path, poster_cache: Path):
 
 ACTING_POSTS = ["/run", "/explore", "/run/r1/explore_restart", "/run/r1/explore/set",
                 "/preflight/expA", "/operator_step", "/run/r1/abort", "/run/r1/proceed",
-                "/stop", "/robot_action", "/kill_ros", "/quarantine/expA/t1"]
+                "/stop", "/robot_action", "/kill_ros", "/exclude/expA/t1", "/restore/expA/t1"]
 
 
 def test_view_only_registers_no_route_that_changes_anything(root):

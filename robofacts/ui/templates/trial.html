@@ -9,9 +9,21 @@
   
   {% if r.counts %}<span class="small ok">counts as coverage{% if r.counts_for %} for {{ r.counts_for|join(', ') }}{% endif %}</span>
   {% else %}<span class="small muted">{{ status_meaning.get(r.status, '') }}</span>{% endif %}</p>
-{% if r.reason and r.status != 'usable' %}
+{% if r.exclusion %}
+<div class="callout warnc"><b>Excluded by {{ r.exclusion.by or 'a person' }}</b>{% if r.exclusion.date %} on {{ r.exclusion.date[:10] }}{% endif %}, category <b>{{ r.exclusion.category or 'other' }}</b> (<code>exclusion.json</code>):
+  <pre style="background:transparent;border:0;padding:0;margin:.2rem 0 0">{{ r.exclusion.reason }}</pre>
+  {% if r.exclusion.evidence %}<p class="small">Evidence: {% for e in r.exclusion.evidence %}<a href="{{ url_for('files', experiment=experiment, rel=e) }}"><code>{{ e }}</code></a>{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}</div>
+{% elif r.reason and r.status != 'usable' %}
 <div class="callout {{ 'badc' if r.status in ('aborted','blocked','failed','interrupted') else 'warnc' }}"><b>Why:</b>
   <pre style="background:transparent;border:0;padding:0;margin:.2rem 0 0">{{ r.reason }}</pre></div>
+{% endif %}
+
+{% if r.corrections %}
+<div class="callout warnc"><b>Corrected by a person</b> (<code>corrections.json</code>): the values below replace what the runner recorded, which stays unchanged in <code>trial_metadata.json</code>.
+  <div class="tablewrap"><table>
+  <thead><tr><th>field</th><th>recorded</th><th>corrected</th><th>by</th><th>date</th><th>reason</th></tr></thead>
+  <tbody>{% for c in r.corrections %}<tr><td><code>{{ c.field }}</code></td><td><s>{{ c.recorded }}</s></td><td><b>{{ c.corrected }}</b></td><td>{{ c.by }}</td><td class="nowrap">{{ (c.date or '')[:10] }}</td><td>{{ c.reason }}</td></tr>{% endfor %}</tbody>
+  </table></div></div>
 {% endif %}
 
 <div class="cols">
@@ -123,13 +135,25 @@
 </details>
 {% endif %}
 
-{% if quarantinable and not view_only %}
-<h2>Quarantine</h2>
-<form method="post" action="{{ url_for('quarantine_bag', experiment=experiment, name=r.name) }}"
+{% if excludable and not view_only %}
+<h2>Exclude</h2>
+<form method="post" action="{{ url_for('exclude_trial', experiment=experiment, name=r.name) }}"
       onsubmit="return confirm('Move {{ r.name }} to bags_issues? It stops counting as coverage but is NOT deleted.')">
   <input type="hidden" name="back" value="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">
-  <p class="small"><button type="submit">🗑 Quarantine this trial</button>
-    <span class="muted">moves the bag (and its slim copy) to <code>bags_issues*</code>: excluded from coverage, never deleted. Moving it back is a plain <code>mv</code>.</span></p>
+  <p class="small"><label>Why it must not count <textarea name="reason" rows="2" cols="70" required placeholder="one or two sentences: what went wrong and how you know"></textarea></label></p>
+  <p class="small"><label>Category <select name="category" required>{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+    <label>By <input name="by" size="14" placeholder="your name"></label></p>
+  <p class="small"><button type="submit">🗑 Exclude this trial</button>
+    <span class="muted">the same as <code>trials exclude {{ experiment }} {{ r.name }}</code>: moves the bag (and its slim copy) to <code>bags_issues*</code> with an <code>exclusion.json</code> that keeps the reason. Never deleted, and <code>trials restore</code> moves it back.</span></p>
+</form>
+{% elif restorable and not view_only %}
+<h2>Restore</h2>
+<form method="post" action="{{ url_for('restore_trial', experiment=experiment, name=r.name) }}"
+      onsubmit="return confirm('Move {{ r.name }} back into coverage?')">
+  <input type="hidden" name="back" value="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">
+  <p class="small"><label>Why it counts again <input name="reason" size="60"></label> <label>By <input name="by" size="14"></label></p>
+  <p class="small"><button type="submit">↩ Restore this trial</button>
+    <span class="muted">the same as <code>trials restore {{ experiment }} {{ r.name }}</code>: moves it back to <code>bags*</code> and keeps the old reason as <code>exclusion_restored_&lt;time&gt;.json</code>.</span></p>
 </form>
 {% endif %}
 {% endblock %}

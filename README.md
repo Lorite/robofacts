@@ -80,10 +80,13 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 | `trials gate --checklist <json>` | a T-0 gate by hand, `--validate` and `--list` for the checklist |
 | `trials analyze <exp> <name>` | a named analysis over a cohort of usable bags |
 | `trials records <exp>` | every trial with its campaign, gate verdict, slim bag, run log, analyses and video; `--campaign`, `--status`, `--where`, `--json`, `--posters` to make the stills of the UI's card view ahead of time, and `--stills` to make the stills and the camera video of the camera an experiment declares in `config/trial_media.yaml` |
+| `trials exclude <exp> <trial> --reason … --category …` | a person's decision that a trial must not count: moves the bag and its slim copy to `bags_issues*` and writes `exclusion.json` beside each (date, by, category, reason, evidence). Categories: `infrastructure`, `operator`, `estimator`, `other`. Refuses a trial the runner may still be writing. On a trial already in `bags_issues/` without a reason, it adds the reason in place |
+| `trials restore <exp> <trial>` | the reverse: moves an excluded trial back and keeps its `exclusion.json` as `exclusion_restored_<time>.json` |
+| `trials amend <exp> <trial> <factor>=<level> --reason …` | a person's correction of a recorded level (an operator level is not checked at T-0, so the recorded value follows the plan): an entry in `corrections.json` beside the bag and its slim copy, with the recorded value, the corrected one, who, when and why. The level must be one the experiment declares. `trial_metadata.json` is never edited |
 | `trials check <campaign>` | the expanded plan of one campaign, `--factors <exp>` the factor space |
 | `trials metadata` | audit the recorded metadata against the contract |
 | `trials ui` | the web interface (`EXPERIMENTS_UI_PASSWORD` required, `EXPERIMENTS_UI_USER` optional: when set, the user name must match too). Every trials list is a table or, with the switch above it, cards with a still from each trial's video that play it in place (ffmpeg makes the stills on first view, cached in `runs/posters/`). A card's picture can show several things, one tag each above it: the trial video, the declared camera's stills (hover to scrub, the play button plays the camera video, labeled with the camera's name) and up to four result plots |
-| `trials ui --view-only` | the same interface as an archive viewer: the routes that run a trial, stop a robot, kill ROS or quarantine a bag are not registered (they answer 404) and the pages show no control for them. `--cache-dir` keeps the poster stills out of a read-only experiments tree. A `.archive_status.json` at the top of the experiments root, when present, fills the banner with the time of the last merge and of each host's last sync. Also `TRIALS_UI_VIEW_ONLY=1`. A password is still required |
+| `trials ui --view-only` | the same interface as an archive viewer: the routes that run a trial, stop a robot, kill ROS, or exclude or restore a trial are not registered (they answer 404) and the pages show no control for them. `--cache-dir` keeps the poster stills out of a read-only experiments tree. A `.archive_status.json` at the top of the experiments root, when present, fills the banner with the time of the last merge and of each host's last sync. Also `TRIALS_UI_VIEW_ONLY=1`. A password is still required |
 | `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
 
@@ -106,6 +109,7 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 | gate | machine checks and operator confirmations, run seconds before every trial (the T-0 gate) | `config/preflight_checklist.json`, `scripts/preflight.sh`, `trials gate`; every verdict in `runs/preflight_gate.jsonl`, the gate log |
 | verify steps | checks on the recording after the trial; a failure aborts it | `verify_steps:` in `runner.yaml` or in a campaign |
 | class | usable (counts), unverified (breaks the contract) or excluded (aborted, quarantined, no data) | `Trial.status` in `trial_index`; `trials records` adds the reason of an excluded trial and the outcome of an attempt that left no trial (blocked, failed, interrupted) |
+| decision (exclusion, correction) | what a person decides about a recorded trial after the fact, with a reason: it must not count (quarantined), or a recorded level was wrong | `exclusion.json` and `corrections.json` beside the bag, from `trials exclude`, `trials restore` and `trials amend`; never an edit of `trial_metadata.json` |
 | coverage, coverage index | the usable trials per cell | `trials index`; `trials plan` prints wanted, covered and still missing per campaign |
 | silent error | a counted trial whose realized condition differs from the declared one; possible only in a factor no check covers | what the linter's rule L13 and the factor `check:` exist to prevent |
 | domain | simulation or hardware, recorded per trial | `domain` in `trial_metadata.json`, from `simulation:` in `runner.yaml` |
@@ -113,6 +117,15 @@ The package uses the terms of the design of experiments, as its paper does. Wher
 | scratch recording | a diagnostic trial through the campaign's stack and gate, never coverage | `trials run … --scratch`, `bags_scratch/` |
 | exploration | one condition's stack brought up live to debug and tune it, with a Foxglove bridge that may change parameters, never a trial and never coverage | `trials explore`, the 🔭 Explore buttons, `runs/explore/<stamp>_explore/parameter_changes.yaml` and `notes.md`, `explore:` in `runner.yaml` (`param_whitelist`, `viewers`, `actions`), recordings in `bags_scratch/<stamp>_explore_<label>` |
 | named analysis | a declared computation over a cohort of usable trials, with the exact bag list | `config/analyses.yaml`, `trials analyze`, `analysis_metadata.json` |
+
+## A person's decision about a trial
+
+The runner writes `trial_metadata.json` once, and nobody edits it afterwards. When a person later knows better, the decision is a file beside it, with a reason, and every reader applies it:
+
+- **It must not count.** `trials exclude <exp> <trial> --reason "…" --category infrastructure` moves the bag and its slim copy into `bags_issues*` and writes `exclusion.json` beside each. `trials records`, the index and the UI show the category and the reason (`excluded (quarantined)`, then `why: infrastructure: …`). `trials restore` moves it back and keeps the old file as history.
+- **A recorded level is wrong.** `trials amend <exp> <trial> route=building_loop --reason "…"` writes `corrections.json` beside the bag and its slim copy. `trial_index.load_trials` reads the corrected value on top of the recorded one (`Trial.metadata` is corrected, `Trial.recorded` is the file as written), so the plan counts the trial in its true cell. `trials plan` and `trials index` name the corrected trials, `trials records` prints a `corrected:` line, and the UI shows a corrected badge and a table of recorded and corrected values.
+
+Who decided comes from `--by`, else `$TRIALS_BY`, else the login name. A slim copy made later (`trials slim`) copies both files, so the copy counts exactly as its bag does.
 
 ## A project's own gate checks
 

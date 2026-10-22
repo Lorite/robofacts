@@ -58,6 +58,9 @@ class PlannedCell:
     unverified: int = 0
     excluded: int = 0
     matched_bags: List[str] = field(default_factory=list)
+    #: Matched bags whose cell comes from a person's correction (corrections.json,
+    #: `trials amend`), not from what the runner recorded.
+    corrected_bags: List[str] = field(default_factory=list)
 
     @property
     def covered(self) -> int:
@@ -124,6 +127,7 @@ class Plan:
                     "excluded": cell.excluded,
                     "needed": cell.needed(self.include_unverified),
                     "matched_bags": cell.matched_bags,
+                    "corrected_bags": cell.corrected_bags,
                 }
                 for cell in self.cells
             ],
@@ -196,6 +200,8 @@ def build_plan(campaign: cs.Campaign, trials: List[ti.Trial],
                 setattr(cell, trial.status, getattr(cell, trial.status) + 1)
                 if trial.status in ("usable", "unverified"):
                     cell.matched_bags.append(trial.bag_dir.name)
+                    if trial.corrections:
+                        cell.corrected_bags.append(trial.bag_dir.name)
             cells[key] = cell
         cell.wanted += 1
 
@@ -327,6 +333,11 @@ def render(plan: Plan, limit: int = 40) -> str:
         lines.append(f"  order: shuffle={bool(campaign.order.get('shuffle'))} "
                      f"seed={campaign.order.get('seed')} blocks={campaign.order.get('blocks', False)} "
                      f"(--schedule prints the execution order)")
+    corrected = [b for c in plan.cells for b in c.corrected_bags]
+    if corrected:
+        lines.append(f"  ({len(corrected)} matching trial(s) are matched through a person's "
+                     f"correction, corrections.json: {', '.join(corrected[:5])}"
+                     f"{' …' if len(corrected) > 5 else ''})")
     if plan.unmatchable_factors:
         lines.append(f"  ⚠ not matchable against recorded data: "
                      f"{', '.join(plan.unmatchable_factors)} — counts may be optimistic")
@@ -349,7 +360,8 @@ def render(plan: Plan, limit: int = 40) -> str:
         lines.append("")
         lines.append(f"  COVERED ({len(done)} cell(s)):")
         for cell in done[:limit]:
-            lines.append(f"    ok   {cell.describe()}   [have {cell.usable} usable]")
+            fixed = f", {len(cell.corrected_bags)} corrected" if cell.corrected_bags else ""
+            lines.append(f"    ok   {cell.describe()}   [have {cell.usable} usable{fixed}]")
         if len(done) > limit:
             lines.append(f"    … and {len(done) - limit} more")
     return "\n".join(lines)

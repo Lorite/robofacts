@@ -60,6 +60,7 @@ from .. import code_version as cv
 from .. import campaign_plan as cp
 from .. import campaign_spec as cs
 from .. import explore as ex
+from .. import trial_decisions as td
 from .. import trial_index as ti
 from .. import trial_records as trec
 from .. import trial_runner as tr
@@ -871,7 +872,7 @@ def create_app(experiments_root: Optional[Path] = None,
                view_only: bool = False,
                cache_dir: Optional[Path] = None) -> Flask:
     """The UI app. ``view_only`` registers none of the routes that act (runs,
-    stops, robot actions, kill ROS, quarantine), for an archive viewer such as
+    stops, robot actions, kill ROS, exclude, restore), for an archive viewer such as
     the home server's: those URLs answer 404 and the pages show no button for
     them. ``cache_dir`` is where poster frames go when the experiments tree
     itself is read-only (default: ``runs/posters/`` inside the tree)."""
@@ -1137,13 +1138,17 @@ def create_app(experiments_root: Optional[Path] = None,
                 log_tail = "\n".join(lines[-60:])
             except OSError:
                 log_tail = ""
-        quarantinable = (record.bag_dir is not None and record.kind == "campaign"
-                         and record.bag_dir.parent.name == "bags")
+        on_disk = [d for d in (record.bag_dir, record.slim_dir) if d is not None]
+        excludable = (record.kind == "campaign" and bool(on_disk)
+                      and all(d.parent.name in td.INCLUDED_DIRS for d in on_disk))
+        restorable = (record.kind == "campaign" and bool(on_disk)
+                      and all(d.parent.name in td.EXCLUDED_DIRS for d in on_disk))
         return render_template(
             "trial.html", experiment=experiment, r=record, data=data,
             verify=trec.verify_report(record.run_log), log_tail=log_tail,
             size_full=dir_mb(record.bag_dir), size_slim=dir_mb(record.slim_dir),
-            quarantinable=quarantinable, crumbs=crumbs)
+            excludable=excludable, restorable=restorable, categories=td.CATEGORIES,
+            describe_correction=td.describe_correction, crumbs=crumbs)
 
     @app.route("/e/<experiment>/analyses")
     @requires_auth
@@ -1795,37 +1800,47 @@ def create_app(experiments_root: Optional[Path] = None,
         return render_template("stop.html", action="kill ROS", robot="all rig hosts",
                                ok=ok, output=output, crumbs=[("kill ROS", None)])
 
-    @action("/quarantine/<experiment>/<name>")
+    @action("/exclude/<experiment>/<name>")
     @requires_auth
-    def quarantine_bag(experiment: str, name: str):
-        """Move a recorded bag out of coverage, into its `_issues` sibling.
+    def exclude_trial(experiment: str, name: str):
+        """`trials exclude`: move a trial and its slim copy into `bags_issues*`, with its reason.
 
-        Quarantine, not deletion: the index excludes `bags_issues*` from
-        coverage while the recording stays inspectable — deleting data from a
-        web button is how a mis-click erases a flight. Resolved the same
-        traversal-safe way as serve_bag: by matching existing directory names,
-        never joining user input onto a path. The slim copy moves with its bag.
+        Exclusion, not deletion: the index excludes `bags_issues*` from coverage
+        while the recording stays inspectable, and `exclusion.json` beside it
+        says why, which every list then shows. The trial is resolved by
+        trial_decisions.locate, which matches existing directory names and never
+        joins user input onto a path.
         """
-        pairs = (("bags", "bags_issues"), ("bags_slim", "bags_issues_slim"))
-        moved = []
-        for src_name, dst_name in pairs:
-            src_root = root() / experiment / src_name
-            if not src_root.is_dir():
-                continue
-            wanted = {name, f"{name}_slim"} if src_name == "bags_slim" else {name}
-            for candidate in src_root.iterdir():
-                if candidate.name not in wanted or not candidate.is_dir():
-                    continue
-                dst_root = root() / experiment / dst_name
-                dst_root.mkdir(exist_ok=True)
-                if (dst_root / candidate.name).exists():
-                    return {"error": f"{dst_name}/{candidate.name} already exists"}, 409
-                candidate.rename(dst_root / candidate.name)
-                moved.append(f"{src_name}/{candidate.name} -> {dst_name}/")
-        if not moved:
-            return {"error": f"no bag directory named {name!r} in {experiment}"}, 404
-        for line in moved:
-            journal.add("quarantine", line)
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404, crumbs)
+        try:
+            record = td.exclude(root(), experiment, name, reason=request.form.get("reason", ""),
+                                category=request.form.get("category", ""),
+                                by=(request.form.get("by") or "").strip() or None)
+        except td.DecisionError as exc:
+            return error(f"Not excluded: {exc}", 409, crumbs)
+        for line in record["moved"] or [f"{name}: reason added in bags_issues"]:
+            journal.add("exclude", line)
+        journal.add("exclude", f"{name}: {td.describe_exclusion(record)}")
+        cache.clear()
+        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
+        return redirect(back)
+
+    @action("/restore/<experiment>/<name>")
+    @requires_auth
+    def restore_trial(experiment: str, name: str):
+        """`trials restore`: move an excluded trial back; its old reason stays as history."""
+        crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
+        if not known_experiment(experiment):
+            return error(f"No experiment {experiment!r} under {root()}", 404, crumbs)
+        try:
+            result = td.restore(root(), experiment, name, reason=request.form.get("reason", ""),
+                                by=(request.form.get("by") or "").strip() or None)
+        except td.DecisionError as exc:
+            return error(f"Not restored: {exc}", 409, crumbs)
+        for line in result["moved"]:
+            journal.add("restore", line)
         cache.clear()
         back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
         return redirect(back)

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import roots
+from . import trial_decisions as td
 from . import trial_index as ti
 from . import trial_media as tm
 
@@ -66,7 +67,8 @@ STATUS_MEANING = {
     "unverified": "a bag exists but its metadata cannot prove the cell (breaks the contract)",
     "excluded": "never counts: aborted, quarantined, no data, or a scratch recording",
     "aborted": "excluded: the trial did not finish (aborted: true)",
-    "quarantined": "excluded: moved to bags_issues by hand",
+    "quarantined": "excluded by a person: in bags_issues, with the reason in its exclusion.json "
+                   "(trials exclude)",
     "no-data": "excluded: the directory holds no .mcap or .db3",
     "scratch": "excluded: a scratch recording (--scratch), a diagnostic, replayable, never coverage",
     "blocked": "an attempt the gate refused (NO-GO): no trial, nothing recorded",
@@ -114,6 +116,10 @@ class TrialRecord:
     plots: List[Dict[str, Any]] = field(default_factory=list)
     #: The experiment's trial_media.yaml asks for the plots first on the card.
     plots_first: bool = False
+    #: A person's decisions (trial_decisions.py): the exclusion.json of an excluded
+    #: trial, and the corrections.json entries already applied to ``values``.
+    exclusion: Optional[Dict[str, Any]] = None
+    corrections: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def slim_name(self) -> Optional[str]:
@@ -165,6 +171,8 @@ class TrialRecord:
             "camera_video": rel(self.camera_video), "camera_label": self.camera_label,
             "plots": [{**p, "path": rel(p["path"])} for p in self.plots],
             "plots_first": self.plots_first,
+            "exclusion": self.exclusion,
+            "corrections": list(self.corrections),
         }
 
     def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
@@ -492,11 +500,15 @@ def _slim_for(exp_dir: Path, name: str, roots_: Iterable[str]) -> Optional[Path]
 def _status_of(trial: ti.Trial) -> Tuple[str, str]:
     if trial.status in ("usable", "unverified"):
         return trial.status, "; ".join(trial.problems)
+    # A person's reason first: it says more than the runner's aborted flag.
+    if trial.exclusion is not None:
+        return "quarantined", td.describe_exclusion(trial.exclusion)
     if trial.aborted:
         reason = trial.metadata.get("abort_reason") or trial.metadata.get("notes") or "marked aborted"
         return "aborted", str(reason)
     if trial.is_issue_bag:
-        return "quarantined", "in bags_issues: excluded from coverage by hand, not deleted"
+        return "quarantined", ("in bags_issues without an exclusion.json: moved by hand, no reason "
+                               "recorded (`trials exclude` adds one in place)")
     if not trial.has_bag_data:
         return "no-data", "no .mcap or .db3 in the bag directory: nothing to analyse"
     return "scratch", "carries scratch: true, so it never counts"
@@ -564,6 +576,8 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
                 (row or {}).get("gate")) or _gate_summary(gates.get(name)),
             code_version=trial.metadata.get("code_version"),
             metadata=trial.metadata,
+            exclusion=trial.exclusion,
+            corrections=list(trial.corrections),
         ))
 
     if include_scratch:
@@ -812,9 +826,13 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
             bits.append("analyses=" + ",".join(sorted({a["analysis"] for a in r.analyses})))
         if r.gate:
             bits.append(f"gate={r.gate['verdict']}")
+        if r.corrections:
+            bits.append("corrected=" + ",".join(dict.fromkeys(str(e["field"]) for e in r.corrections)))
         lines.append("  ".join(bits))
         if r.reason and r.status != "usable":
             lines.append(f"      why: {r.reason.splitlines()[0][:160]}")
+        for entry in r.corrections:
+            lines.append(f"      corrected: {td.describe_correction(entry)[:160]}")
     lines.append(summary_line(records))
     return "\n".join(lines)
 

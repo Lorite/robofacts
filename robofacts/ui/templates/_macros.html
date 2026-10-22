@@ -113,7 +113,8 @@
     <div class="tmeta"><span class="nowrap muted">{{ r.started|when or '—' }}</span>
       {{ status_badge(r.status) }}
       {%- if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch" title="a scratch recording: a diagnostic, never coverage">scratch</span>{% endif %}
-      <span title="T-0 gate">{{ gate_badge(r.gate) }}</span></div>
+      <span title="T-0 gate">{{ gate_badge(r.gate) }}</span>
+      {%- if r.corrections %} <span class="badge b-corrected" title="{% for c in r.corrections %}{{ c.field }}: {{ c.recorded }} → {{ c.corrected }} ({{ c.reason }}){{ '; ' if not loop.last }}{% endfor %}">corrected</span>{% endif %}</div>
     <div class="tname"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a></div>
     {%- if r.reason and r.status != 'usable' %}<div class="small muted why" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:110] }}{{ '…' if r.reason|length > 110 }}</div>{% endif %}
     {%- if show_campaign and r.campaign %}<div class="small muted">campaign {{ r.campaign }}</div>{% endif %}
@@ -150,6 +151,7 @@
   <td class="trial"><a href="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">{{ r.name }}</a>
     {%- if r.kind == 'scratch' and r.status != 'scratch' %} <span class="badge b-scratch" title="a scratch recording: a diagnostic, never coverage">scratch</span>{% endif %}</td>
   <td class="statuscol" data-sort="{{ r.status }}">{{ status_badge(r.status) }}
+    {%- if r.corrections %} <span class="badge b-corrected" title="{% for c in r.corrections %}{{ c.field }}: {{ c.recorded }} → {{ c.corrected }} ({{ c.reason }}){{ '; ' if not loop.last }}{% endfor %}">corrected</span>{% endif %}
     {%- if r.reason and r.status != 'usable' %}<div class="small muted why" title="{{ r.reason }}">{{ r.reason.splitlines()[0][:110] }}{{ '…' if r.reason|length > 110 }}</div>{% endif %}</td>
   {% if show_campaign %}<td class="nowrap">
     {%- if r.campaign and r.campaign in data.campaigns -%}<a href="{{ url_for('campaign_view', experiment=experiment, name=r.campaign) }}">{{ r.campaign }}</a>
