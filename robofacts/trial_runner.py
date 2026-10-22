@@ -42,6 +42,7 @@ coverage index or the planner.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import hashlib
@@ -66,6 +67,7 @@ from . import trial_index as ti
 from .preflight_gate import PreflightGate  # noqa: E402
 
 from . import roots
+from . import run_marker
 
 
 def __getattr__(name):
@@ -1816,7 +1818,24 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
     blocked, failed or ran, to ``<experiment>/runs/attempts.jsonl``: label,
     factor values, status, aborted and its reason, the gate's verdict and mode,
     and the stage timings. A dry run writes nothing. Writing it is never fatal.
+
+    An executed attempt holds the run marker (run_marker.py, 2026-10-22) until
+    its ledger line is written, so an uploader waits for the complete trial.
     """
+    if kwargs.get("dry_run", True):
+        return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
+                                 session_id=session_id, ledger=ledger, **kwargs)
+    with run_marker.running(Path(bags_dir).resolve().parents[1], experiment=trial.experiment,
+                            campaign=campaign_name, label=trial.describe()):
+        return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
+                                 session_id=session_id, ledger=ledger, **kwargs)
+
+
+def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: RunnerConfig,
+                      bags_dir: Path, *, campaign_name: Optional[str] = None,
+                      session_id: Optional[str] = None, ledger: bool = True,
+                      **kwargs: Any) -> TrialResult:
+    """run_trial() without the run marker."""
     ctx: Dict[str, Any] = {}
     started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     try:
@@ -2054,6 +2073,23 @@ def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
     # there is nothing running to share). The finally below is what guarantees
     # the rig does not stay up after an abort, a block or an exception.
     session: Optional[Dict[str, Any]] = {} if (keep_stack and not dry_run) else None
+    # The run marker spans the whole campaign, the gaps between trials included
+    # (run_marker.py): an uploader must not start between two flights.
+    marker = contextlib.nullcontext() if dry_run else run_marker.running(
+        Path(bags_dir).resolve().parents[1], experiment=plan.campaign.experiment,
+        campaign=plan.campaign.name)
+    with marker:
+        return _run_plan_items(plan, config, bags_dir, factors, results, session, session_id,
+                               limit, should_continue, gate, dry_run, hooks, slim, steps, hold_s,
+                               extra_verify, quiet_children, pause_before_action, confirm_steps,
+                               confirm_pose, on_result, stop_on_block)
+
+
+def _run_plan_items(plan, config, bags_dir, factors, results, session, session_id, limit,
+                    should_continue, gate, dry_run, hooks, slim, steps, hold_s, extra_verify,
+                    quiet_children, pause_before_action, confirm_steps, confirm_pose, on_result,
+                    stop_on_block):
+    """run_plan()'s loop over the attempts, inside the run marker."""
     try:
         for item in cp.execution_order(plan):
             cell, rep = item.cell, item.repetition

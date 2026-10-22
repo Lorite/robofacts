@@ -1196,7 +1196,10 @@ def create_app(experiments_root: Optional[Path] = None,
 
         Resolved, then checked to stay inside one of FILE_ROOTS of this
         experiment, so ``..`` cannot leave it. Recordings are refused here: the
-        slim ones are served by /bag, the heavy ones never.
+        slim ones are served by /bag, the heavy ones never, because a UI on a
+        trial host shares the rig's network with the flights. In ``--view-only``
+        mode (the trial archive on a server, 2026-10-22) a heavy recording is a
+        password-protected download.
         """
         if not known_experiment(experiment):
             return error(f"No experiment {experiment!r}", 404)
@@ -1216,7 +1219,8 @@ def create_app(experiments_root: Optional[Path] = None,
             listing = [{"name": p.name + ("/" if p.is_dir() else ""),
                         "rel": str(p.relative_to(base)) + ("/" if p.is_dir() else ""),
                         "size": (p.stat().st_size if p.is_file() else None),
-                        "recording": p.suffix in RECORDING_SUFFIXES}
+                        "recording": (p.suffix in RECORDING_SUFFIXES
+                                      and not app.config["VIEW_ONLY"])}
                        for p in entries]
             if not inside.parts:
                 listing = [e for e in listing if e["name"].rstrip("/") in FILE_ROOTS]
@@ -1244,8 +1248,11 @@ def create_app(experiments_root: Optional[Path] = None,
         if not target.is_file():
             return error(f"no file {rel!r} in {experiment}", 404, crumbs)
         if target.suffix in RECORDING_SUFFIXES:
-            return error("recordings are not served here: open the slim copy in Foxglove "
-                         "from the trial's page", 403, crumbs)
+            if not app.config["VIEW_ONLY"]:
+                return error("recordings are not served here: open the slim copy in Foxglove "
+                             "from the trial's page", 403, crumbs)
+            return send_file(target, mimetype="application/octet-stream", as_attachment=True,
+                             download_name=target.name, conditional=True)
         text_types = {".log": "text/plain", ".txt": "text/plain", ".md": "text/plain",
                       ".yaml": "text/plain", ".yml": "text/plain", ".jsonl": "text/plain",
                       ".csv": "text/plain", ".json": "application/json"}

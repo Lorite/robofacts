@@ -1585,3 +1585,18 @@ def test_view_only_posters_go_to_the_cache_dir_not_the_tree(viewer, root, poster
     assert resp.status_code == 200 and resp.get_data()[:2] == b"\xff\xd8"
     assert (poster_cache / "expA" / rel).is_file()
     assert not (root / "expA" / "runs" / "posters").exists(), "the archive tree stays untouched"
+
+
+def test_view_only_serves_a_heavy_recording_behind_the_password(viewer, client, root):
+    """The trial archive (2026-10-22) serves full recordings as a download; a UI
+    on a trial host still refuses them, because it shares the rig's network."""
+    name = "20261015T100000_rep01"
+    _write_bag(root, name, _meta(name))
+    url = f"/files/expA/bags/{name}/{name}_0.mcap"
+    assert viewer.get(url).status_code == 401
+    resp = viewer.get(url, headers=auth())
+    assert resp.status_code == 200 and resp.get_data() == b"not really a bag"
+    assert "attachment" in resp.headers["Content-Disposition"]
+    listing = viewer.get(f"/files/expA/bags/{name}/", headers=auth()).get_data(as_text=True)
+    assert f'href="/files/expA/bags/{name}/{name}_0.mcap"' in listing
+    assert client.get(url, headers=auth()).status_code == 403
