@@ -39,6 +39,8 @@ Profiles (``PROFILES``):
                        flow, range and barometer blocks: a Paper 3 flight on
                        mocap with every drone-side estimator in shadow (#158,
                        #164). See _shadow_sensors.
+  ``teleop_shadow_flight`` shadow_flight + ``/joy``: the same flight flown by a
+                       pilot on a gamepad (#168). See _teleop_pad.
 
 Every profile is a plain list of topic names, exactly like the hand-written
 lists this repo already uses (``build_record_command()`` in the run notebook,
@@ -442,6 +444,16 @@ def _shadow_sensors(cf_name: str) -> List[str]:
     ]
 
 
+def _teleop_pad(joy_topic: str = "/joy") -> List[str]:
+    """The gamepad of a teleoperated flight (#168, added 2026-10-29).
+
+    ``/joy`` (``sensor_msgs/Joy``, joy_node at its autorepeat rate, 20 Hz): every stick and
+    button the pilot moved. The teleop node's setpoint stream, ``/<cf>/cmd_full_state``, is
+    already in ``_mocap_and_firmware``. Light: a few hundred bytes per message.
+    """
+    return [joy_topic]
+
+
 def _livox_lidar() -> List[str]:
     """The Livox Mid-360S driver outputs (#109): the point stream and the IMU.
 
@@ -521,6 +533,8 @@ def build_topics(profile: str, cf_name: str = None,
             topics += _vio_shadow(cf_name)
         elif part == "shadow_sensors":
             topics += _shadow_sensors(cf_name)
+        elif part == "teleop_pad":
+            topics += _teleop_pad()
     seen = set()
     return [t for t in topics if not (t in seen or seen.add(t))]
 
@@ -543,6 +557,11 @@ PROFILES: Dict[str, List[str]] = {
     # 2026-10-29): the flight's own telemetry, the AI deck frames and the relay's IMU, OpenVINS,
     # and the raw flow, range and barometer blocks. One flight feeds every shadow estimator.
     "shadow_flight": ["mocap_firmware", "aideck_mocap", "vio_shadow", "shadow_sensors"],
+    # shadow_flight flown by a pilot on a gamepad (#168, 2026-10-29): the same bag plus /joy, so
+    # the sticks and buttons sit next to the setpoints they produced. Added together with its
+    # trial_metadata_core.yaml enum entry (L9).
+    "teleop_shadow_flight": ["mocap_firmware", "aideck_mocap", "vio_shadow", "shadow_sensors",
+                             "teleop_pad"],
     "markerless_light": ["mocap_firmware", "markerless_debug"],
     # The replay-grade middle tier (the lab, 2026-08-03: future experiments
     # must carry replay-grade data). WHY IT EXISTS: the three 07-29 fig-8 cell

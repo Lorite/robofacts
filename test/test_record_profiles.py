@@ -387,3 +387,15 @@ def test_vio_shadow_record_command():
     assert cmd[:6] == ["ros2", "bag", "record", "-s", "mcap", "-o"]
     assert cmd[-3:] == [f"/{CF}/imu_log", "/ov_msckf/odomimu", "/ov_msckf/poseimu"]
     assert "aideck_vio_shadow" in PROFILE_NOTES
+
+
+def test_teleop_shadow_flight_is_shadow_flight_plus_the_pad():
+    """#168 (2026-10-29): the teleoperated flight records the same bag as shadow_flight plus
+    /joy. The teleop setpoints need no extra topic: /<cf>/cmd_full_state is in mocap_firmware."""
+    shadow = build_topics("shadow_flight", cf_name="cfb1")
+    teleop = build_topics("teleop_shadow_flight", cf_name="cfb1")
+    assert set(teleop) - set(shadow) == {"/joy"}
+    assert set(shadow) <= set(teleop)
+    assert "/cfb1/cmd_full_state" in teleop
+    assert not is_heavy_topic("/joy")
+

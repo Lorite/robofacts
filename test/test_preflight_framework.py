@@ -239,6 +239,8 @@ def test_preflight_ui_renders_object_entries(tmp_path: Path):
     ("ekf_convergence.sh", []),
     ("node_present.sh", []),
     ("rigidbody_continuity.sh", []),
+    ("rigidbody_near.sh", []),
+    ("rigidbody_near.sh", ["name=cf1"]),  # neither x= y= nor node=
     ("topic_rate.sh", ["topic=/x"]),  # min_hz missing
     ("ros_param_equals.sh", ["node=/n", "param=p"]),  # expected missing
 ])
@@ -249,7 +251,8 @@ def test_missing_required_argument_exits_usage(script: str, argv):
     result = subprocess.run(["bash", str(CHECKS_DIR / script), *argv], capture_output=True, text=True)
     assert result.returncode == RC_USAGE_EXPECTED, (
         f"{script} exited {result.returncode}:\n{result.stdout}{result.stderr}")
-    assert "missing required argument" in (result.stdout + result.stderr)
+    out = result.stdout + result.stderr
+    assert "missing required argument" in out or "give x= and y=, or node=" in out
 
 
 RC_USAGE_EXPECTED = 2
