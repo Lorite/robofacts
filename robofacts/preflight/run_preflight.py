@@ -175,6 +175,10 @@ SEQUENTIAL_CHECKS = {
     "mem_available": (
         "measures MemAvailable, which the concurrent checks' own ros2 CLI processes "
         "consume, so it reads a quiet machine only when it runs alone"),
+    "rigidbody_near": (
+        "one `ros2 topic echo --once` on the same NamedPoseArray topic that "
+        "rigidbody_continuity captures (2026-10-29): on the rig only the first echo on a "
+        "topic reliably attaches within the window, so it must not race that capture"),
 }
 
 
