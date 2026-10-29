@@ -1365,11 +1365,11 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                                        "not confirmed at the pose pause — "
                                        "nothing was recorded or flown", commands)
             elif sys.stdin.isatty():
-                # A bare Enter is not enough on hardware (2026-10-29): a keypress meant for the
-                # operator-steps prompt reached this pause through the cockpit's tmux and a
-                # 3-minute hover took off without the operator's go. On hardware the word
-                # ``fly`` starts the trial, ``no`` aborts it, anything else asks again (three
-                # tries, then it aborts). Simulation keeps the plain Enter.
+                # A bare Enter is not enough on hardware (2026-10-29): the cockpit pane is
+                # shared between the operator's terminal and an agent driving it over tmux, so
+                # an Enter can come from either, and a flight must not start on an accidental
+                # one. On hardware the word ``fly`` starts the trial, ``no`` aborts it, anything
+                # else asks again (three tries, then it aborts). Simulation keeps the plain Enter.
                 if config.simulation:
                     print(_c("33;1", f"[runner] T-0 gate done — POSE THE RIG NOW "
                                      f"({nd}). Recording starts on Enter."))
