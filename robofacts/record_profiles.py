@@ -35,6 +35,10 @@ Profiles (``PROFILES``):
   ``aideck_vio_shadow`` aideck_mocap + crazyswarm2's raw IMU log topic and the
                        OpenVINS outputs: the Paper 3 drone VIO in shadow (#122),
                        next to the flight's own recorder. See _vio_shadow.
+  ``shadow_flight``    position_only + aideck_mocap + vio_shadow + the raw
+                       flow, range and barometer blocks: a Paper 3 flight on
+                       mocap with every drone-side estimator in shadow (#158,
+                       #164). See _shadow_sensors.
 
 Every profile is a plain list of topic names, exactly like the hand-written
 lists this repo already uses (``build_record_command()`` in the run notebook,
@@ -422,6 +426,22 @@ def _vio_shadow(cf_name: str) -> List[str]:
     ]
 
 
+def _shadow_sensors(cf_name: str) -> List[str]:
+    """The in-flight raw sensor blocks of Paper 3 (#158, added 2026-10-29).
+
+    For ``experiments/ros2_crazyflie_shadow_sensors_flight``: crazyswarm2's custom log topics
+    ``flow_log`` (``motion.deltaX``, ``motion.deltaY``, ``motion.squal``, ``motion.shutter``,
+    ``range.zrange``, ``baro.asl``, 50 or 100 Hz) and ``flow_quality`` (``motion.maxRaw``,
+    ``minRaw``, ``Rawsum``, ``outlierCount``, ``std``, ``motion``, 10 Hz), as
+    ``LogDataGeneric``. The shadow height sources of design v2 part 2 (the firmware's
+    flat-floor height, the barometer and the map-aware height, #167) replay from these.
+    """
+    return [
+        f"/{cf_name}/flow_log",
+        f"/{cf_name}/flow_quality",
+    ]
+
+
 def _livox_lidar() -> List[str]:
     """The Livox Mid-360S driver outputs (#109): the point stream and the IMU.
 
@@ -499,6 +519,8 @@ def build_topics(profile: str, cf_name: str = None,
             topics += _aideck_mocap(cf_name)
         elif part == "vio_shadow":
             topics += _vio_shadow(cf_name)
+        elif part == "shadow_sensors":
+            topics += _shadow_sensors(cf_name)
     seen = set()
     return [t for t in topics if not (t in seen or seen.add(t))]
 
@@ -517,6 +539,10 @@ PROFILES: Dict[str, List[str]] = {
     # what forensics actually need. Use markerless_full only when raw pixels
     # are the point, and never for an availability or accuracy cell.
     "position_only": ["mocap_firmware"],
+    # Paper 3 flight on mocap with every drone-side estimator recorded in shadow (#158, #164,
+    # 2026-10-29): the flight's own telemetry, the AI deck frames and the relay's IMU, OpenVINS,
+    # and the raw flow, range and barometer blocks. One flight feeds every shadow estimator.
+    "shadow_flight": ["mocap_firmware", "aideck_mocap", "vio_shadow", "shadow_sensors"],
     "markerless_light": ["mocap_firmware", "markerless_debug"],
     # The replay-grade middle tier (the lab, 2026-08-03: future experiments
     # must carry replay-grade data). WHY IT EXISTS: the three 07-29 fig-8 cell
