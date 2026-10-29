@@ -1365,12 +1365,35 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                                        "not confirmed at the pose pause — "
                                        "nothing was recorded or flown", commands)
             elif sys.stdin.isatty():
-                print(_c("33;1", f"[runner] T-0 gate done — POSE THE RIG NOW "
-                                 f"({nd}). Recording starts on Enter."))
-                try:
-                    input()
-                except EOFError:
-                    pass
+                # A bare Enter is not enough on hardware (2026-10-29): a keypress meant for the
+                # operator-steps prompt reached this pause through the cockpit's tmux and a
+                # 3-minute hover took off without the operator's go. On hardware the word
+                # ``fly`` starts the trial, ``no`` aborts it, anything else asks again (three
+                # tries, then it aborts). Simulation keeps the plain Enter.
+                if config.simulation:
+                    print(_c("33;1", f"[runner] T-0 gate done — POSE THE RIG NOW "
+                                     f"({nd}). Recording starts on Enter."))
+                    try:
+                        input()
+                    except EOFError:
+                        pass
+                else:
+                    print(_c("33;1", f"[runner] T-0 gate done — POSE THE RIG NOW "
+                                     f"({nd}). Type fly and Enter to record and act, "
+                                     f"no to abort."))
+                    answer = ""
+                    for _attempt in range(3):
+                        try:
+                            answer = input().strip().lower()
+                        except EOFError:
+                            answer = "no"
+                        if answer in ("fly", "no"):
+                            break
+                        print(_c("33;1", "[runner] type fly to start, or no to abort"))
+                    if answer != "fly":
+                        return TrialResult(trial, None, "blocked",
+                                           "not confirmed at the pose pause (no 'fly' typed) — "
+                                           "nothing was recorded or flown", commands)
 
         if record_cmd and external_record:
             # rosbag2 creates its own output directory but not the parents of
