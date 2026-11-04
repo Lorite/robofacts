@@ -5,11 +5,12 @@
 #
 #   topic_rate.sh topic=/poses min_hz=85 [max_hz=<n>] [window_s=10] [required=true]
 #
-# appear_s=<n> (default 0) waits up to n seconds for the topic to be advertised before
-# the rate is measured. For a source that creates its publisher only once it is ready:
-# OpenVINS advertises /ov_msckf/odomimu only after its initializer fired, so a check
-# that asks once at the start reports "not advertised at all" while the operator is
-# still lifting the drone (2026-11-04, the K2 VIO gate). 0 keeps the old semantics.
+# appear_s=<n> (default 0) waits up to n seconds for the topic to be advertised AND for
+# its first message, then measures the rate over window_s. For a source that starts
+# sending only once it is ready: OpenVINS creates /ov_msckf/odomimu at its start but
+# publishes only after its initializer fired, here on the operator's lift about 20 s
+# later (2026-11-04, the K2 VIO gate: "not advertised" before the node was up, then
+# "0 Hz over 5 s" before the lift, then 66 Hz once initialized). 0 keeps the old semantics.
 #
 # required=false turns "topic not advertised" into SKIP instead of FAIL, for
 # checks that only apply to some experiments.
@@ -38,6 +39,14 @@ until pf_topic_exists "$TOPIC"; do
     [ "$(date +%s)" -ge "$appear_deadline" ] && break
     sleep 1
 done
+
+if [ "${APPEAR%.*}" -gt 0 ] && pf_topic_exists "$TOPIC"; then
+    # Advertised: now wait for its first message, for the rest of the appear window.
+    remaining=$(( appear_deadline - $(date +%s) ))
+    [ "$remaining" -lt 1 ] && remaining=1
+    timeout "$remaining" ros2 topic echo --once --no-arr "$TOPIC" >/dev/null 2>&1 \
+        || pf_fail "$TOPIC advertised but no message within ${APPEAR}s (the source never started sending)"
+fi
 
 if ! pf_topic_exists "$TOPIC"; then
     if [ "${APPEAR%.*}" -gt 0 ]; then

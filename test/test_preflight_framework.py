@@ -598,3 +598,40 @@ def test_topic_rate_appear_s_fails_with_its_own_message(tmp_path: Path):
                              "window_s=3.2", "appear_s=2"],
                             capture_output=True, text=True, env=env, timeout=60)
     assert result.returncode != 0 and "not advertised within 2s" in result.stdout, result.stdout
+
+
+def test_topic_rate_appear_s_waits_for_the_first_message(tmp_path: Path):
+    """appear_s also waits for data: /late is advertised at once but its first `echo --once`
+    only succeeds from the 3rd try (OpenVINS before its initializer fired). A stub that
+    fails `--once` twice, then answers, must still PASS."""
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir(exist_ok=True)
+    counter = tmp_path / "once"
+    counter.write_text("0")
+    stub = stub_bin / "ros2"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$2\" = list ]; then echo /late; exit 0; fi\n"
+                    "if [ \"$3\" = --once ]; then sleep 2; echo '---'; exit 0; fi\n"
+                    "for i in $(seq 20); do echo 'data: x'; echo '---'; done\n")
+    stub.chmod(0o755)
+    env = dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}")
+    result = subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/late", "min_hz=5",
+                             "window_s=3.2", "appear_s=10"],
+                            capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout + result.stderr
+
+
+def test_topic_rate_appear_s_fails_when_no_message_arrives(tmp_path: Path):
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir(exist_ok=True)
+    stub = stub_bin / "ros2"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$2\" = list ]; then echo /late; exit 0; fi\n"
+                    "if [ \"$3\" = --once ]; then sleep 30; exit 1; fi\n"
+                    "exit 0\n")
+    stub.chmod(0o755)
+    env = dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}")
+    result = subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/late", "min_hz=5",
+                             "window_s=3.2", "appear_s=2"],
+                            capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode != 0 and "no message within 2s" in result.stdout, result.stdout
