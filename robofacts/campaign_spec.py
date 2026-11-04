@@ -463,8 +463,56 @@ def load_factors(experiment: Optional[str] = None,
     return factors
 
 
+#: When a step applies within ONE runner invocation (2026-11-04, the lab's #159): ``first``
+#: only on its first trial, ``repeat`` only on the trials after it, ``always`` on every
+#: trial (the default, which is every step before this key existed). A repeated trial of a
+#: campaign rarely needs the whole setup again: a 16 s square uses almost no battery, and
+#: a drone that boots where it landed needs no re-placement. A runner that stops (a
+#: blocked trial, Ctrl-C) starts again with the ``first`` steps, so a broken repeat
+#: always falls back to the full procedure.
+STEP_WHEN = ("always", "first", "repeat")
+
+
+def step_applies(step: Dict[str, Any], repeat: bool) -> bool:
+    """Does an operator or setup step apply to this trial (``repeat`` = not the first)?"""
+    when = str(step.get("when") or "always")
+    return when == "always" or (when == "repeat") == bool(repeat)
+
+
+def steps_for(steps: List[Dict[str, Any]], repeat: bool) -> List[Dict[str, Any]]:
+    """The steps of a list that apply to the first trial (``repeat=False``) or a later one."""
+    return [st for st in steps or [] if step_applies(st, repeat)]
+
+
+def _when_problems(where: str, steps: List[Dict[str, Any]]) -> List[str]:
+    return [f"{where}[{i}]: when must be one of {', '.join(STEP_WHEN)}, got {st.get('when')!r}"
+            for i, st in enumerate(steps or []) if str(st.get("when") or "always") not in STEP_WHEN]
+
+
+def _setup_steps(raw: Any) -> List[Dict[str, Any]]:
+    """Campaign-scoped setup steps, ``{name, command, required, when}`` as runner.yaml's.
+
+    Malformed entries are kept with ``_invalid`` so ``validate`` reports them, instead of
+    vanishing (a dropped reset step would make every repeat trial run without it).
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return [{"_invalid": raw}]
+    out: List[Dict[str, Any]] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict) or not str(entry.get("command", "")).strip():
+            out.append({"_invalid": entry})
+            continue
+        out.append({"name": str(entry.get("name", f"setup_steps_{i}")),
+                    "command": str(entry["command"]).strip(),
+                    "required": bool(entry.get("required", True)),
+                    "when": str(entry.get("when") or "always")})
+    return out
+
+
 def _operator_steps(raw: Any) -> List[Dict[str, Any]]:
-    """Normalise operator steps to ``{text, run}``.
+    """Normalise operator steps to ``{text, run, when}``.
 
     A step may be a plain string (instruction only) or a mapping with an
     optional ``run``: a command the UI can execute on the trial's host with
@@ -476,10 +524,11 @@ def _operator_steps(raw: Any) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for entry in raw or []:
         if isinstance(entry, str):
-            out.append({"text": entry.strip(), "run": ""})
+            out.append({"text": entry.strip(), "run": "", "when": "always"})
         elif isinstance(entry, dict):
             out.append({"text": str(entry.get("text", "")).strip(),
-                        "run": str(entry.get("run", "")).strip()})
+                        "run": str(entry.get("run", "")).strip(),
+                        "when": str(entry.get("when") or "always")})
     return out
 
 
@@ -597,6 +646,12 @@ class Campaign:
     #: verify steps are universal (did it fly), these are specific to what
     #: this campaign asked a human to do.
     verify_steps: List[Dict[str, Any]] = field(default_factory=list)
+    #: Campaign-scoped setup steps (2026-11-04), run AFTER runner.yaml's ``setup_steps``
+    #: and before the stack launches, ``{name, command, required, when}``. The reset a
+    #: repeated trial needs (the Crazyflie's radio power cycle, so its frame restarts
+    #: where it landed) belongs to the campaign that repeats, not to every trial of the
+    #: experiment. ``{factor}`` and ``{arg_*}`` placeholders fill as in runner.yaml.
+    setup_steps: List[Dict[str, Any]] = field(default_factory=list)
     #: The T-0 gate for THIS campaign, relative to the experiment directory.
     #: Empty = the experiment's config/preflight_checklist.json.
     #:
@@ -712,6 +767,7 @@ def _build_campaign(path: Path, experiments_root: Optional[Path] = None,
         operator_steps=_operator_steps(raw.get("operator_steps")),
         operator_live_steps=_operator_steps(raw.get("operator_live_steps")),
         verify_steps=[dict(v) for v in (raw.get("verify_steps") or [])],
+        setup_steps=_setup_steps(raw.get("setup_steps")),
         preflight_checklist=str(raw.get("preflight_checklist") or ""),
         order=dict(raw.get("order") or {}) if isinstance(raw.get("order"), dict)
         else ({"_invalid": raw.get("order")} if raw.get("order") is not None else {}),
@@ -791,6 +847,18 @@ def validate(campaign: Campaign) -> List[str]:
 
     if campaign.repetitions < 1:
         problems.append(f"repetitions must be >= 1 (got {campaign.repetitions})")
+
+    # Step timing within a runner invocation (2026-11-04): first | repeat | always.
+    problems += _when_problems("operator_steps", campaign.operator_steps)
+    for i, st in enumerate(campaign.setup_steps):
+        if "_invalid" in st:
+            problems.append(f"setup_steps[{i}] must be a mapping with a non-empty command "
+                            f"({{name, command, required, when}}), got {st['_invalid']!r}")
+    problems += _when_problems("setup_steps", [st for st in campaign.setup_steps
+                                               if "_invalid" not in st])
+    if any(st.get("when") not in (None, "always") for st in campaign.operator_live_steps):
+        problems.append("operator_live_steps take no `when`: a live step is part of the "
+                        "flight itself, so it applies to every trial")
     problems += _order_problems(campaign.order)
     problems += _repetitions_where_problems(campaign)
     if campaign.factor_checks not in FACTOR_CHECK_MODES:

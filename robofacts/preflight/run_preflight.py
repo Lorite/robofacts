@@ -158,7 +158,7 @@ PARALLEL_SAFE_CHECKS = frozenset({
     "estop_reachable", "file_exists", "gpu_memory", "graph_nav_localized",
     "gz_world_matches", "host_reachable", "mocap_stream",
     "node_present", "px4_preflight_pass", "ros_param_equals", "rosout_report",
-    "stop_latch", "topic_rate", "watchdog_health",
+    "stop_latch", "topic_rate", "topic_value", "watchdog_health",
 })
 
 #: Checks that must run alone, and why (read from each script's code).

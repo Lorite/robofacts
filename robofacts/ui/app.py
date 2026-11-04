@@ -562,7 +562,8 @@ class ShellPreflightGate:
         return _GatePass()
 
 
-def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None) -> List[str]:
+def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None,
+                       campaign_setup: Optional[List[Dict[str, Any]]] = None) -> List[str]:
     """What EXECUTE does by itself, in order, derived from runner.yaml.
 
     Derived rather than written out, so it cannot drift from what the runner
@@ -572,7 +573,13 @@ def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None) -> List[
     steps = {**tr.DEFAULT_STEPS, **(steps or {})}
     seq: List[str] = []
     if steps["setup"]:
-        seq += [f"{s['name']}  ({s['command'].split()[0]}…)" for s in config.setup_steps]
+        # runner.yaml's, then the campaign's (2026-11-04), each with its `when`.
+        for s in list(config.setup_steps) + list(campaign_setup or []):
+            if "_invalid" in s:
+                continue
+            when = s.get("when") or "always"
+            label = "" if when == "always" else f"  [{when} trials only]"
+            seq.append(f"{s['name']}  ({s['command'].split()[0]}…){label}")
     if steps["launch"]:
         seq.append(f"launch {config.launch_package}/{config.launch_file}, "
                    f"wait {config.settle_s:g}s to settle")
@@ -1081,7 +1088,8 @@ def create_app(experiments_root: Optional[Path] = None,
         warnings = cs.validate_against_metadata_contract(campaign, root())
         checklist, checklist_vars = load_preflight_checklist(root(), experiment)
         try:
-            auto_seq = automatic_sequence(tr.RunnerConfig.load(experiment, root()))
+            auto_seq = automatic_sequence(tr.RunnerConfig.load(experiment, root()),
+                                          campaign_setup=campaign.setup_steps)
             runner_error = ""
         except tr.RunnerError as exc:
             auto_seq, runner_error = [], str(exc)

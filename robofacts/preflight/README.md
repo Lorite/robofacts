@@ -66,6 +66,7 @@ Checklist entries are either a plain string (manual, operator confirms) or an ob
 | Check | Verifies | Notes |
 |---|---|---|
 | `topic_rate` | a topic's data is actually flowing at ≥ `min_hz` (and, with `max_hz`, below it) | generic; `required=false` → SKIP when absent. `max_hz` (2026-10-14) lets a rate identify a configuration: the AI deck's GAP8 JPEG build streams 8.0 to 8.2 fps on the same topic as the raw build at 10.2 to 11 fps, so the `stream_format` factor checks raw with `min_hz=9` and jpeg with `min_hz=7 max_hz=9` |
+| `topic_value` | a sensor stream is alive, not only flowing: the median of a field (`values[2]` of a `LogDataGeneric`, or a dotted path such as `pose.position.z`) over `window_s` is at least `min` and/or at most `max`, and with `vary=true` the field is not constant over the window | generic (2026-11-04); `required=false` → SKIP when absent. Born for the Crazyflie Flow deck, whose PMW3901 came up stuck after a boot (squal 0, shutter frozen at 900) while `flow_log` streamed at 50 Hz and `topic_rate` passed |
 | `mocap_stream` | MOCAP streaming at full rate | named wrapper over `topic_rate` |
 | `camera_frames` | camera frames flowing, not just a node up | optional by default |
 | `rigidbody_continuity` | the rigid body is in ≥ `min_pct` of mocap frames | catches name mismatch **and** tracking dead zones |

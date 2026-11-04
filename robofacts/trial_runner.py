@@ -447,10 +447,40 @@ def _named_commands(raw: Any, field_name: str, path: Path) -> List[Dict[str, Any
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict) or not str(entry.get("command", "")).strip():
             raise RunnerError(f"{path}: {field_name}[{i}] needs a non-empty 'command'")
+        when = str(entry.get("when") or "always")
+        if when not in cs.STEP_WHEN:
+            raise RunnerError(f"{path}: {field_name}[{i}] when must be one of "
+                              f"{', '.join(cs.STEP_WHEN)}, got {entry.get('when')!r}")
         steps.append({"name": str(entry.get("name", f"{field_name}_{i}")),
                       "command": str(entry["command"]).strip(),
-                      "required": bool(entry.get("required", True))})
+                      "required": bool(entry.get("required", True)),
+                      "when": when})
     return steps
+
+
+#: What a repeated trial shows when every operator step of the campaign is ``when: first``
+#: (2026-11-04). The runner still waits once: the reset steps and the launch come next,
+#: and the operator may still be standing at the drone that just landed.
+REPEAT_READY_STEP = {"text": "Repeat trial: the previous one of this run has ended. Press Enter "
+                             "when the area is clear and you are ready. The setup and reset "
+                             "steps and the stack launch come next, then the T-0 gate.",
+                     "run": "", "when": "repeat"}
+
+
+def operator_steps_for(operator_steps: Optional[List[Dict[str, Any]]],
+                       repeat: bool) -> List[Dict[str, Any]]:
+    """The operator steps of one trial: the campaign's, filtered by ``when``. A repeat
+    trial whose steps all drop out still gets the one ready step, so it pauses."""
+    steps = cs.steps_for(list(operator_steps or []), repeat)
+    if repeat and operator_steps and not steps:
+        return [dict(REPEAT_READY_STEP)]
+    return steps
+
+
+def setup_steps_for(config: "RunnerConfig", campaign_setup: Optional[List[Dict[str, Any]]],
+                    repeat: bool) -> List[Dict[str, Any]]:
+    """runner.yaml's setup steps, then the campaign's, both filtered by ``when``."""
+    return cs.steps_for(list(config.setup_steps) + list(campaign_setup or []), repeat)
 
 
 def _metadata_probes(raw: Any, path: Path) -> List[Dict[str, Any]]:
@@ -927,6 +957,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
               clock: Callable[[], str] = lambda: datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S"),
               voice_cues: Optional[List[Any]] = None,
               voice_announce: Any = None,
+              repeat: bool = False,
+              campaign_setup_steps: Optional[List[Dict[str, Any]]] = None,
               ) -> TrialResult:
     """One trial, end to end.
 
@@ -1006,6 +1038,14 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # seam, a UI-triggered run would block on input() at a terminal nobody is
     # watching. Dry runs skip. A False from the surface means the steps were
     # NOT confirmed (the operator aborted), so nothing launches.
+    # FIRST OR REPEAT (2026-11-04): a step's `when` picks the steps of this trial. A
+    # repeat is a trial after another one of the same runner invocation that was not
+    # blocked (run_plan decides), so a blocked trial falls back to the full procedure.
+    operator_steps = operator_steps_for(operator_steps, repeat)
+    _ctx["step_set"] = "repeat" if repeat else "first"
+    if operator_steps:
+        print(f"[runner] {'repeat' if repeat else 'first'} trial of this run: "
+              f"{len(operator_steps)} operator step(s)")
     if operator_steps and not dry_run:
         confirm = confirm_steps if confirm_steps is not None else confirm_operator_steps_tty
         if not confirm(trial, operator_steps):
@@ -1095,7 +1135,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 
     setup_cmds = [(s["name"], templated_command(s["command"], trial, f"setup step {s['name']}",
                                                 **arg_ph),
-                   s["required"]) for s in config.setup_steps] if steps["setup"] else []
+                   s["required"]) for s in setup_steps_for(config, campaign_setup_steps, repeat)
+                  ] if steps["setup"] else []
     # Aux launches get {bag} too (2026-08-18), for the same reason the action
     # does: a side process that records something ABOUT the trial has to be able
     # to put it beside the trial. Added for sample_process_resources.py, whose
@@ -1183,6 +1224,15 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # A dry run previews commands; there is no stack to check and the gate
         # bounces the ros2 daemon, so running it here would be a side effect.
         # The voice plan is printed, never sent.
+        if operator_steps:
+            print(f"[dry-run] operator steps of this {'repeat' if repeat else 'first'} trial "
+                  f"(shown and waited on before anything runs):")
+            for i, step in enumerate(operator_steps, 1):
+                first_line = (str(step.get("text", "")).strip().splitlines() or [""])[0]
+                print(f"[dry-run]   {i}. {first_line[:150]}")
+        if setup_cmds:
+            print("[dry-run] setup steps, before the launch: "
+                  + ", ".join(name for name, _, _ in setup_cmds))
         lines = voice_plan_lines(vplan)
         if lines:
             print(f"[runner] voice plan (dry run, nothing is sent, {voice_target_line()}):")
@@ -2013,6 +2063,8 @@ def attempt_record(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                                            "factor_checks")}
                  if isinstance(gate, dict) else None),
         "timings_s": dict(ctx.get("marks") or {}),
+        # Which operator and setup steps this attempt got (2026-11-04): first or repeat.
+        "step_set": ctx.get("step_set"),
         # What ran, how long, how it ended, and a failing step's output tail
         # (2026-10-20). The failure report is written from this.
         "trace": list(ctx.get("trace") or []),
@@ -2131,6 +2183,10 @@ def _run_plan_items(plan, config, bags_dir, factors, results, session, session_i
                 print(f"[runner] attempt {pos['position']}/{pos['of']}"
                       + (f" (block {pos['block']}, seed {pos['seed']})"
                          if pos.get("block") else f" (seed {pos['seed']})"))
+            # A REPEAT trial follows one of this invocation that was not blocked
+            # (2026-11-04): after a blocked one (a NO-GO, unconfirmed steps) the rig may
+            # need the whole procedure again, so it gets the first-trial steps.
+            repeat = bool(results) and results[-1].status != "blocked"
             result = run_trial(spec, factors, config, bags_dir,
                                campaign_name=plan.campaign.name, session_id=session_id,
                                gate=gate, dry_run=dry_run, hooks=hooks, slim=slim,
@@ -2142,7 +2198,9 @@ def _run_plan_items(plan, config, bags_dir, factors, results, session, session_i
                                confirm_steps=confirm_steps,
                                confirm_pose=confirm_pose,
                                voice_cues=getattr(plan.campaign, "voice_cues", None),
-                               voice_announce=getattr(plan.campaign, "voice_announce", None))
+                               voice_announce=getattr(plan.campaign, "voice_announce", None),
+                               repeat=repeat,
+                               campaign_setup_steps=getattr(plan.campaign, "setup_steps", None))
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -2226,6 +2284,7 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
                        quiet_children=quiet_children,
                        pause_before_action=pause_before_action,
                        operator_steps=campaign.operator_steps,
+                       campaign_setup_steps=campaign.setup_steps,
                        scratch_label=safe_label,
                        voice_cues=getattr(campaign, "voice_cues", None),
                        voice_announce=getattr(campaign, "voice_announce", None))

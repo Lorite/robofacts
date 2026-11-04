@@ -21,6 +21,10 @@ L4  every {placeholder} in a command must be a declared factor (or {bag} in a
     directory, which is how a flight script knows where to write its
     flight-time commanded_waypoints.json). (`{cf_name_placeholder}` was
     written by hand and would have raised at trial time, i.e. on the rig.)
+L4b (2026-11-04) the same for a campaign's own setup_steps (a reset step between
+    repeated trials): {factor} or {arg_<launch argument>}, never {bag}, because
+    setup runs before the trial has a bag. Its `when` must be first, repeat or
+    always, and so must an operator step's.
 L5  a campaign's pre-flight operator_steps must not start ROS processes: a
     trial's setup steps tear down the previous stack first (scripts/kill_ros.sh,
     which matches /opt/ros/ and any *_ws/install/, or an experiment's own stop
@@ -286,6 +290,39 @@ def test_command_placeholders_are_declared_factors(experiment):
 
 
 @pytest.mark.parametrize("experiment", experiments_with_runner())
+def test_campaign_setup_step_placeholders_are_declared_factors(experiment):
+    """L4b — a campaign's reset steps run on the rig between trials, so a bad placeholder
+    or a bad `when` must fail here, not at the second trial of a lab day."""
+    all_factors = cs.load_factors(experiment, EXPERIMENTS_ROOT)
+    launch_args = set()
+    for factor in all_factors.values():
+        if factor.maps_to.get("kind") == "launch_arg":
+            launch_args |= set(factor.maps_to.get("names") or [factor.maps_to.get("name")])
+    for path in campaigns_of(experiment):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for i, step in enumerate(raw.get("setup_steps") or []):
+            assert isinstance(step, dict) and str(step.get("command", "")).strip(), (
+                f"{path.name}: setup_steps[{i}] needs a mapping with a non-empty command")
+            assert str(step.get("when") or "always") in cs.STEP_WHEN, (
+                f"{path.name}: setup_steps[{i}] when={step.get('when')!r} is not one of "
+                f"{', '.join(cs.STEP_WHEN)}")
+            for placeholder in PLACEHOLDER.findall(str(step["command"])):
+                if placeholder.startswith("arg_"):
+                    assert placeholder[len("arg_"):] in launch_args, (
+                        f"{path.name}: setup_steps[{i}] references {{{placeholder}}}, but no "
+                        f"factor maps to that launch argument")
+                    continue
+                assert placeholder in all_factors, (
+                    f"{path.name}: setup_steps[{i}] references {{{placeholder}}}, which is not a "
+                    f"declared factor ({{bag}} does not exist yet before the launch)")
+        for i, step in enumerate(raw.get("operator_steps") or []):
+            if isinstance(step, dict):
+                assert str(step.get("when") or "always") in cs.STEP_WHEN, (
+                    f"{path.name}: operator_steps[{i}] when={step.get('when')!r} is not one of "
+                    f"{', '.join(cs.STEP_WHEN)}")
+
+
+@pytest.mark.parametrize("experiment", experiments_with_runner())
 def test_pre_flight_operator_steps_do_not_start_ros_processes(experiment):
     """L5: the setup steps' stack teardown would kill them. They belong in aux or live steps."""
     for path in campaigns_of(experiment):
@@ -333,7 +370,13 @@ def test_flight_experiments_declare_a_verify_step(experiment):
 def test_commands_reference_scripts_that_exist(experiment):
     """L7 — a typo'd path fails on the rig, after the stack is up."""
     config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    for where, template in command_templates(config) + explore_templates(config):
+    # A campaign's own setup steps (2026-11-04) run on the rig too.
+    campaign_setup = [(f"{path.name}:setup_steps[{i}]", str(step.get("command", "")))
+                      for path in campaigns_of(experiment)
+                      for i, step in enumerate((yaml.safe_load(path.read_text(encoding="utf-8"))
+                                                or {}).get("setup_steps") or [])
+                      if isinstance(step, dict)]
+    for where, template in command_templates(config) + explore_templates(config) + campaign_setup:
         # `ros2 launch <pkg> <file>.launch.py` names a launch file INSIDE a
         # package, resolved by ament at run time — not a path in this repo.
         launch_files = set(re.findall(r"ros2\s+launch\s+\S+\s+(\S+)", template))

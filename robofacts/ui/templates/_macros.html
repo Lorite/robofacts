@@ -250,6 +250,9 @@
 
 {%- macro step_cell(step, kind, index, experiment, campaign) -%}
 <li style="margin:.45rem 0">
+  {%- if step.when and step.when != 'always' %}
+  <span class="badge small" title="first = the first trial of one runner invocation; repeat = the trials after it">{{ step.when }} trial only</span>
+  {%- endif %}
   <span style="white-space:pre-wrap">{{ step.text }}</span>
   {%- if step.run %}
   <div class="cmdline">
