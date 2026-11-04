@@ -31,7 +31,7 @@ def _num(text: str) -> str:
 
 
 def _topic_words(topic: str) -> str:
-    """``/crazylori_brushless_1/flow_log`` -> ``flow log``: the last name, spoken."""
+    """``/cf1/flow_log`` -> ``flow log``: the last name, spoken."""
     last = [p for p in topic.split("/") if p]
     return (last[-1] if last else topic).replace("_", " ")
 
