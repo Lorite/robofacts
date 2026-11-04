@@ -145,14 +145,24 @@ def test_no_processes_survive_the_trial(demo_root, demo_config):
     class of failure that produced 'the camera is up but publishes nothing'."""
     import subprocess
 
+    def pids(pattern: str) -> set:
+        found = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+        return {int(p) for p in (found.stdout or "").split()}
+
+    # Only processes this trial started count (2026-11-04). The dev container is
+    # shared: another session's Gazebo trial kept a `ros2 bag record` running,
+    # and a container-wide count failed this test although the runner had torn
+    # down everything it started. The recorder is matched on this test's own
+    # bag directory, the talker on the processes that were not there before.
+    patterns = ("demo_nodes_cpp", f"bag record.*{demo_root}")
+    before = {p: pids(p) for p in patterns}
     bags = demo_root / "demo" / "bags"
     factors = cs.load_factors("demo", demo_root)
     tr.run_trial(_trial(), factors, demo_config, bags, dry_run=False, slim=False)
 
-    for pattern in ("demo_nodes_cpp", "bag record"):
-        leftovers = subprocess.run(["pgrep", "-fc", pattern], capture_output=True, text=True)
-        count = int((leftovers.stdout or "0").strip() or 0)
-        assert count == 0, f"{count} leftover process(es) matching {pattern!r}"
+    for pattern in patterns:
+        leftovers = pids(pattern) - before[pattern]
+        assert not leftovers, f"{len(leftovers)} leftover process(es) matching {pattern!r}: {sorted(leftovers)}"
 
 
 def test_a_crashing_action_still_closes_the_bag(demo_root, demo_config, monkeypatch):
