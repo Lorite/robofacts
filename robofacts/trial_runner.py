@@ -1646,7 +1646,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                    output=getattr(completed, "stdout", "") or "")
         if rc != 0:
             tail = (getattr(completed, "stdout", "") or "").strip().splitlines()
-            reason = f"verify step {step['name']!r} failed (rc={rc}) — the trial did not happen"
+            # "does not count", not "did not happen" (2026-11-04): a verify step runs on a
+            # recorded bag after an action that returned 0, so the robot usually DID fly (the
+            # Flow-only square of that day landed 0.67 m off and was stamped "did not happen").
+            # The words "verify step" stay first: trial_decisions.abort_is_verify_only reads them.
+            reason = (f"verify step {step['name']!r} failed (rc={rc}) — the trial ran and was "
+                      f"recorded, but it does not count")
             if tail:
                 reason += "\n" + "\n".join(tail[-6:])
             detail = f"{detail} | {reason}".strip(" |") if detail else reason
@@ -1701,8 +1706,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # The schema requires abort_reason whenever aborted is true; without it
         # the runner writes metadata its own contract rejects.
         metadata["abort_reason"] = detail or "action/verify failed (no detail captured)"
-        print("[runner] TRIAL FAILED - the trial did not happen; recorded as "
-              "aborted, so it cannot count as coverage")
+        if detail.startswith("action returned rc="):
+            print("[runner] TRIAL FAILED - the action failed, so the trial did not happen as "
+                  "planned; recorded as aborted, so it cannot count as coverage")
+        else:
+            print("[runner] TRIAL FAILED - a verify step rejected the recorded trial; recorded "
+                  "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")
     if gate_result is not None:
         metadata["preflight"] = gate_result.as_metadata()
     if calibration_results:
