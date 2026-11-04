@@ -652,6 +652,9 @@ class Campaign:
     #: where it landed) belongs to the campaign that repeats, not to every trial of the
     #: experiment. ``{factor}`` and ``{arg_*}`` placeholders fill as in runner.yaml.
     setup_steps: List[Dict[str, Any]] = field(default_factory=list)
+    #: False opts this campaign out of the robots' reset steps (robots.yaml ``reset:``, run for
+    #: the robots runner.yaml declares, 2026-11-04). Default True.
+    robot_reset: bool = True
     #: The T-0 gate for THIS campaign, relative to the experiment directory.
     #: Empty = the experiment's config/preflight_checklist.json.
     #:
@@ -768,6 +771,7 @@ def _build_campaign(path: Path, experiments_root: Optional[Path] = None,
         operator_live_steps=_operator_steps(raw.get("operator_live_steps")),
         verify_steps=[dict(v) for v in (raw.get("verify_steps") or [])],
         setup_steps=_setup_steps(raw.get("setup_steps")),
+        robot_reset=raw.get("robot_reset", True),
         preflight_checklist=str(raw.get("preflight_checklist") or ""),
         order=dict(raw.get("order") or {}) if isinstance(raw.get("order"), dict)
         else ({"_invalid": raw.get("order")} if raw.get("order") is not None else {}),
@@ -856,6 +860,8 @@ def validate(campaign: Campaign) -> List[str]:
                             f"({{name, command, required, when}}), got {st['_invalid']!r}")
     problems += _when_problems("setup_steps", [st for st in campaign.setup_steps
                                                if "_invalid" not in st])
+    if not isinstance(campaign.robot_reset, bool):
+        problems.append(f"robot_reset must be true or false, got {campaign.robot_reset!r}")
     if any(st.get("when") not in (None, "always") for st in campaign.operator_live_steps):
         problems.append("operator_live_steps take no `when`: a live step is part of the "
                         "flight itself, so it applies to every trial")

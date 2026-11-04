@@ -175,6 +175,10 @@ SEQUENTIAL_CHECKS = {
     "mem_available": (
         "measures MemAvailable, which the concurrent checks' own ros2 CLI processes "
         "consume, so it reads a quiet machine only when it runs alone"),
+    "crazyflie_radio_battery": (
+        "opens its own link on the Crazyradio (cflib, 2026-11-04), which allows one user at a "
+        "time, so it must not race another radio check; it runs in the pre-launch stage, before "
+        "crazyflie_server takes the radio"),
     "rigidbody_near": (
         "one `ros2 topic echo --once` on the same NamedPoseArray topic that "
         "rigidbody_continuity captures (2026-10-29): on the rig only the first echo on a "

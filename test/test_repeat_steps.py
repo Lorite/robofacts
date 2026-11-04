@@ -180,9 +180,11 @@ def test_a_dry_run_of_two_shows_the_first_then_the_repeat_steps(root):
     first, second = text.split("operator steps of this repeat trial")
     assert "first trial of this run: 2 operator step(s)" in first
     assert "Fresh battery" in first and "stays where it landed" not in first
-    assert "setup steps, before the launch: clean_slate, first_only_calibration" in first
+    assert "setup steps (runner.yaml): clean_slate, first_only_calibration" in first
+    assert "setup steps, before the launch" not in first
     assert "stays where it landed" in second and "Fresh battery" not in second
-    assert "setup steps, before the launch: clean_slate, radio_power_cycle" in second
+    assert "setup steps (runner.yaml): clean_slate" in second
+    assert "setup steps, before the launch: radio_power_cycle" in second
     flat = [[" ".join(c) for c in r.commands] for r in results]
     assert not any("power_cycle.py" in c for c in flat[0])
     assert any(c == "python3 power_cycle.py hover" for c in flat[1])

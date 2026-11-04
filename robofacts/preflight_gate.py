@@ -135,6 +135,9 @@ class GateResult:
     checked_at: str = ""
     reused_age_s: Optional[float] = None
     failed_checks: List[str] = field(default_factory=list)
+    #: One item per FAIL or ERR (2026-11-04): check, detail, the entry's text and its optional
+    #: ``speak`` sentence, for the spoken NO-GO reasons (gate_speech.py).
+    failed_items: List[Dict[str, Any]] = field(default_factory=list)
     output_tail: List[str] = field(default_factory=list)
     checklist: str = ""
     #: binding | shadow | disabled (see the module docstring).
@@ -170,6 +173,7 @@ class GateResult:
             "checked_at": self.checked_at,
             "reused_age_s": self.reused_age_s,
             "failed_checks": list(self.failed_checks),
+            "failed_items": [dict(i) for i in self.failed_items],
             "output_tail": list(self.output_tail),
             "checklist": self.checklist,
             "mode": self.mode,
@@ -209,6 +213,10 @@ class PreflightGate:
     mode: str = ""
     #: Checklist entries this trial adds (factor checks), set by with_extra().
     extra_entries: List[Dict[str, Any]] = field(default_factory=list)
+    #: Which entries run (2026-11-04): "" all of them (trials gate, older callers), "pre_launch"
+    #: only the machine entries marked ``"stage": "pre_launch"`` (before the stack starts),
+    #: "t0" every other entry (the T-0 gate once the stack is up). Set by with_stage().
+    stage: str = ""
     #: "sequential" or "concurrent" machine checks (run_preflight.py --concurrency).
     #: Empty leaves the choice to $TRIALS_PREFLIGHT_CONCURRENCY, the checklist's
     #: "concurrency", then run_preflight.py's default (concurrent, 2026-10-13).
@@ -251,6 +259,17 @@ class PreflightGate:
         never leak into the next trial's gate.
         """
         return dataclasses.replace(self, extra_entries=[dict(e) for e in entries])
+
+    def with_stage(self, stage: str) -> "PreflightGate":
+        """A copy that runs only the entries of ``stage`` (pre_launch or t0)."""
+        if stage not in ("", "pre_launch", "t0"):
+            raise ValueError(f"unknown gate stage {stage!r} (known: pre_launch, t0)")
+        return dataclasses.replace(self, stage=stage)
+
+    def stage_checks(self, stage: str) -> List[str]:
+        """The check names of the machine entries of ``stage`` in this gate's checklist."""
+        return [e["check"] for e in _checklist_machine_entries(Path(self.checklist))
+                if _entry_stage(e) == stage] if stage == "pre_launch" else []
 
     def with_target(self, target: Any, local_setup: Optional[tuple] = None,
                     project_root: Optional[Path] = None) -> "PreflightGate":
@@ -350,6 +369,7 @@ class PreflightGate:
         status = "fail" if rc == RC_FAIL else "error"
         result = GateResult(status=status, allowed=False, checked_at=now_iso,
                             failed_checks=failed, output_tail=tail,
+                            failed_items=_failed_items(items, Path(self.checklist)),
                             checklist=str(self.checklist), mode=mode,
                             duration_s=duration, n_checks=len(items),
                             factor_checks=factor_items, stop_latch=latch)
@@ -389,16 +409,21 @@ class PreflightGate:
         return merged
 
     def _materialize(self) -> tuple[Path, Optional[Path]]:
-        """(checklist to run, scratch dir to delete) with the extra entries appended."""
-        if not self.extra_entries:
+        """(checklist to run, scratch dir to delete) with the extra entries appended and, with a
+        stage, only that stage's entries (the factor checks belong to the T-0 stage)."""
+        if not self.extra_entries and not self.stage:
             return Path(self.checklist), None
         data = json.loads(Path(self.checklist).read_text(encoding="utf-8"))
         if isinstance(data, list):
             data = {"checklist": data}
         data = dict(data)
+        if self.stage:
+            data["checklist"] = [e for e in (data.get("checklist") or [])
+                                 if (_entry_stage(e) == "pre_launch") == (self.stage == "pre_launch")]
+        extra = [] if self.stage == "pre_launch" else self.extra_entries
         data["checklist"] = list(data.get("checklist") or []) + [
             {"text": e["text"], "check": e["check"], "args": dict(e.get("args") or {})}
-            for e in self.extra_entries]
+            for e in extra]
         scratch = Path(tempfile.mkdtemp(prefix="gate_factor_checks_"))
         merged = scratch / Path(self.checklist).name
         merged.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -549,6 +574,21 @@ def _failed_checks(output: str) -> List[str]:
     return failed
 
 
+def _entry_stage(entry: Any) -> str:
+    """``pre_launch`` for a machine entry marked so, else ``t0`` (a manual entry is always t0)."""
+    if isinstance(entry, dict) and entry.get("check") and str(entry.get("stage", "")) == "pre_launch":
+        return "pre_launch"
+    return "t0"
+
+
+def _failed_items(items: List[Dict[str, Any]], checklist: Path) -> List[Dict[str, Any]]:
+    """The FAIL and ERR items with each entry's ``speak`` sentence (joined by text)."""
+    speak = {e["text"]: e.get("speak", "") for e in _checklist_machine_entries(checklist)}
+    return [{"check": i["check"], "detail": i["detail"], "text": i["text"],
+             "speak": speak.get(i["text"], "")}
+            for i in items if i.get("result") in ("FAIL", "ERR")]
+
+
 def _checklist_machine_entries(checklist: Path) -> List[Dict[str, Any]]:
     """(check, text, hard) of every machine-checked entry, in file order."""
     try:
@@ -561,7 +601,8 @@ def _checklist_machine_entries(checklist: Path) -> List[Dict[str, Any]]:
         if isinstance(item, dict) and item.get("check"):
             text = str(item.get("text", "")).strip()
             out.append({"check": str(item["check"]), "text": text,
-                        "hard": bool(item.get("hard", text.upper().startswith("[HARD]")))})
+                        "hard": bool(item.get("hard", text.upper().startswith("[HARD]"))),
+                        "stage": str(item.get("stage", "")), "speak": str(item.get("speak", ""))})
     return out
 
 

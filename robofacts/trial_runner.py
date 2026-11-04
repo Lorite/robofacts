@@ -115,6 +115,11 @@ class RunnerConfig:
     #: notebooks kept as their own cells (Spot arm-camera mode, spot setup/
     #: stand, EKF priming). Each is {name, command, optional required: false}.
     setup_steps: List[Dict[str, Any]] = field(default_factory=list)
+    #: The robots this experiment uses (runner.yaml ``robots:``, 2026-11-04) and the reset steps
+    #: their robots.yaml entries declare (robot_resets.py), run after ``setup_steps`` and the
+    #: pre-launch checks, before the campaign's setup steps and the launch.
+    robots: List[Dict[str, Any]] = field(default_factory=list)
+    robot_resets: List[Dict[str, Any]] = field(default_factory=list)
     #: Extra long-running launches started alongside the main stack and torn
     #: down with it (e.g. Spot arm-tracking). Each is {name, command}.
     aux_launches: List[Dict[str, Any]] = field(default_factory=list)
@@ -266,6 +271,12 @@ class RunnerConfig:
                 f"{experiment} has no config/{RUNNER_CONFIG_NAME}; the runner needs to be told "
                 f"which launch file to bring up and how to execute one trial")
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        from . import robot_resets as rr
+        try:
+            robots_decl = rr.parse_declaration(raw.get("robots"), str(path))
+            robot_reset_steps = rr.reset_steps(experiments_root, robots_decl, str(path))
+        except rr.RobotResetError as exc:
+            raise RunnerError(str(exc)) from exc
         launch = raw.get("launch") or {}
         for required in ("package", "file"):
             if not launch.get(required):
@@ -287,6 +298,8 @@ class RunnerConfig:
             record_topics=list(raw.get("record_topics") or []),
             action=str((raw.get("action") or {}).get("command", "")).strip(),
             setup_steps=_named_commands(raw.get("setup_steps"), "setup_steps", path),
+            robots=robots_decl,
+            robot_resets=robot_reset_steps,
             aux_launches=_named_commands(raw.get("aux_launches"), "aux_launches", path),
             verify_steps=_named_commands(raw.get("verify_steps"), "verify_steps", path),
             metadata_probes=_metadata_probes(raw.get("metadata_probes"), path),
@@ -478,9 +491,22 @@ def operator_steps_for(operator_steps: Optional[List[Dict[str, Any]]],
 
 
 def setup_steps_for(config: "RunnerConfig", campaign_setup: Optional[List[Dict[str, Any]]],
-                    repeat: bool) -> List[Dict[str, Any]]:
-    """runner.yaml's setup steps, then the campaign's, both filtered by ``when``."""
-    return cs.steps_for(list(config.setup_steps) + list(campaign_setup or []), repeat)
+                    repeat: bool, robot_reset: bool = True) -> List[Dict[str, Any]]:
+    """runner.yaml's setup steps, the robots' resets, then the campaign's, filtered by ``when``."""
+    before, after = setup_groups(config, campaign_setup, repeat, robot_reset)
+    return before + after
+
+
+def setup_groups(config: "RunnerConfig", campaign_setup: Optional[List[Dict[str, Any]]],
+                 repeat: bool, robot_reset: bool = True):
+    """(runner.yaml's setup steps, then robot resets + the campaign's), filtered by ``when``.
+    The pre-launch checks run between the two groups (2026-11-04): after the runner's own steps,
+    which clear a stale stack off the robot's link, and before the resets, which may take a
+    minute (a radio power cycle and an access point coming back), so a low battery stops the
+    trial in seconds."""
+    resets = list(config.robot_resets) if robot_reset else []
+    return (cs.steps_for(list(config.setup_steps), repeat),
+            cs.steps_for(resets + list(campaign_setup or []), repeat))
 
 
 def _metadata_probes(raw: Any, path: Path) -> List[Dict[str, Any]]:
@@ -885,6 +911,18 @@ def tally(statuses: Iterable[str]) -> Dict[str, Any]:
             "line": f"{len(statuses)} trial(s): {ok} OK, {blocked} blocked, {failed} failed"}
 
 
+def speak_gate_reasons(result: Any, limit: int = 3) -> List[str]:
+    """Speak up to ``limit`` failed checks of a NO-GO in plain sentences (2026-11-04): the
+    operator in the flight volume cannot read the screen, and "The gate says no go" alone
+    sent them to the laptop for every block. Silent when the voice is off."""
+    from . import gate_speech
+    items = list(getattr(result, "failed_items", None) or [])
+    lines = gate_speech.sentences(items, limit=limit)
+    for line in lines:
+        voice.speak(line, prefix="[voice] gate reason: ")
+    return lines
+
+
 def confirm_operator_steps_tty(trial: cs.TrialSpec,
                                operator_steps: List[Dict[str, Any]]) -> bool:
     """The CLI's confirmation surface: print the steps, wait for Enter.
@@ -959,6 +997,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
               voice_announce: Any = None,
               repeat: bool = False,
               campaign_setup_steps: Optional[List[Dict[str, Any]]] = None,
+              robot_reset: bool = True,
               ) -> TrialResult:
     """One trial, end to end.
 
@@ -1133,10 +1172,17 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         from .remote_exec_utils import wrap_command
         return wrap_command(cmd, target)
 
-    setup_cmds = [(s["name"], templated_command(s["command"], trial, f"setup step {s['name']}",
-                                                **arg_ph),
-                   s["required"]) for s in setup_steps_for(config, campaign_setup_steps, repeat)
-                  ] if steps["setup"] else []
+    def _setup(group):
+        return [(s["name"], templated_command(s["command"], trial, f"setup step {s['name']}",
+                                              **arg_ph), s["required"]) for s in group]
+    _before, _after = (setup_groups(config, campaign_setup_steps, repeat, robot_reset)
+                       if steps["setup"] else ([], []))
+    setup_before_cmds, setup_after_cmds = _setup(_before), _setup(_after)
+    setup_cmds = setup_before_cmds + setup_after_cmds
+    # The pre-launch checks (2026-11-04): checklist entries with "stage": "pre_launch", run
+    # between the two setup groups, before the stack, so a low battery stops the trial in seconds.
+    pre_launch_names = (gate.stage_checks("pre_launch")
+                        if gate is not None and hasattr(gate, "stage_checks") else [])
     # Aux launches get {bag} too (2026-08-18), for the same reason the action
     # does: a side process that records something ABOUT the trial has to be able
     # to put it beside the trial. Added for sample_process_resources.py, whose
@@ -1230,9 +1276,14 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             for i, step in enumerate(operator_steps, 1):
                 first_line = (str(step.get("text", "")).strip().splitlines() or [""])[0]
                 print(f"[dry-run]   {i}. {first_line[:150]}")
-        if setup_cmds:
+        if setup_before_cmds:
+            print("[dry-run] setup steps (runner.yaml): "
+                  + ", ".join(name for name, _, _ in setup_before_cmds))
+        if pre_launch_names:
+            print("[dry-run] pre-launch checks, before the stack: " + ", ".join(pre_launch_names))
+        if setup_after_cmds:
             print("[dry-run] setup steps, before the launch: "
-                  + ", ".join(name for name, _, _ in setup_cmds))
+                  + ", ".join(name for name, _, _ in setup_after_cmds))
         lines = voice_plan_lines(vplan)
         if lines:
             print(f"[runner] voice plan (dry run, nothing is sent, {voice_target_line()}):")
@@ -1252,6 +1303,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     cwd = config.project_root
     procs: Dict[str, Any] = {}
     detail = ""
+    pre_launch_meta = None
     # Everything this trial prints, on disk next to the experiment. The UI's
     # log is in memory and dies with the process; the terminal's scrollback
     # dies with the window. A trial that failed at 23:00 has to be explainable
@@ -1284,22 +1336,71 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         sys.stdout = _LogTee(_saved_stdout, log_file)
     try:
         announce("before_launch")
-        # Setup steps run after the gate and before the stack: they are the
-        # preconditions, so failing one must abort the trial rather than record
-        # a flight whose rig was never actually configured.
-        for name, cmd, required in setup_cmds:
-            print(f"[setup] {name}")
-            _t_step = time.monotonic()
-            completed = hooks.run_foreground(cmd, target, cwd=cwd, check=False)
-            rc = getattr(completed, "returncode", 0)
-            mark(f"setup:{name}")
-            trace_step(f"setup:{name}", "setup", ok=rc == 0, since=_t_step, rc=rc,
-                 output=getattr(completed, "stdout", "") or "", blocking=required,
-                 note="" if rc == 0 or required else "optional, the trial continued")
-            if rc != 0 and required:
-                raise RunnerError(f"setup step {name!r} failed (rc={rc})")
-            if rc != 0:
-                detail = f"{detail} | optional setup {name} rc={rc}".strip(" |")
+        # Setup steps run before the stack: they are the preconditions, so failing
+        # one must abort the trial rather than record a flight whose rig was never
+        # actually configured. Two groups since 2026-11-04, with the pre-launch
+        # checks between them (setup_groups says why).
+        def _gate_for(stage):
+            g = gate.with_stage(stage) if hasattr(gate, "with_stage") else gate
+            if hasattr(g, "with_target"):
+                g = g.with_target(target, local_env, config.project_root)
+            if gate_spec is not None and hasattr(g, "with_mode"):
+                g = g.with_mode(gate_spec[2], reason=f"shadow: {gate_spec[0]}={gate_spec[1]} "
+                                                     f"(the gate runs and records, a NO-GO does not block)")
+            return g
+
+        def _gate_no_go(stage_label, g, exc, since):
+            mark("gate_done")
+            last = getattr(g, "last_result", None)
+            if last is not None and hasattr(last, "as_metadata"):
+                _ctx["gate"] = last.as_metadata()
+                if stage_label != "gate":
+                    _ctx["gate"]["stage"] = "pre_launch"
+            trace_step(stage_label, "gate", ok=False, since=since, output=str(exc),
+                       note=_gate_note(_ctx.get("gate")))
+            where = "PRE-LAUNCH CHECKS" if stage_label != "gate" else "GATE"
+            print(_c("31;1", f"[runner] {where} NO-GO - not recording, the action does not run"))
+            announce("gate_blocked")
+            speak_gate_reasons(last)
+            _note_gate_refusal(bag_dir, _ctx.get("gate"), str(exc))
+            return TrialResult(trial, None, "blocked", str(exc), commands)
+
+        def _run_setup(group):
+            nonlocal detail
+            for name, cmd, required in group:
+                print(f"[setup] {name}")
+                _t_step = time.monotonic()
+                completed = hooks.run_foreground(cmd, target, cwd=cwd, check=False)
+                rc = getattr(completed, "returncode", 0)
+                mark(f"setup:{name}")
+                trace_step(f"setup:{name}", "setup", ok=rc == 0, since=_t_step, rc=rc,
+                     output=getattr(completed, "stdout", "") or "", blocking=required,
+                     note="" if rc == 0 or required else "optional, the trial continued")
+                if rc != 0 and required:
+                    raise RunnerError(f"setup step {name!r} failed (rc={rc})")
+                if rc != 0:
+                    detail = f"{detail} | optional setup {name} rc={rc}".strip(" |")
+
+        _run_setup(setup_before_cmds)
+        # THE PRE-LAUNCH CHECKS, between the two setup groups.
+        if pre_launch_names:
+            pre_gate = _gate_for("pre_launch")
+            mark("pre_launch_start")
+            _t_pre = time.monotonic()
+            try:
+                try:
+                    pre_result = pre_gate.check(bag_dir.name, {**trial.values, **arg_ph})
+                except TypeError:
+                    pre_result = pre_gate.check(bag_dir.name)
+            except Exception as exc:  # PreflightBlocked, or anything else
+                return _gate_no_go("gate:pre_launch", pre_gate, exc, _t_pre)
+            mark("pre_launch_done")
+            if hasattr(pre_result, "as_metadata"):
+                pre_launch_meta = pre_result.as_metadata()
+            trace_step("gate:pre_launch", "gate",
+                       ok=(pre_launch_meta or {}).get("verdict") != "NO-GO",
+                       since=_t_pre, note=_gate_note(pre_launch_meta), blocking=False)
+        _run_setup(setup_after_cmds)
 
         if launch_cmd:
             procs["launch_stack"] = hooks.start_background(
@@ -1328,15 +1429,17 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # Before the recorder and before the action: a no-go must not produce
         # a bag, and nothing has flown yet. Teardown is in the finally below.
         if gate is not None:
-            trial_gate = gate
+            # Without its pre-launch entries when they ran before the stack (2026-11-04).
+            trial_gate = (gate.with_stage("t0") if pre_launch_names and hasattr(gate, "with_stage")
+                          else gate)
             # The gate runs where the trial runs (2026-10-14): a laptop-driven
             # trial on the Orin used to check the LAPTOP's processes, disk,
             # network and stop latch. A gate that cannot move (a test double,
             # the UI's shell gate) keeps running here.
-            if hasattr(gate, "with_target"):
-                trial_gate = gate.with_target(target, local_env, config.project_root)
+            if hasattr(trial_gate, "with_target"):
+                trial_gate = trial_gate.with_target(target, local_env, config.project_root)
             if gate_spec is not None:
-                trial_gate = gate.with_mode(
+                trial_gate = trial_gate.with_mode(
                     gate_spec[2], reason=f"shadow: {gate_spec[0]}={gate_spec[1]} "
                                          f"(the gate runs and records, a NO-GO does not block)")
             if factor_checks:
@@ -1362,6 +1465,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                      note=_gate_note(_ctx.get("gate")))
                 print(_c("31;1", "[runner] GATE NO-GO - not recording, the action does not run"))
                 announce("gate_blocked")
+                speak_gate_reasons(last)
                 _note_gate_refusal(bag_dir, _ctx.get("gate"), str(exc))
                 return TrialResult(trial, None, "blocked", str(exc), commands)
             mark("gate_done")
@@ -1714,6 +1818,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                   "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")
     if gate_result is not None:
         metadata["preflight"] = gate_result.as_metadata()
+        if pre_launch_meta is not None:
+            # The pre-launch checks of 2026-11-04, inside the same block (no new contract field).
+            metadata["preflight"]["pre_launch"] = pre_launch_meta
     if calibration_results:
         metadata["factor_calibration"] = calibration_results
     if detail:
@@ -2209,7 +2316,8 @@ def _run_plan_items(plan, config, bags_dir, factors, results, session, session_i
                                voice_cues=getattr(plan.campaign, "voice_cues", None),
                                voice_announce=getattr(plan.campaign, "voice_announce", None),
                                repeat=repeat,
-                               campaign_setup_steps=getattr(plan.campaign, "setup_steps", None))
+                               campaign_setup_steps=getattr(plan.campaign, "setup_steps", None),
+                               robot_reset=getattr(plan.campaign, "robot_reset", True))
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -2294,6 +2402,7 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
                        pause_before_action=pause_before_action,
                        operator_steps=campaign.operator_steps,
                        campaign_setup_steps=campaign.setup_steps,
+                       robot_reset=getattr(campaign, "robot_reset", True),
                        scratch_label=safe_label,
                        voice_cues=getattr(campaign, "voice_cues", None),
                        voice_announce=getattr(campaign, "voice_announce", None))
@@ -2493,6 +2602,17 @@ def main(argv=None) -> int:
 
     gate = build_gate(campaign, args.experiments_root, execute=args.execute,
                       override_reason=args.gate_override or "")
+    if not args.execute:
+        # Dry runs are ungated, so the per-trial line cannot name the pre-launch checks: say
+        # once what every executed trial will run before its stack (2026-11-04).
+        rel = campaign.preflight_checklist or "config/preflight_checklist.json"
+        checklist = Path(args.experiments_root) / campaign.experiment / rel
+        if checklist.is_file():
+            names = PreflightGate(checklist=checklist).stage_checks("pre_launch")
+            if names:
+                print("[dry-run] pre-launch checks of every executed trial (from "
+                      f"{campaign.experiment}/{rel}, after runner.yaml's setup steps, before the "
+                      f"robot resets and the stack): {', '.join(names)}")
     if campaign.order:
         print(cp.render_schedule(plan, limit=args.limit or 200))
         print("")
