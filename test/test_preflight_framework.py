@@ -556,3 +556,45 @@ def test_dds_socket_buffer_still_fails_cyclonedds_without_a_config():
     """The lab's false-dead trap stays a FAIL: Cyclone in use, its config unknown."""
     result = _dds_check({"RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"})
     assert result.returncode == 1 and "CYCLONEDDS_URI is unset" in result.stdout
+
+
+def _stub_late_topic(tmp_path: Path, appear_after_calls: int) -> dict:
+    """A `ros2` stub whose `topic list` advertises /late only from the n-th call on,
+    like OpenVINS, which creates /ov_msckf/odomimu once its initializer fired."""
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir(exist_ok=True)
+    counter = tmp_path / "calls"
+    counter.write_text("0")
+    stub = stub_bin / "ros2"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    f"if [ \"$2\" = list ]; then n=$(( $(cat {counter}) + 1 )); echo $n > {counter}; "
+                    f"[ $n -ge {appear_after_calls} ] && echo /late; exit 0; fi\n"
+                    "for i in $(seq 20); do echo 'data: x'; echo '---'; done\n")
+    stub.chmod(0o755)
+    return dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}")
+
+
+def test_topic_rate_appear_s_waits_for_a_late_topic(tmp_path: Path):
+    """appear_s: a topic that is advertised only after a few probes still passes."""
+    env = _stub_late_topic(tmp_path, appear_after_calls=3)
+    result = subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/late", "min_hz=5",
+                             "window_s=3.2", "appear_s=10"],
+                            capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout + result.stderr
+
+
+def test_topic_rate_without_appear_s_still_fails_at_once(tmp_path: Path):
+    """The default keeps the old semantics: one probe, then FAIL 'not advertised at all'."""
+    env = _stub_late_topic(tmp_path, appear_after_calls=3)
+    result = subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/late", "min_hz=5",
+                             "window_s=3.2"],
+                            capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode != 0 and "not advertised at all" in result.stdout, result.stdout
+
+
+def test_topic_rate_appear_s_fails_with_its_own_message(tmp_path: Path):
+    env = _stub_late_topic(tmp_path, appear_after_calls=1000)
+    result = subprocess.run(["bash", str(CHECKS_DIR / "topic_rate.sh"), "topic=/late", "min_hz=5",
+                             "window_s=3.2", "appear_s=2"],
+                            capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode != 0 and "not advertised within 2s" in result.stdout, result.stdout
