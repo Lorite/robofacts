@@ -99,6 +99,14 @@ class Trial:
     corrections: List[Dict[str, Any]] = field(default_factory=list)
     exclusion: Optional[Dict[str, Any]] = None
     recorded: Optional[Dict[str, Any]] = None
+    #: ``trials reverify`` (2026-11-04): the current verify steps run again on
+    #: the bag. When it lifts the abort, ``metadata`` is the lifted copy.
+    reverification: Optional[Dict[str, Any]] = None
+
+    @property
+    def reverified(self) -> bool:
+        """Counts because a re-verify lifted the runner's verify-step abort."""
+        return bool(self.recorded and td.reverification_lifts(self.recorded, self.reverification))
 
     @property
     def excluded_by_hand(self) -> bool:
@@ -208,6 +216,10 @@ def load_trials(experiments_root: Optional[Path] = None,
         corrections = td.read_corrections(meta_path.parent)
         recorded = metadata
         metadata = td.apply_corrections(metadata, corrections)
+        # A re-verify (reverification.json, `trials reverify`) lifts an abort
+        # that came from a verify step alone, when every current step passes.
+        reverification = td.read_reverification(meta_path.parent)
+        metadata = td.apply_reverification(metadata, reverification)
         # Dedupe ONLY a slim copy against its own full bag. A slim copy is
         # named after its full bag plus "_slim" (slim_bag.py), so the key is the
         # experiment plus the directory name without that suffix. Keying on
@@ -239,6 +251,7 @@ def load_trials(experiments_root: Optional[Path] = None,
             corrections=corrections,
             exclusion=td.read_exclusion(meta_path.parent),
             recorded=recorded,
+            reverification=reverification,
         ))
     return trials
 

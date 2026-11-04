@@ -64,7 +64,8 @@ SLIM_SUFFIX = "_slim"
 # person's decisions about the trial (trial_decisions.py): the slim copy must
 # count, or not count, exactly as its bag does.
 SIDECAR_NAMES = ("trial_metadata.json", "rosout.txt", "analysis_metadata.json",
-                 "commanded_waypoints.json", "exclusion.json", "corrections.json")
+                 "commanded_waypoints.json", "exclusion.json", "corrections.json",
+                 "reverification.json")
 PROVENANCE_NAME = "slim_provenance.json"
 RECORD_DIR_NAMES = ("bags", "bags_issues")
 

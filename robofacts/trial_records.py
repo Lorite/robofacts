@@ -499,12 +499,17 @@ def _slim_for(exp_dir: Path, name: str, roots_: Iterable[str]) -> Optional[Path]
 
 def _status_of(trial: ti.Trial) -> Tuple[str, str]:
     if trial.status in ("usable", "unverified"):
-        return trial.status, "; ".join(trial.problems)
+        why = "; ".join(trial.problems)
+        if trial.reverification is not None:
+            why = "; ".join(x for x in (td.describe_reverification(trial.reverification), why) if x)
+        return trial.status, why
     # A person's reason first: it says more than the runner's aborted flag.
     if trial.exclusion is not None:
         return "quarantined", td.describe_exclusion(trial.exclusion)
     if trial.aborted:
         reason = trial.metadata.get("abort_reason") or trial.metadata.get("notes") or "marked aborted"
+        if trial.reverification is not None:
+            reason = f"{reason} [{td.describe_reverification(trial.reverification)}]"
         return "aborted", str(reason)
     if trial.is_issue_bag:
         return "quarantined", ("in bags_issues without an exclusion.json: moved by hand, no reason "

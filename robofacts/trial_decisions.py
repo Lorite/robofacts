@@ -44,6 +44,11 @@ from . import roots
 
 EXCLUSION_FILE = "exclusion.json"
 CORRECTIONS_FILE = "corrections.json"
+#: ``trials reverify`` (trial_reverify.py, 2026-11-04): the current verify steps run again.
+REVERIFICATION_FILE = "reverification.json"
+#: How the runner's ``abort_reason`` starts when a verify step failed after an action that
+#: returned 0 (trial_runner: an action failure is written first, as "action returned rc=").
+VERIFY_ABORT_PREFIX = "verify step "
 #: What kind of cause excluded a trial, so a reader can count them.
 CATEGORIES = ("infrastructure", "operator", "estimator", "other")
 #: Where a bag lives when it counts, and where it lives when excluded.
@@ -88,6 +93,54 @@ def read_corrections(bag_dir: Path) -> List[Dict[str, Any]]:
     entries = data.get("corrections") if isinstance(data, dict) else None
     return [e for e in entries or [] if isinstance(e, dict) and e.get("field")
             and "corrected" in e]
+
+
+def read_reverification(bag_dir: Path) -> Optional[Dict[str, Any]]:
+    """The ``reverification.json`` beside a bag, or None (also when it is unreadable)."""
+    path = Path(bag_dir) / REVERIFICATION_FILE
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def abort_is_verify_only(abort_reason: Any) -> bool:
+    """Did the runner abort the trial for a failed verify step and nothing else?"""
+    return isinstance(abort_reason, str) and abort_reason.startswith(VERIFY_ABORT_PREFIX)
+
+
+def reverification_lifts(metadata: Dict[str, Any], record: Optional[Dict[str, Any]]) -> bool:
+    """A re-verify lifts the abort when every current step passed, the recorded abort came
+    from a verify step alone, and the record was written against THIS abort_reason."""
+    return bool(record and record.get("verify_ok") is True and record.get("lifts_abort") is True
+                and metadata.get("aborted")
+                and abort_is_verify_only(metadata.get("abort_reason"))
+                and record.get("recorded_abort_reason") == metadata.get("abort_reason"))
+
+
+def apply_reverification(metadata: Dict[str, Any], record: Optional[Dict[str, Any]]
+                         ) -> Dict[str, Any]:
+    """The metadata as re-verified: a copy without the abort when the record lifts it."""
+    if not reverification_lifts(metadata, record):
+        return metadata
+    out = {k: v for k, v in metadata.items() if k != "abort_reason"}
+    out["aborted"] = False
+    return out
+
+
+def describe_reverification(record: Dict[str, Any]) -> str:
+    """``re-verified 2026-11-04 by lori: 3 of 3 steps pass, the abort is lifted (reason)``."""
+    steps = record.get("steps") or []
+    passed = sum(1 for s in steps if s.get("rc") == 0)
+    outcome = ("the abort is lifted" if record.get("lifts_abort") else
+               "no change to its status" if record.get("verify_ok") else "it fails today")
+    reason = str(record.get("reason") or "").strip()
+    text = (f"re-verified {str(record.get('date') or '')[:10]} by {record.get('by') or '?'}: "
+            f"{passed} of {len(steps)} steps pass, {outcome}")
+    return f"{text} ({reason})" if reason else text
 
 
 def apply_corrections(metadata: Dict[str, Any], corrections: Sequence[Dict[str, Any]]

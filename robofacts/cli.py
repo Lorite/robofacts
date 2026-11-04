@@ -70,6 +70,11 @@ def _amend(argv):
     return trial_decisions.main_amend(argv)
 
 
+def _reverify(argv):
+    from . import trial_reverify
+    return trial_reverify.main(argv)
+
+
 def _check(argv):
     from . import campaign_spec
     return campaign_spec.main(argv)
@@ -214,6 +219,8 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "restore": (_restore, "move an excluded trial back into coverage, keeping its old reason"),
     "amend": (_amend, "correct a recorded factor level in corrections.json; "
                       "trial_metadata.json is never edited"),
+    "reverify": (_reverify, "run a trial's current verify steps again (reverification.json); a "
+                            "pass lifts an abort that came from a verify step only"),
     "lint": (_lint, "check every declaration against the rules (pytest)"),
     "validate": (_validate, "is an experiment ready: check, plan, gate, lint, its tests, dry run"),
     "gate": (_gate, "run a T-0 gate checklist by hand"),
