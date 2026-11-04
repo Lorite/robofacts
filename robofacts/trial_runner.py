@@ -777,6 +777,10 @@ DEFAULT_VOICE_ANNOUNCE: Dict[str, Optional[str]] = {
     "record_start": "Recording.",
     "record_end": "Recording stopped.",
     "gate_blocked": "The gate says no go. Nothing was recorded.",
+    # Spoken on a GO (2026-11-04, Alejandro: the operator stands at the drone and only heard
+    # the NO-GO). On hardware the runner then waits for "fly"; without that pause (--no-pause,
+    # or a simulation's plain Enter) the default is shortened to its first sentence.
+    "gate_passed": "The gate passed. Type fly when you are ready.",
 }
 
 
@@ -815,10 +819,10 @@ def voice_plan_lines(plan: Dict[str, Any]) -> List[str]:
     """The plan as printed lines, in the order the trial would speak them."""
     announce = plan.get("announce") or {}
     lines: List[str] = []
-    for moment in ("before_launch", "gate_blocked", "record_start"):
+    only = {"gate_blocked": "  (only on a NO-GO)", "gate_passed": "  (only on a GO)"}
+    for moment in ("before_launch", "gate_blocked", "gate_passed", "record_start"):
         if announce.get(moment):
-            lines.append(f"{moment}: {announce[moment]}"
-                         + ("  (only on a NO-GO)" if moment == "gate_blocked" else ""))
+            lines.append(f"{moment}: {announce[moment]}" + only.get(moment, ""))
     for cue in plan.get("cues") or []:
         lines.append(f"+{cue.at_s:.1f} s: {cue.text}")
     if announce.get("record_end"):
@@ -1475,6 +1479,13 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             # trial run: a failing, non-blocking step in the trace.
             trace_step("gate", "gate", ok=(_ctx.get("gate") or {}).get("verdict") != "NO-GO",
                  since=_t_gate, note=_gate_note(_ctx.get("gate")), blocking=False)
+            # A real GO is spoken, a shadow gate's recorded NO-GO is not ("passed" would lie).
+            if (_ctx.get("gate") or {}).get("verdict") != "NO-GO":
+                text = vplan["announce"].get("gate_passed")
+                if (text and text == DEFAULT_VOICE_ANNOUNCE["gate_passed"]
+                        and (not pause_before_action or config.simulation)):
+                    vplan["announce"]["gate_passed"] = "The gate passed."
+                announce("gate_passed")
 
         # CALIBRATION MEASUREMENTS (factor_checks: calibration, scratch only):
         # the stack is up and the gate passed, so the condition a factor check

@@ -90,7 +90,7 @@ BLOCKED_MARKER = "BLOCKED LEVEL"
 #: ``voice_cues`` during the recorded action and its ``voice_announce`` lines
 #: at fixed moments of the trial, through operator_voice.py and the laptop's
 #: voice daemon. These are the moments a ``voice_announce`` may name.
-VOICE_ANNOUNCE_KEYS = ("before_launch", "record_start", "record_end", "gate_blocked")
+VOICE_ANNOUNCE_KEYS = ("before_launch", "record_start", "record_end", "gate_blocked", "gate_passed")
 #: Keys of one ``voice_cues`` entry.
 VOICE_CUE_KEYS = ("at_s", "text")
 

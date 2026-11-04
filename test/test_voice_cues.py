@@ -347,3 +347,29 @@ def test_run_plan_hands_the_campaign_voice_to_each_trial(root, monkeypatch):
     tr.run_plan(plan, tr.RunnerConfig.load("expA", root), root / "expA" / "bags", dry_run=True)
     assert [c["at_s"] for c in seen["voice_cues"]] == [0, 8, 88, 101]
     assert seen["voice_announce"] is False
+
+
+def test_a_go_is_announced(root, monkeypatch, no_sleep):
+    """The operator stands at the drone: a passed gate is spoken too (2026-11-04)."""
+    said = []
+    monkeypatch.setattr(ov, "send", lambda text, **kw: said.append(text) or True)
+
+    class Go:
+        last_result = None
+
+        def check(self, label, values=None):
+            return None
+
+    factors, config, trial = _pieces(root)
+    tr.run_trial(trial, factors, config, root / "expA" / "bags", dry_run=False,
+                 hooks=FakeHooks().hooks(), slim=False, gate=Go(), pause_before_action=False)
+    assert "The gate passed." in said
+    assert tr.DEFAULT_VOICE_ANNOUNCE["gate_blocked"] not in said
+
+
+def test_gate_passed_is_a_campaign_announce_key():
+    assert "gate_passed" in cs.VOICE_ANNOUNCE_KEYS
+    plan = tr.voice_plan(None, {"gate_passed": None}, simulation=False)
+    assert plan["announce"]["gate_passed"] is None
+    plan = tr.voice_plan(None, None, simulation=False)
+    assert plan["announce"]["gate_passed"] == tr.DEFAULT_VOICE_ANNOUNCE["gate_passed"]
