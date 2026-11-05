@@ -41,6 +41,10 @@ Profiles (``PROFILES``):
                        #164). See _shadow_sensors.
   ``teleop_shadow_flight`` shadow_flight + ``/joy``: the same flight flown by a
                        pilot on a gamepad (#168). See _teleop_pad.
+  ``spot_observer_handcam_vio`` spot_observer_handcam + aideck_mocap +
+                       vio_shadow: Spot's markerless estimate and the drone's AI
+                       deck VIO in one bag, with mocap as truth (#170). See the
+                       PROFILES comment.
 
 Every profile is a plain list of topic names, exactly like the hand-written
 lists this repo already uses (``build_record_command()`` in the run notebook,
@@ -602,6 +606,16 @@ PROFILES: Dict[str, List[str]] = {
     # variable of the handcam shadow campaigns; still no pixels.
     "spot_observer_handcam": ["mocap_firmware", "spot_observer",
                               "markerless_debug_handcam"],
+    # spot_observer_handcam + the drone's AI deck frames, the relay's IMU and OpenVINS
+    # (#170, 2026-11-05): the quadruped's markerless estimate and the drone's own VIO in ONE
+    # bag with mocap truth, so a gap in Spot's view can be cut offline and bridged by the VIO.
+    # No bag before this profile had both (0 of 4,842 in the archive on 2026-11-05). The AI
+    # deck frames are small (320 x 320 mono at about 8 fps, about 0.8 MB/s), not the hand
+    # camera's pixels, which this profile still leaves out because of the 59.8 -> 7.4 Hz
+    # starvation above. Whether the estimator keeps its rate with OpenVINS and this recorder
+    # on the same Orin is NOT measured yet: check it on the ground before the first flight.
+    "spot_observer_handcam_vio": ["mocap_firmware", "spot_observer",
+                                  "markerless_debug_handcam", "aideck_mocap", "vio_shadow"],
     # spot_observer_handcam PLUS the hand camera's replay-grade pixels and
     # NOTHING of the route demo (2026-08-11, the depth-confound follow-up to
     # the 08-10 background-lock finding). WHY IT EXISTS: the 08-10 shadow bags
@@ -712,6 +726,11 @@ PROFILE_NOTES = {
                                     "16UC1 registered depth at ~0.6 MB/frame; same "
                                     "unverified-Orin-cost caveat as spot_route_replay "
                                     "— STATIC recording only until measured)",
+    "spot_observer_handcam_vio": "~55-75 MB/min (spot_observer_handcam + the AI deck "
+                                 "frames, IMU and OpenVINS; the shadow flight bag of "
+                                 "2026-11-04 measured 53 MB/min for the drone part). The "
+                                 "estimator's rate with OpenVINS on the same Orin is not "
+                                 "measured yet: check it on the ground first",
     "spot_route_replay": "~0.4-0.8 GB/min ESTIMATE (spot_observer_handcam + the "
                          "hand camera's native JPEG colour + RAW 16UC1 registered "
                          "depth at ~0.6 MB/frame + the operator's loop-closure "

@@ -399,3 +399,14 @@ def test_teleop_shadow_flight_is_shadow_flight_plus_the_pad():
     assert "/cfb1/cmd_full_state" in teleop
     assert not is_heavy_topic("/joy")
 
+
+def test_spot_observer_handcam_vio_is_the_handcam_bag_plus_the_drone_vio():
+    """#170 (2026-11-05): Spot's markerless estimate and the drone's VIO in one bag."""
+    handcam = build_topics("spot_observer_handcam", cf_name="cfb1")
+    vio = build_topics("aideck_vio_shadow", cf_name="cfb1")
+    both = build_topics("spot_observer_handcam_vio", cf_name="cfb1")
+    assert set(handcam) <= set(both)
+    assert set(vio) - set(handcam) <= set(both)
+    assert "/ov_msckf/odomimu" in both and "/cfb1/aideck/image_raw" in both
+    assert "spot_observer_handcam_vio" in PROFILE_NOTES
+
