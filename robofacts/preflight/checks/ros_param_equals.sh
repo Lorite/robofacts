@@ -12,6 +12,9 @@
 #
 #   ros_param_equals.sh node=/camera/d435 param=depth_module.visual_preset expected=3 [timeout_s=10]
 #
+# Arrays (2026-11-09, the lab's #170 teleop box): Humble prints `Double values are:
+# array('d', [-0.6, 0.7])` (or a plain list for strings); declare `expected=[-0.6, 0.7]` and the
+# lists compare element by element, numbers numerically, the rest as text.
 # Numbers compare numerically (4 equals 4.0), everything else as text, case
 # insensitive (True equals true). An empty `expected` FAILS ("not declared"),
 # so an undeclared level can never pass. A node that is absent, a parameter
@@ -36,6 +39,26 @@ RC=$?
 # `ros2 param get` prints "<Type> value is: <value>" (Humble): Integer, Double,
 # String, Boolean, and the array types.
 VALUE="$(printf '%s\n' "$OUT" | sed -n 's/^[A-Za-z ]* value is: //p' | head -n 1)"
+ARRAY="$(printf '%s\n' "$OUT" | sed -n 's/^[A-Za-z ]* values are: //p' | head -n 1)"
+if [ -n "$ARRAY" ]; then
+    VALUE="$(printf '%s' "$ARRAY" | sed -E "s/^array\('[a-zA-Z]', (\[.*\])\)$/\1/")"
+    if python3 -c '
+import ast, sys
+try:
+    a, b = ast.literal_eval(sys.argv[1]), ast.literal_eval(sys.argv[2])
+except (ValueError, SyntaxError):
+    sys.exit(1)
+def eq(x, y):
+    try:
+        return float(x) == float(y)
+    except (TypeError, ValueError):
+        return str(x).lower() == str(y).lower()
+sys.exit(0 if isinstance(b, (list, tuple)) and len(a) == len(b) and all(eq(x, y) for x, y in zip(a, b)) else 1)
+' "$VALUE" "$EXPECTED" 2>/dev/null; then
+        pf_pass "$NODE $PARAM = $VALUE (expected $EXPECTED)"
+    fi
+    pf_fail "$NODE $PARAM = $VALUE, but the trial declares $EXPECTED"
+fi
 if [ -z "$VALUE" ] && ! printf '%s\n' "$OUT" | grep -q ' value is: '; then
     pf_fail "cannot read $NODE $PARAM: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
 fi

@@ -511,6 +511,24 @@ def test_ros_param_equals_undeclared_expected_fails(tmp_path: Path):
     assert result.returncode == 1 and "no expected value" in result.stdout, result.stdout
 
 
+@pytest.mark.parametrize("reply, expected", [
+    ("Double values are: array('d', [-0.6, 0.7])\n", "[-0.6, 0.7]"),
+    ("Double values are: array('d', [-0.6, 0.7])\n", "[-0.60, 0.7]"),
+    ("String values are: ['a', 'B']\n", "['A', 'b']"),
+])
+def test_ros_param_equals_compares_arrays_element_by_element(tmp_path: Path, reply, expected):
+    """2026-11-09 (#170): the teleop box is a double array, which Humble prints as `values are:`."""
+    result = _run_param_check_against(tmp_path, reply, f"expected={expected}")
+    assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout
+
+
+@pytest.mark.parametrize("expected", ["[-1.5, 0.8]", "[-0.6]", "-0.6"])
+def test_ros_param_equals_refuses_another_array(tmp_path: Path, expected):
+    """The shared box loaded where the Spot box is declared, a short list, or a scalar."""
+    result = _run_param_check_against(tmp_path, "Double values are: array('d', [-0.6, 0.7])\n", f"expected={expected}")
+    assert result.returncode == 1 and "declares" in result.stdout, result.stdout
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
