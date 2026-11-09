@@ -70,13 +70,23 @@ def _topic_value(detail: str) -> str:
     return f"{words.capitalize()} out of range."
 
 
+def _rigidbody_continuity(detail: str) -> str:
+    """Name the body: the check guards Spot's body in the Livox walks and the drone's in the flights. On
+    2026-11-09 'Mocap does not track the drone' sent the operator looking for a drone that the campaign
+    did not use, while Motive was not solving the rigid body 'spot'."""
+    m = re.search(r"rigid body '([^']+)'", detail)
+    if m:
+        return f"Mocap does not track the rigid body {m.group(1).replace('_', ' ')}."
+    return "Mocap does not track the rigid body."
+
+
 BUILT_IN = {
     "battery": _battery,
     "crazyflie_radio_battery": _battery,
     "topic_rate": _topic_rate,
     "topic_value": _topic_value,
     "mocap_stream": lambda d: "Mocap stream missing." if "not advertised" in d else "Mocap stream too slow.",
-    "rigidbody_continuity": lambda d: "Mocap does not track the drone.",
+    "rigidbody_continuity": _rigidbody_continuity,
     "rigidbody_near": lambda d: "The drone is not on its takeoff point.",
     "node_present": lambda d: "A required node is missing.",
     "host_reachable": lambda d: "A host is not reachable.",
