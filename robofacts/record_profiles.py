@@ -45,6 +45,10 @@ Profiles (``PROFILES``):
                        vio_shadow: Spot's markerless estimate and the drone's AI
                        deck VIO in one bag, with mocap as truth (#170). See the
                        PROFILES comment.
+  ``spot_observer_handcam_teleop`` spot_observer_handcam_replay + ``/joy``: the
+                       hand camera's replay-grade pixels of a drone the pilot
+                       flies on a gamepad, as detector training data (#170).
+                       See the PROFILES comment.
 
 Every profile is a plain list of topic names, exactly like the hand-written
 lists this repo already uses (``build_record_command()`` in the run notebook,
@@ -633,6 +637,17 @@ PROFILES: Dict[str, List[str]] = {
     "spot_observer_handcam_replay": ["mocap_firmware", "spot_observer",
                                      "markerless_debug_handcam",
                                      "spot_replay_streams"],
+    # spot_observer_handcam_replay + the gamepad (#170, 2026-11-09): the hand camera's
+    # replay-grade pixels of a drone that a pilot FLIES with the PS5 DualSense, as training
+    # data for the hand-camera detector (the drone with pink guards, auto-labeled from the
+    # mocap projection). /joy proves the pad flew it; the teleop setpoints /<cf>/cmd_full_state
+    # are already in mocap_firmware. This is a flight with the replay streams the profile
+    # above keeps to static material, accepted for one reason: the drone flies on MOCAP and
+    # the estimator only listens, so a starved estimator costs detections, not the flight.
+    # What the flight does depend on, the mocap feed, the campaign's gate and verify watch.
+    "spot_observer_handcam_teleop": ["mocap_firmware", "spot_observer",
+                                     "markerless_debug_handcam",
+                                     "spot_replay_streams", "teleop_pad"],
     # The beyond-the-volume route demo (ICRA Paper 2 Experiment 3). It is
     # spot_observer_handcam plus the two things that demo specifically needs:
     #   * REPLAY-GRADE PIXELS from the hand camera, because outside the mocap
@@ -726,6 +741,11 @@ PROFILE_NOTES = {
                                     "16UC1 registered depth at ~0.6 MB/frame; same "
                                     "unverified-Orin-cost caveat as spot_route_replay "
                                     "— STATIC recording only until measured)",
+    "spot_observer_handcam_teleop": "~0.4-0.8 GB/min ESTIMATE (spot_observer_handcam_replay "
+                                    "+ /joy, a few kB/s). The replay streams in FLIGHT are "
+                                    "unmeasured on the Orin: the drone flies on mocap, so "
+                                    "check the estimator's and the mocap feed's rates in the "
+                                    "first bag",
     "spot_observer_handcam_vio": "~55-75 MB/min (spot_observer_handcam + the AI deck "
                                  "frames, IMU and OpenVINS; the shadow flight bag of "
                                  "2026-11-04 measured 53 MB/min for the drone part). The "

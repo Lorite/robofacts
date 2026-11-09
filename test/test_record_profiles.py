@@ -410,3 +410,12 @@ def test_spot_observer_handcam_vio_is_the_handcam_bag_plus_the_drone_vio():
     assert "/ov_msckf/odomimu" in both and "/cfb1/aideck/image_raw" in both
     assert "spot_observer_handcam_vio" in PROFILE_NOTES
 
+
+def test_spot_observer_handcam_teleop_is_the_replay_bag_plus_the_pad():
+    """#170 (2026-11-09): hand-camera pixels of a teleoperated drone, as detector training data."""
+    replay = build_topics("spot_observer_handcam_replay", cf_name="cfb1")
+    teleop = build_topics("spot_observer_handcam_teleop", cf_name="cfb1")
+    assert set(replay) <= set(teleop)
+    assert set(teleop) - set(replay) == {"/joy"}
+    assert "/cfb1/cmd_full_state" in teleop and "/poses" in teleop
+    assert "spot_observer_handcam_teleop" in PROFILE_NOTES
