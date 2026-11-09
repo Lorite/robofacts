@@ -38,10 +38,9 @@ def project(no_project):
 def test_the_neutral_defaults_without_a_project(no_project):
     assert roots.project_settings() == {}
     assert slc.latch_path() == Path("/tmp/trial_stop_latch")
-    assert rp.names() == rp.DEFAULT_NAMES
-    assert rp.default_cf_name() == "cf1"
+    assert rp.names() == rp.DEFAULT_NAMES == {}, "the core names no robot"
+    assert rp.default_cf_name() is None
     assert rp.profiles() == {}, "without a project there are no record profiles"
-    assert rp.SPOT_NAME == "spot" and rp.CAMERA == "/camera"
 
 
 def test_a_project_sets_its_own_names(project):
@@ -57,7 +56,7 @@ def test_a_project_sets_its_own_names(project):
     assert "/lab_drone/pose" in topics and "/lab_estimator/position" in topics
     assert "/lab_cam/color/camera_info" in topics and "/lab_watchdog/health" in topics
     assert "/lab_spot/odometry" in topics
-    assert rp.SPOT_NAME == "lab_spot"
+    assert rp.names()["spot_name"] == "lab_spot"
     cmd = rp.build_record_command("position_only", "/tmp/x")
     assert "/lab_drone/pose" in cmd
 

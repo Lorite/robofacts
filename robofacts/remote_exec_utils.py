@@ -53,81 +53,64 @@ class RemoteTarget:
 # recorder stop does not accidentally kill the main launch on the same host.
 #
 # ros2 launch/bag record/run have the workspace path in their *arguments*
-# (e.g. spot_config_file:=<workspace>/..., -o <workspace>/bags/...), so the
-# command token comes first: "ros2 launch.*{workspace}".
-# Bash wrapper scripts (record_*_bag.sh) carry the workspace in their path,
-# so the workspace comes first there: "{workspace}.*record_apriltag_mocap_bag".
+# (a config file or the bag directory under the workspace), so the command token
+# comes first: "ros2 launch.*{workspace}".
 #
-# Composable containers (component_container_mt) spawned by ros2 launch do not
-# carry the workspace path nor the "ros2 launch" token in their argv, so the
-# workspace-anchored patterns above miss them. Their argv does include the
-# container's node name (--node-name=… or -r __node:=…). When ros2 launch is
-# killed without a clean shutdown, the container survives as an orphan and the
-# composables it owns (rectifier + apriltag detector here) keep publishing to
-# their topics. On the next launch a fresh container starts with the same name
-# and the detectors stack, doubling the detection-topic publisher count and
-# burning CPU. Match the container by its known node name so the stop sweep
-# catches orphans too. Containers we own:
-#   spot_hand_apriltag_container     — spot_hand_camera_apriltags.launch.py
-#   realsense_apriltag_container     — ros2_realsense_camera_apriltags.launch.py
+# What only a project knows comes from trials.yaml ``stop_patterns:``:
+#
+#   stop_patterns:
+#     recorder_scripts: [record_my_bag]       # bash wrappers that exec ros2 bag record.
+#                                             # They carry the workspace in their path.
+#     owned_containers: [my_container]        # composable containers the project's launches
+#                                             # start. Their argv holds neither the workspace
+#                                             # nor "ros2 launch", so an orphan survives an
+#                                             # unclean shutdown and its detectors stack with
+#                                             # the next launch's. Matched by node name.
+#     kinds:                                  # extra kinds, regex templates with {workspace}
+#       my_subsystem: "ros2 launch.*my_subsystem"
 #
 # The ROS 2 daemon (/usr/bin/python3 -c "from ros2cli.daemon…") is intentionally
 # NOT matched by any of these — never kill the daemon.
-_OWNED_COMPONENT_CONTAINERS = (
-    'spot_hand_apriltag_container',
-    'realsense_apriltag_container',
-)
-_COMPONENT_CONTAINER_PATTERN = (
-    'component_container.*(' + '|'.join(_OWNED_COMPONENT_CONTAINERS) + ')'
-)
 
-_PKILL_PATTERN_TEMPLATES: dict[str, str] = {
-    # Everything spawned by this workspace. Used by the full-stack stop cell.
-    'all': (
-        'ros2 (launch|bag record|run ).*{workspace}'
-        '|{workspace}.*(record_apriltag_mocap_bag|record_dual_localization_bag)'
-        '|' + _COMPONENT_CONTAINER_PATTERN
-    ),
-    # Only the bag recorder (ros2 bag record + the bash wrappers that exec it).
-    # Used when stopping a per-demo recorder so the long-running main launch
-    # (ros2 launch ...) on the same host keeps running.
-    'recorder': (
-        'ros2 bag record.*{workspace}'
-        '|{workspace}.*(record_apriltag_mocap_bag|record_dual_localization_bag)'
-    ),
-    # Only ros2 launch / ros2 run processes + their composable containers
-    # (no bag recorders).
-    'launch': (
-        'ros2 (launch|run ).*{workspace}'
-        '|' + _COMPONENT_CONTAINER_PATTERN
-    ),
-    # Only the Spot arm-track sub-launch + the underlying visual servo node.
-    # Used by stop_arm_track_launch() in the apriltag_mocap notebook so the
-    # main launch (spot_ros2 driver + AprilTag pipeline) stays up while the
-    # arm-track launch is torn down. The 'all' / 'launch' patterns above
-    # would otherwise match the main launch's workspace-anchored args and
-    # kill the driver — leaving Spot mid-trajectory and prone to collapse.
-    'arm_track': (
-        'ros2 launch.*spot_arm_track_drone'
-        '|real_spot_visual_servo_node'
-    ),
-    # The crazyswarm2 + position-only flight stack nodes, matched by their
-    # executable name so ORPHANS are caught. Like the composable containers
-    # above, these are spawned by `ros2 launch` but their argv carries neither
-    # the "ros2 launch" token nor (for crazyflie_server) anything but the
-    # workspace install path + node name. When `ros2 launch` dies uncleanly the
-    # node is reparented to PID 1 and the 'all'/'launch' patterns miss it; the
-    # orphan then pollutes the ROS graph (duplicate /crazyflie_server node, stale
-    # /<old_cf>/* services -> the crazyflie_py client picks up a phantom drone and
-    # crashes) and a second server fights the single Crazyradio. Anchored to
-    # {workspace} so only this workspace's stack nodes are matched. Used by the
-    # position-only run notebook's stop helper as a final orphan sweep.
-    'crazyflie_stack': (
-        '{workspace}.*'
-        '(crazyflie_server|motion_capture_tracking|nan_quat_pose_relay'
-        '|mocap_position_degrade_node)'
-    ),
-}
+
+def _stop_settings() -> dict:
+    try:
+        from . import roots
+    except ImportError:  # pragma: no cover - a copy outside the package
+        return {}
+    raw = roots.setting("stop_patterns") or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"trials.yaml: stop_patterns must be a mapping, got {raw!r}")
+    return raw
+
+
+def _alternation(names: Iterable[str]) -> str:
+    return "|".join(re.escape(str(n)) for n in names)
+
+
+def _pkill_pattern_templates() -> dict[str, str]:
+    """The kinds in force: the core's three plus the project's ``stop_patterns.kinds``."""
+    settings = _stop_settings()
+    scripts = _alternation(settings.get("recorder_scripts") or [])
+    containers = _alternation(settings.get("owned_containers") or [])
+    script_part = f"|{{workspace}}.*({scripts})" if scripts else ""
+    container_part = f"|component_container.*({containers})" if containers else ""
+    templates = {
+        # Everything spawned by this workspace. Used by the full-stack stop.
+        'all': 'ros2 (launch|bag record|run ).*{workspace}' + script_part + container_part,
+        # Only the bag recorder (ros2 bag record + the bash wrappers that exec it).
+        # Used when stopping a recorder so the long-running main launch
+        # (ros2 launch ...) on the same host keeps running.
+        'recorder': 'ros2 bag record.*{workspace}' + script_part,
+        # Only ros2 launch / ros2 run processes + their composable containers
+        # (no bag recorders).
+        'launch': 'ros2 (launch|run ).*{workspace}' + container_part,
+    }
+    extra = settings.get("kinds") or {}
+    if not isinstance(extra, dict):
+        raise ValueError(f"trials.yaml: stop_patterns.kinds must be a mapping, got {extra!r}")
+    templates.update({str(k): str(v) for k, v in extra.items()})
+    return templates
 
 
 def _source_chain(files: Iterable[str]) -> str:
@@ -362,9 +345,10 @@ def bag_has_data(target: RemoteTarget | None, bag_dir: Path) -> tuple[bool, str]
 
 def _resolve_pkill_pattern(kind: str, workspace: Path) -> str:
     try:
-        template = _PKILL_PATTERN_TEMPLATES[kind]
+        templates = _pkill_pattern_templates()
+        template = templates[kind]
     except KeyError as exc:
-        valid = ', '.join(sorted(_PKILL_PATTERN_TEMPLATES))
+        valid = ', '.join(sorted(templates))
         raise ValueError(f'pkill kind must be one of {{{valid}}}, got {kind!r}') from exc
     return template.format(workspace=str(workspace))
 
@@ -421,10 +405,9 @@ def pkill_workspace_launches(
       - ``'all'`` (default): every ros2 launch/run/bag record under workspace.
       - ``'recorder'``: only ros2 bag record + the record_*_bag.sh wrappers.
       - ``'launch'``: only ros2 launch / ros2 run (no bag recorders).
-      - ``'crazyflie_stack'``: the crazyswarm2/position-only stack nodes
-        (crazyflie_server, motion_capture_tracking, nan_quat_pose_relay,
-        mocap_position_degrade_node) matched by executable name so reparented
-        orphans of a dead ``ros2 launch`` are reaped too.
+      - any kind the project adds in trials.yaml ``stop_patterns.kinds``, for
+        example nodes matched by executable name so reparented orphans of a dead
+        ``ros2 launch`` are reaped too.
 
     Safe to call even when no Popen handle is available (e.g. after a kernel
     restart that lost ACTIVE_PROCESSES). The pkill pattern is anchored to

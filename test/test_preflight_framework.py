@@ -62,7 +62,7 @@ def test_declared_variables_are_all_used(checklist: Path):
     assert not (declared - used), f"{checklist}: declared but unused {sorted(declared - used)}"
 
 
-@pytest.mark.parametrize("script", sorted(CHECKS_DIR.glob("*.sh")), ids=lambda p: p.name)
+@pytest.mark.parametrize("script", sorted([*CHECKS_DIR.glob("*.sh"), *(CHECKS_DIR.parents[1] / "adapters").glob("*/checks/*.sh")]), ids=lambda p: p.name)
 def test_check_scripts_are_executable_and_valid_bash(script: Path):
     assert script.stat().st_mode & 0o111, f"{script.name} is not executable"
     result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
@@ -124,13 +124,15 @@ def test_unknown_check_is_reported():
     assert len(problems) == 1 and "unknown check" in problems[0]
 
 
-def test_unsupplied_placeholder_is_reported():
+def test_unsupplied_placeholder_is_reported(enable_adapters):
+    enable_adapters('crazyflie')
     entries = [{"text": "x", "check": "battery", "args": {"cf": "${drone}"}, "hard": True}]
     problems = rp.validate(entries, {})
     assert len(problems) == 1 and "${drone}" in problems[0]
 
 
-def test_supplied_placeholder_is_accepted():
+def test_supplied_placeholder_is_accepted(enable_adapters):
+    enable_adapters('crazyflie')
     entries = [{"text": "x", "check": "battery", "args": {"cf": "${cf}"}, "hard": True}]
     assert rp.validate(entries, {"cf": "crazylori_brushless_1"}) == []
 
@@ -207,7 +209,8 @@ def test_schema_error_exits_usage_not_pass(tmp_path: Path):
     assert rp.main(["--checklist", str(checklist), "--no-daemon-bounce"]) == rp.RC_USAGE
 
 
-def test_list_mode_runs_nothing_and_needs_no_ros(tmp_path: Path, capsys):
+def test_list_mode_runs_nothing_and_needs_no_ros(tmp_path: Path, capsys, enable_adapters):
+    enable_adapters('crazyflie')
     checklist = tmp_path / "c.json"
     checklist.write_text(json.dumps({"checklist": [
         {"text": "battery ok", "check": "battery", "args": {"cf": "${cf}"}},
@@ -248,7 +251,11 @@ def test_missing_required_argument_exits_usage(script: str, argv):
     """A check missing an argument must exit 2, not stumble on with an empty
     value. pf_arg is read inside $( ), where an exit only kills the subshell -
     hence the explicit pf_require_args gate in the main shell."""
-    result = subprocess.run(["bash", str(CHECKS_DIR / script), *argv], capture_output=True, text=True)
+    path = CHECKS_DIR / script
+    if not path.is_file():  # a robot adapter's check, run here without PF_LIB on purpose
+        from robofacts import adapters
+        path = next(adapters.ADAPTERS_DIR.glob(f"*/checks/{script}"))
+    result = subprocess.run(["bash", str(path), *argv], capture_output=True, text=True)
     assert result.returncode == RC_USAGE_EXPECTED, (
         f"{script} exited {result.returncode}:\n{result.stdout}{result.stderr}")
     out = result.stdout + result.stderr

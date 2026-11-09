@@ -16,11 +16,12 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .rosout_trim_utils import detect_storage_id, stamp_to_float
 from .pose_error_analysis import PoseSample
 
 
 __all__ = [
+    "detect_storage_id",
+    "stamp_to_float",
     "read_messages",
     "read_messages_with_time",
     "load_pose_samples",
@@ -30,6 +31,29 @@ __all__ = [
     "write_json",
     "write_csv_columns",
 ]
+
+
+def detect_storage_id(bag_dir: Path) -> str:
+    """Detect the storage plugin used by a bag directory.
+
+    Reads ``metadata.yaml`` first; falls back to probing for ``.db3`` files.
+    Returns ``"sqlite3"`` or ``"mcap"`` (default).
+    """
+    metadata_file = bag_dir / "metadata.yaml"
+    if metadata_file.exists():
+        for line in metadata_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("storage_identifier:"):
+                return stripped.split(":", 1)[1].strip()
+    if any(bag_dir.glob("*.db3")):
+        return "sqlite3"
+    return "mcap"
+
+
+def stamp_to_float(stamp) -> float:
+    """Convert a ROS builtin_interfaces/Time stamp to a float (seconds)."""
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
+
 
 
 def read_messages(input_bag: Path, topics=None):

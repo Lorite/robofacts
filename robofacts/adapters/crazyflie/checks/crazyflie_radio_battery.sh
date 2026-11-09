@@ -9,7 +9,7 @@
 #
 # Read-only: one log block of pm.vbat at 10 Hz, the median of `samples` values. No setpoint, never
 # arms. A radio that cannot be opened, a link that does not come up, or cflib missing is a FAIL.
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="crazyflie_radio_battery.sh uri=<radio uri> min_v=<V> [samples=5] [timeout_s=20]"
 pf_parse_args "$@"
 pf_require_args uri min_v

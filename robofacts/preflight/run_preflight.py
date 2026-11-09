@@ -98,6 +98,54 @@ def _roots():
         return None
 
 
+def _adapters():
+    """The package's adapters module, or None outside the package (see _roots)."""
+    try:
+        if __package__:
+            from .. import adapters
+        else:  # pragma: no cover - python3 path/to/run_preflight.py
+            from robofacts import adapters  # type: ignore[no-redef]
+        return adapters
+    except ImportError:
+        return None
+
+
+def adapter_checks_dirs() -> List[Path]:
+    """The checks of the robot adapters the project enables (trials.yaml ``adapters:``)."""
+    adapters = _adapters()
+    return adapters.checks_dirs() if adapters is not None else []
+
+
+def parallel_safe_checks() -> frozenset:
+    """The core's read-only probes, the enabled adapters' ones, and the project's own
+    (trials.yaml ``parallel_safe_checks:``, for checks in its common/preflight/checks/)."""
+    out = set(PARALLEL_SAFE_CHECKS)
+    adapters = _adapters()
+    if adapters is not None:
+        out |= adapters.merged_set("PARALLEL_SAFE_CHECKS")
+    roots = _roots()
+    if roots is not None:
+        out |= {str(c) for c in (roots.setting("parallel_safe_checks") or [])}
+    return frozenset(out)
+
+
+def sequential_checks() -> Dict[str, str]:
+    """The checks that must run alone, with the reason: the core's and the enabled adapters'."""
+    out = dict(SEQUENTIAL_CHECKS)
+    adapters = _adapters()
+    if adapters is not None:
+        out.update(adapters.merged_dict("SEQUENTIAL_CHECKS"))
+    return out
+
+
+def _unknown_check_hint(check: str) -> str:
+    adapters = _adapters()
+    owner = adapters.owner_of_check(check) if adapters is not None else None
+    if owner is None:
+        return ""
+    return f" (it belongs to the {owner!r} adapter: enable it in trials.yaml, adapters: [{owner}])"
+
+
 def project_checks_dir(experiments_root: Optional[Path] = None) -> Optional[Path]:
     """The project's own checks directory, or None when no project is found."""
     roots = _roots()
@@ -110,13 +158,14 @@ def project_checks_dir(experiments_root: Optional[Path] = None) -> Optional[Path
 
 
 def check_dirs(experiments_root: Optional[Path] = None) -> List[Path]:
-    """Where a check script may live, in lookup order."""
+    """Where a check script may live, in lookup order: the project, the enabled adapters,
+    the core."""
     project = project_checks_dir(experiments_root)
-    return [d for d in (project, CHECKS_DIR) if d is not None]
+    return [d for d in (project, *adapter_checks_dirs(), CHECKS_DIR) if d is not None]
 
 
 def find_check(name: str, experiments_root: Optional[Path] = None) -> Optional[Path]:
-    """The script of the check ``name``: the project's own first, then the package's."""
+    """The script of the check ``name``: the project's own, then an enabled adapter's, then the core's."""
     for directory in check_dirs(experiments_root):
         script = directory / f"{name}.sh"
         if script.is_file():
@@ -153,12 +202,12 @@ DEFAULT_JOBS = 8
 #: bag_dir_writable writes and removes a probe file whose name carries its own
 #: PID, so two instances cannot collide.
 PARALLEL_SAFE_CHECKS = frozenset({
-    "address_on_interface", "bag_dir_writable", "battery", "camera_frames",
-    "dds_socket_buffer", "disk_space", "drone_armable", "ekf_convergence",
-    "estop_reachable", "file_exists", "gpu_memory", "graph_nav_localized",
+    "address_on_interface", "bag_dir_writable", "camera_frames",
+    "dds_socket_buffer", "disk_space",
+    "estop_reachable", "file_exists", "gpu_memory",
     "gz_world_matches", "host_reachable", "mocap_stream",
-    "node_present", "px4_preflight_pass", "ros_param_equals", "rosout_report",
-    "stop_latch", "topic_rate", "topic_value", "watchdog_health",
+    "node_present", "ros_param_equals", "rosout_report",
+    "stop_latch", "topic_rate", "topic_value",
 })
 
 #: Checks that must run alone, and why (read from each script's code).
@@ -175,10 +224,6 @@ SEQUENTIAL_CHECKS = {
     "mem_available": (
         "measures MemAvailable, which the concurrent checks' own ros2 CLI processes "
         "consume, so it reads a quiet machine only when it runs alone"),
-    "crazyflie_radio_battery": (
-        "opens its own link on the Crazyradio (cflib, 2026-11-04), which allows one user at a "
-        "time, so it must not race another radio check; it runs in the pre-launch stage, before "
-        "crazyflie_server takes the radio"),
     "rigidbody_near": (
         "one `ros2 topic echo --once` on the same NamedPoseArray topic that "
         "rigidbody_continuity captures (2026-10-29): on the rig only the first echo on a "
@@ -316,7 +361,7 @@ def runs_in_parallel(entry: Dict[str, Any]) -> bool:
     """
     if entry.get("parallel") is not None:
         return bool(entry["parallel"])
-    return entry.get("check") in PARALLEL_SAFE_CHECKS
+    return entry.get("check") in parallel_safe_checks()
 
 
 def plan_batches(machine: List[Dict[str, Any]], concurrency: str) -> List[List[int]]:
@@ -354,12 +399,14 @@ def validate(entries: List[Dict[str, Any]], variables: Dict[str, str]) -> List[s
         script = find_check(check)
         if script is None:
             problems.append(f"{entry['text'][:60]!r} -> unknown check {check!r} "
-                            f"(no {check}.sh in {' or '.join(str(d) for d in check_dirs())})")
+                            f"(no {check}.sh in {' or '.join(str(d) for d in check_dirs())})"
+                            f"{_unknown_check_hint(check)}")
             continue
 
-        if entry.get("parallel") is True and check in SEQUENTIAL_CHECKS:
+        sequential = sequential_checks()
+        if entry.get("parallel") is True and check in sequential:
             problems.append(f"check {check!r} cannot be declared parallel: "
-                            f"{SEQUENTIAL_CHECKS[check]}")
+                            f"{sequential[check]}")
 
         for key, value in entry["args"].items():
             for name in _PLACEHOLDER.findall(value):
@@ -382,7 +429,7 @@ def run_check(entry: Dict[str, Any], variables: Dict[str, str], timeout_s: float
     """Run one check script. Returns (exit code, single-line detail)."""
     script = find_check(entry["check"])
     if script is None:
-        return RC_USAGE, f"unknown check {entry['check']!r}"
+        return RC_USAGE, f"unknown check {entry['check']!r}{_unknown_check_hint(entry['check'])}"
     # Through bash on purpose: a package installed by pip or colcon may not keep
     # the executable bit, and the script's own shebang is bash anyway.
     argv = ["bash", str(script)] + [f"{k}={substitute(v, variables)}" for k, v in entry["args"].items()]

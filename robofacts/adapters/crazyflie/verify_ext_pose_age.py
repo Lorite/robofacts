@@ -286,7 +286,7 @@ def _drone_of(topic: str, suffix: str) -> Optional[str]:
 
 def read_series(bag: Path) -> Tuple[Dict[str, List[Sample]], Dict[str, List[Flag]]]:
     """Every drone's ext_pose_age samples and IS_FLYING flags, on the recorder's clock."""
-    from .bag_io_utils import read_messages_with_time
+    from ...bag_io_utils import read_messages_with_time
 
     ages: Dict[str, List[Sample]] = {}
     flags: Dict[str, List[Flag]] = {}

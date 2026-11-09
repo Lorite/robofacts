@@ -32,12 +32,20 @@ PROFILE_FILE = {
 }
 
 
+#: A project with the two robot adapters whose default names the topics use, and the
+#: estimator's names of its own.
+BASE_TRIALS_YAML = (
+    "experiments_root: experiments\nproject_root: .\nadapters: [crazyflie, spot]\n"
+    "record_profiles: {camera: /camera, markerless_node: /estimator, "
+    "watchdog: /localization_watchdog}\n")
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """A project with a trials.yaml and a record_profiles.yaml, and no root variables."""
     for var in (roots.ENV_EXPERIMENTS_ROOT, roots.ENV_PROJECT_ROOT):
         monkeypatch.delenv(var, raising=False)
-    (tmp_path / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n")
+    (tmp_path / "trials.yaml").write_text(BASE_TRIALS_YAML)
     config = tmp_path / "experiments" / rp.PROJECT_PROFILES_REL
     config.parent.mkdir(parents=True)
     config.write_text(yaml.safe_dump(PROFILE_FILE))
@@ -76,13 +84,26 @@ def test_repeated_topics_are_recorded_once(project):
 
 def test_names_come_from_trials_yaml_and_the_call(project):
     (project / "trials.yaml").write_text(
-        "experiments_root: experiments\nproject_root: .\n"
-        "record_profiles: {cf_name: lab_drone, camera: /lab_cam, spot_name: lab_spot}\n")
+        "experiments_root: experiments\nproject_root: .\nadapters: [crazyflie, spot]\n"
+        "record_profiles: {cf_name: lab_drone, camera: /lab_cam, spot_name: lab_spot, "
+        "markerless_node: /estimator, watchdog: /localization_watchdog}\n")
     assert build_topics("flight")[0] == "/lab_drone/pose"
     assert "/lab_spot/odometry" in build_topics("with_robot")
     listed = build_topics("full", cf_name="drone9", node="/mk", watchdog="/wd", camera="/cam")
     assert "/drone9/battery" in listed and "/mk/position" in listed
     assert "/wd/health" in listed and "/cam/color/image_raw" in listed
+
+
+def test_the_adapters_bring_the_robot_names(project):
+    """The core has no names: cf_name and spot_name come from the enabled adapters."""
+    (project / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n")
+    assert rp.names() == {}
+    with pytest.raises(rp.ProfileError, match="cf_name"):
+        build_topics("flight")
+    (project / "trials.yaml").write_text(
+        "experiments_root: experiments\nproject_root: .\nadapters: [crazyflie]\n")
+    assert rp.names() == {"cf_name": "cf1"}
+    assert build_topics("flight")[0] == "/cf1/pose"
 
 
 def test_an_unknown_name_names_itself(project):

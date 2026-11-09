@@ -469,7 +469,8 @@ def _lease_echo(owner: str) -> str:
     return "=== spot.lease ===\nresources:\n" + "\n".join(blocks) + "\n---\n=== OK spot.lease\n"
 
 
-def test_the_lease_action_states_who_holds_the_body_lease(client, monkeypatch):
+def test_the_lease_action_states_who_holds_the_body_lease(client, monkeypatch, enable_adapters):
+    enable_adapters('spot')
     class Done:
         returncode = 0
         stdout = _lease_echo("ros_rig:__main__.py-192339")
@@ -482,7 +483,8 @@ def test_the_lease_action_states_who_holds_the_body_lease(client, monkeypatch):
     assert all(f"<tr><td>{r}</td>" in body for r in ("all-leases", "arm", "body", "mobility"))
 
 
-def test_a_free_body_lease_says_so(client, monkeypatch):
+def test_a_free_body_lease_says_so(client, monkeypatch, enable_adapters):
+    enable_adapters('spot')
     class Done:
         returncode = 0
         stdout = _lease_echo("")
@@ -494,12 +496,18 @@ def test_a_free_body_lease_says_so(client, monkeypatch):
     assert "Body lease: nobody holds it" in body
 
 
-def test_other_actions_show_no_lease_table():
+def test_other_actions_show_no_lease_table(enable_adapters):
+    enable_adapters('spot')
     assert ui.lease_owners("=== OK spot.ready") is None
     assert ui.lease_owners("resources: [unclosed") is None
     owners = ui.lease_owners(_lease_echo("tablet"))
     assert [o["resource"] for o in owners][:3] == ["all-leases", "arm", "body"]
     assert {o["client_name"] for o in owners} == {"tablet"}
+
+
+def test_no_lease_table_without_the_spot_adapter(enable_adapters):
+    enable_adapters()
+    assert ui.lease_owners(_lease_echo("tablet")) is None
 
 
 def test_robot_action_requires_auth(client):

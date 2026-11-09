@@ -5,7 +5,7 @@
 # what let a blind estimator take off).
 #
 #   ekf_convergence.sh cf=cf1 [max_err_m=0.05] [gt_topic=/poses]
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="ekf_convergence.sh cf=<name> [max_err_m=0.05] [gt_topic=/poses] [ekf_topic=/<cf>/pose]"
 pf_parse_args "$@"
 pf_require_args cf

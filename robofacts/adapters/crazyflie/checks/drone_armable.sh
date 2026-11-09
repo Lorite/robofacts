@@ -14,7 +14,7 @@
 #   16 IS_FLYING     32 IS_TUMBLED             64 IS_LOCKED
 #
 #   drone_armable.sh cf=cf1 [topic=/<cf>/status]
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="drone_armable.sh cf=<name> [topic=/<cf>/status]"
 pf_parse_args "$@"
 pf_require_args cf

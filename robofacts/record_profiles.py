@@ -52,15 +52,10 @@ import yaml
 
 from . import roots
 
-#: Neutral defaults of the names the profiles are built from: the drone (``cf_name``),
-#: the quadruped's namespace (``spot_name``), the camera namespace and the estimator,
-#: bridge and watchdog node namespaces. A project sets its own under
-#: ``record_profiles:`` in trials.yaml, and may add any other name there.
-DEFAULT_NAMES: Dict[str, str] = {
-    "cf_name": "cf1", "spot_name": "spot", "camera": "/camera",
-    "markerless_node": "/estimator", "extpos_bridge": "/estimator_bridge",
-    "watchdog": "/localization_watchdog",
-}
+#: The core knows no robot, so it has no default names. Each enabled robot adapter adds
+#: its own (the Crazyflie adapter ``cf_name: cf1``, the Spot adapter ``spot_name: spot``),
+#: and a project sets its own under ``record_profiles:`` in trials.yaml, any name it uses.
+DEFAULT_NAMES: Dict[str, str] = {}
 
 #: The profile file of a project, relative to its experiments root.
 PROJECT_PROFILES_REL = Path("common") / "config" / "record_profiles.yaml"
@@ -77,8 +72,11 @@ class ProfileError(ValueError):
 
 
 def names() -> Dict[str, str]:
-    """The names in force: the package defaults under the project's ``record_profiles``."""
+    """The names in force: the enabled adapters' defaults under the project's ``record_profiles``."""
+    from . import adapters
+
     merged = dict(DEFAULT_NAMES)
+    merged.update({str(k): str(v) for k, v in adapters.merged_dict("NAMES").items()})
     project = roots.setting("record_profiles") or {}
     if not isinstance(project, dict):
         raise ValueError(f"trials.yaml: record_profiles must be a mapping, got {project!r}")
@@ -86,9 +84,10 @@ def names() -> Dict[str, str]:
     return merged
 
 
-def default_cf_name() -> str:
-    """The drone the profiles name their topics after, unless runner.yaml says ``cf_name:``."""
-    return names()["cf_name"]
+def default_cf_name() -> Optional[str]:
+    """The drone the profiles name their topics after, unless runner.yaml says ``cf_name:``.
+    None when neither the project nor an enabled adapter names one."""
+    return names().get("cf_name")
 
 
 def default_record_profile() -> Optional[str]:
@@ -198,16 +197,11 @@ def profile_notes(experiments_root: Optional[Path] = None) -> Dict[str, str]:
 
 
 def __getattr__(name):
-    """``PROFILES`` and ``PROFILE_NOTES`` resolved from the files on access, and the old name
-    constants (MARKERLESS_NODE, EXTPOS_BRIDGE, WATCHDOG, CAMERA, SPOT_NAME) from the names."""
+    """``PROFILES`` and ``PROFILE_NOTES`` resolved from the files on access."""
     if name == "PROFILES":
         return profiles()
     if name == "PROFILE_NOTES":
         return profile_notes()
-    keys = {"MARKERLESS_NODE": "markerless_node", "EXTPOS_BRIDGE": "extpos_bridge",
-            "WATCHDOG": "watchdog", "CAMERA": "camera", "SPOT_NAME": "spot_name"}
-    if name in keys:
-        return names()[keys[name]]
     raise AttributeError(name)
 
 
@@ -317,7 +311,7 @@ def main(argv=None) -> int:
     ap.add_argument("profile", nargs="?", help="a profile name (omit with --list)")
     ap.add_argument("--list", action="store_true",
                     help="list the profiles in force, their size notes and their files")
-    ap.add_argument("--cf-name", default=None, help="default: trials.yaml record_profiles.cf_name, else cf1")
+    ap.add_argument("--cf-name", default=None, help="default: trials.yaml record_profiles.cf_name, else the adapter's")
     ap.add_argument("--output", default="", help="bag output directory (-o)")
     ap.add_argument("--storage", default="mcap")
     ap.add_argument("--max-duration-sec", type=int, default=0)

@@ -172,7 +172,8 @@ def test_failed_items_carry_the_entry_speak(root):
 # --------------------------------------------------------------------------- #
 # Spoken reasons
 # --------------------------------------------------------------------------- #
-def test_the_spoken_reasons_of_the_lab_day():
+def test_the_spoken_reasons_of_the_lab_day(enable_adapters):
+    enable_adapters('crazyflie')
     items = [{"check": "crazyflie_radio_battery", "detail": "battery 3.758 V is below the 3.85 V launch threshold"},
              {"check": "topic_rate", "detail": "/crazylori_brushless_1/flow_log advertised but only ~28.7 Hz over 5s (need >= 30) - publisher stalled or dead"},
              {"check": "mocap_stream", "detail": "/poses is not advertised at all"},
@@ -214,7 +215,8 @@ class StageGate:
         return self.last_result
 
 
-def test_a_pre_launch_no_go_stops_before_the_resets_and_the_stack_and_speaks(root, monkeypatch):
+def test_a_pre_launch_no_go_stops_before_the_resets_and_the_stack_and_speaks(root, monkeypatch, enable_adapters):
+    enable_adapters('crazyflie')
     config = tr.RunnerConfig.load("expA", root)
     c = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
     factors = cs.load_factors("expA", root)

@@ -81,8 +81,6 @@ def _rigidbody_continuity(detail: str) -> str:
 
 
 BUILT_IN = {
-    "battery": _battery,
-    "crazyflie_radio_battery": _battery,
     "topic_rate": _topic_rate,
     "topic_value": _topic_value,
     "mocap_stream": lambda d: "Mocap stream missing." if "not advertised" in d else "Mocap stream too slow.",
@@ -91,7 +89,6 @@ BUILT_IN = {
     "node_present": lambda d: "A required node is missing.",
     "host_reachable": lambda d: "A host is not reachable.",
     "estop_reachable": lambda d: "The emergency stop is not reachable.",
-    "drone_armable": lambda d: "The drone cannot arm.",
     "camera_frames": lambda d: "Camera frames missing.",
     "disk_space": lambda d: "Disk almost full.",
     "stop_latch": lambda d: "The stop latch is set. Clear it first.",
@@ -110,6 +107,12 @@ def sentence(item: Dict[str, Any]) -> str:
             return custom
     check = str(item.get("check") or "a check")
     fn = BUILT_IN.get(check)
+    if fn is None:
+        try:
+            from . import adapters
+            fn = adapters.merged_dict("GATE_SENTENCES").get(check)
+        except Exception:  # noqa: BLE001 - a sentence must never break a NO-GO
+            fn = None
     if fn is not None:
         try:
             return fn(detail)

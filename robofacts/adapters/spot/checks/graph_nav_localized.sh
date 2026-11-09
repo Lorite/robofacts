@@ -15,7 +15,7 @@
 #   localized age=0.1s src=service tf=graph_nav_map->... n_pub=169 n_rej=1 n_frozen=0
 #
 #   graph_nav_localized.sh [topic=/graph_nav_map_tf/status] [max_age_s=2.0] [max_frozen=0]
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="graph_nav_localized.sh [topic=/graph_nav_map_tf/status] [max_age_s=2.0] [max_frozen=0]"
 pf_parse_args "$@"
 pf_require_ros

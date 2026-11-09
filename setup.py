@@ -26,6 +26,7 @@ setup(
     package_data={
         package_name: [
             "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md",
+            "adapters/*/checks/*.sh", "adapters/*/*.yaml",
             "ui/templates/*.html", "ui/static/*", "tools/*.sh",
             *files_under("skeleton"),
         ],

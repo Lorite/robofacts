@@ -11,7 +11,7 @@
 # check reads the flag PX4 publishes, before anything is recorded.
 #
 #   px4_preflight_pass.sh [topic=/fmu/out/vehicle_status_v1] [timeout_s=8]
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="px4_preflight_pass.sh [topic=/fmu/out/vehicle_status_v1] [timeout_s=8]"
 pf_parse_args "$@"
 pf_require_ros

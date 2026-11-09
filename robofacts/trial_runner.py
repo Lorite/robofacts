@@ -659,7 +659,8 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
     from .record_profiles import default_cf_name
 
     cf_name = trial.launch_args(factors).get("cf_name") or config.cf_name or default_cf_name()
-    return build_record_command(profile, str(bag_dir), cf_name=str(cf_name),
+    return build_record_command(profile, str(bag_dir),
+                                cf_name=(str(cf_name) if cf_name else None),
                                 storage=config.record_storage,
                                 experiments_root=config.experiments_root)
 

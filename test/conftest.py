@@ -60,3 +60,13 @@ def _runner_sleeps_cost_nothing(request, monkeypatch):
         return
     from robofacts import trial_runner
     monkeypatch.setattr(trial_runner, "time", _TimeWithoutSleep())
+
+
+@pytest.fixture
+def enable_adapters(monkeypatch):
+    """Enable robot adapters for one test, as `adapters: [...]` in trials.yaml would."""
+    from robofacts import adapters
+
+    def enable(*names):
+        monkeypatch.setattr(adapters, "_setting", lambda: list(names))
+    return enable

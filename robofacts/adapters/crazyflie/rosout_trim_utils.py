@@ -40,33 +40,15 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
 
+# The two generic bag helpers live in the core. They are re-exported for the callers of this module.
+from ...bag_io_utils import detect_storage_id, stamp_to_float  # noqa: E402,F401
+
 __all__ = [
     "get_rosout_trim_bounds",
     "get_command_activity_bounds",
     "apply_trim",
 ]
 
-
-def detect_storage_id(bag_dir: Path) -> str:
-    """Detect the storage plugin used by a bag directory.
-
-    Reads ``metadata.yaml`` first; falls back to probing for ``.db3`` files.
-    Returns ``"sqlite3"`` or ``"mcap"`` (default).
-    """
-    metadata_file = bag_dir / "metadata.yaml"
-    if metadata_file.exists():
-        for line in metadata_file.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("storage_identifier:"):
-                return stripped.split(":", 1)[1].strip()
-    if any(bag_dir.glob("*.db3")):
-        return "sqlite3"
-    return "mcap"
-
-
-def stamp_to_float(stamp) -> float:
-    """Convert a ROS builtin_interfaces/Time stamp to a float (seconds)."""
-    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
 def get_command_activity_bounds(commanded, epsilon: float = 1e-6) -> Optional[Tuple[float, float]]:

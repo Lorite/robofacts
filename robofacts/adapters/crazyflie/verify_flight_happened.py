@@ -34,7 +34,7 @@ from pathlib import Path
 
 
 import numpy as np
-from .bag_io_utils import read_messages
+from ...bag_io_utils import read_messages
 
 GT_TOPICS = ("/poses", "/poses_full")
 TF_TOPICS = ("/tf",)
@@ -72,9 +72,9 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     if args.drone_body is None:
-        from .record_profiles import default_cf_name
+        from ...record_profiles import default_cf_name
 
-        args.drone_body = default_cf_name()
+        args.drone_body = default_cf_name() or "cf1"
     z = heights(args.bag, args.drone_body, args.pose_source)
     topics = TF_TOPICS if args.pose_source == "tf" else GT_TOPICS
 

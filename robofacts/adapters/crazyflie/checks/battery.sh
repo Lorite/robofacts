@@ -3,7 +3,7 @@
 # a battery you cannot read is a battery you cannot trust.
 #
 #   battery.sh cf=cf1 [min_v=3.9] [topic=/<cf>/status]
-source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
+source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../preflight/lib/common.sh}"
 PF_HELP="battery.sh cf=<name> [min_v=3.9] [topic=/<cf>/status]"
 pf_parse_args "$@"
 pf_require_args cf

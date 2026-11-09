@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from robofacts import adapters
+
 import robofacts.preflight  # noqa: F401  (the parent package of the module under test)
 from robofacts import preflight_gate as pg
 
@@ -191,6 +193,18 @@ def test_every_check_script_is_classified_exactly_once():
     assert scripts == safe | alone, (
         f"unclassified: {sorted(scripts - safe - alone)}, unknown: {sorted((safe | alone) - scripts)}. "
         f"Read the new check's code and add it to PARALLEL_SAFE_CHECKS or SEQUENTIAL_CHECKS")
+
+
+@pytest.mark.parametrize("adapter", adapters.AVAILABLE)
+def test_every_adapter_check_is_classified_exactly_once_by_its_adapter(adapter):
+    module = adapters.module(adapter)
+    scripts = {p.stem for p in (adapters.ADAPTERS_DIR / adapter / "checks").glob("*.sh")}
+    safe, alone = set(module.PARALLEL_SAFE_CHECKS), set(module.SEQUENTIAL_CHECKS)
+    assert not safe & alone
+    assert scripts == safe | alone, (
+        f"{adapter}: unclassified {sorted(scripts - safe - alone)}, unknown {sorted((safe | alone) - scripts)}")
+    core = {p.stem for p in (PREFLIGHT / "checks").glob("*.sh")}
+    assert not scripts & core, f"{adapter} shadows core checks {sorted(scripts & core)}"
 
 
 @pytest.mark.parametrize("check", sorted(rp.SEQUENTIAL_CHECKS))

@@ -65,7 +65,25 @@ Every command resolves the experiments root in this order: the `--experiments-ro
 
 ## Project settings in `trials.yaml`
 
-Besides the two roots, `trials.yaml` may hold the names a project gives to what used to be constants in the code, so that the package itself knows no robot: `stop_latch` (the file every stop command writes first, which the gate's `stop_latch` check refuses while it is younger than 120 s, default `/tmp/trial_stop_latch`) and `record_profiles` (the drone, quadruped, camera and node names the named record profiles build their topic lists from, defaults `cf1`, `spot`, `/camera`, `/estimator`, `/estimator_bridge`, `/localization_watchdog`). An experiment's `runner.yaml` may still say `cf_name:` for its own drone. The environment variables the package reads all start with `TRIALS_`: `TRIALS_EXPERIMENTS_ROOT`, `TRIALS_PROJECT_ROOT`, `TRIALS_STOP_LATCH`, `TRIALS_PREFLIGHT_CONCURRENCY`, `TRIALS_PREFLIGHT_TIMING_LOG`, `TRIALS_VOICE`, `TRIALS_VOICE_HOST`, `TRIALS_VOICE_PORT`, `TRIALS_ROBOTS_CONFIG`.
+Besides the two roots, `trials.yaml` may hold the names a project gives to what used to be constants in the code, so that the package itself knows no robot: `stop_latch` (the file every stop command writes first, which the gate's `stop_latch` check refuses while it is younger than 120 s, default `/tmp/trial_stop_latch`) and `record_profiles` (the names, such as the drone or the camera namespace, that fill the placeholders of the project's record profiles. The core has no defaults, and an enabled robot adapter brings its own, `cf1` for the Crazyflie and `spot` for Spot). `adapters`, `parallel_safe_checks` and `stop_patterns` are described under "Robot adapters" below. An experiment's `runner.yaml` may still say `cf_name:` for its own drone. The environment variables the package reads all start with `TRIALS_`: `TRIALS_EXPERIMENTS_ROOT`, `TRIALS_PROJECT_ROOT`, `TRIALS_STOP_LATCH`, `TRIALS_PREFLIGHT_CONCURRENCY`, `TRIALS_PREFLIGHT_TIMING_LOG`, `TRIALS_VOICE`, `TRIALS_VOICE_HOST`, `TRIALS_VOICE_PORT`, `TRIALS_ROBOTS_CONFIG`.
+
+## Robot adapters
+
+The core of the package names no robot. What only makes sense for one robot family is a robot adapter under `robofacts/adapters/`, and a project enables the ones it uses in `trials.yaml`:
+
+```yaml
+adapters: [crazyflie, spot, px4]
+```
+
+| Adapter | Gate checks | Default names | Other |
+|---|---|---|---|
+| `crazyflie` | `battery`, `crazyflie_radio_battery`, `drone_armable`, `ekf_convergence` | `cf_name: cf1` | verify steps `verify_flight_happened`, `verify_ext_pose_age`, the analysis windows of `rosout_trim_utils` |
+| `spot` | `graph_nav_localized` | `spot_name: spot` | the lease table of an action that echoes `<robot>/status/leases` in the web interface |
+| `px4` | `px4_preflight_pass` | | |
+
+An adapter's checks are found after the project's own checks and before the core ones, its names fill record-profile placeholders under the project's own, and its helpers are modules such as `robofacts.adapters.crazyflie.verify_flight_happened`. Nothing of a disabled adapter is in force. A project's own checks go in `experiments/common/preflight/checks/`, and the ones that are read-only probes may share a gate batch when `trials.yaml` lists them in `parallel_safe_checks:`.
+
+The stop sweeps match the processes of the project's workspace. What only the project knows goes in `trials.yaml` under `stop_patterns:`: `recorder_scripts` (wrappers that exec `ros2 bag record`), `owned_containers` (composable containers its launches start, matched by node name so an orphan is found), and `kinds` (extra named patterns, regex templates with `{workspace}`).
 
 ## Record profiles
 
