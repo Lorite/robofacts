@@ -53,8 +53,8 @@ import yaml
 from . import roots
 
 #: The core knows no robot, so it has no default names. Each enabled robot adapter adds
-#: its own (the Crazyflie adapter ``cf_name: cf1``, the Spot adapter ``spot_name: spot``),
-#: and a project sets its own under ``record_profiles:`` in trials.yaml, any name it uses.
+#: its own (see robofacts/adapters), and a project sets its own under ``record_profiles:``
+#: in trials.yaml, any name it uses.
 DEFAULT_NAMES: Dict[str, str] = {}
 
 #: The profile file of a project, relative to its experiments root.
@@ -62,9 +62,6 @@ PROJECT_PROFILES_REL = Path("common") / "config" / "record_profiles.yaml"
 
 #: The package's own profile file (generic blocks only, it may be absent).
 PACKAGE_PROFILES_FILE = Path(__file__).resolve().parent / "record_profiles.yaml"
-
-#: The keyword arguments of build_topics that name a placeholder by an older, shorter name.
-_KWARG_NAMES = {"node": "markerless_node", "bridge": "extpos_bridge"}
 
 
 class ProfileError(ValueError):
@@ -197,11 +194,16 @@ def profile_notes(experiments_root: Optional[Path] = None) -> Dict[str, str]:
 
 
 def __getattr__(name):
-    """``PROFILES`` and ``PROFILE_NOTES`` resolved from the files on access."""
+    """``PROFILES``, ``PROFILE_NOTES``, ``HEAVY_TOPIC_PATTERNS`` and ``LIGHT_TOPIC_SUFFIXES``
+    resolved from the files and the project settings on access."""
     if name == "PROFILES":
         return profiles()
     if name == "PROFILE_NOTES":
         return profile_notes()
+    if name == "HEAVY_TOPIC_PATTERNS":
+        return heavy_topic_patterns()
+    if name == "LIGHT_TOPIC_SUFFIXES":
+        return light_topic_suffixes()
     raise AttributeError(name)
 
 
@@ -227,15 +229,15 @@ def build_topics(profile: str, cf_name: str = None, *,
                  experiments_root: Optional[Path] = None, **name_overrides) -> List[str]:
     """The topic list of a named profile, placeholders filled, order kept, repeats dropped.
 
-    ``cf_name`` and any other name (``camera=``, ``spot_name=``, or the older ``node=`` and
-    ``bridge=``) override the names in force for this call. None means "not overridden"."""
+    ``cf_name`` and any other name given as a keyword (``camera=``) override the names in
+    force for this call. None means "not overridden"."""
     data = load(experiments_root)
     if profile not in data["profiles"]:
         raise ValueError(f"unknown record profile {profile!r}; "
                          f"expected one of {sorted(data['profiles'])}")
     values = names()
     overrides = {"cf_name": cf_name, **name_overrides}
-    values.update({_KWARG_NAMES.get(k, k): str(v) for k, v in overrides.items() if v is not None})
+    values.update({k: str(v) for k, v in overrides.items() if v is not None})
     spec = data["profiles"][profile]
     topics: List[str] = []
     for block in spec["blocks"]:
@@ -247,44 +249,55 @@ def build_topics(profile: str, cf_name: str = None, *,
 
 # ── heavy topics (what slim_bag drops) ───────────────────────────────────────────────────
 
-#: Topics whose payload is an image/point cloud — the reason full bags are huge.
-#: Also used by ``slim_bag.py`` as the default exclusion set.
-HEAVY_TOPIC_PATTERNS = (
+#: Topics whose payload is an image or a point cloud, the reason full bags are huge. A slim
+#: copy of a bag drops them. A project adds its own patterns in trials.yaml
+#: (``slim_topics: {heavy_patterns: [...]}``), for example a lidar driver's point stream.
+CORE_HEAVY_TOPIC_PATTERNS = (
     "image_raw", "image_rect", "image_color", "/depth/", "aligned_depth",
     "/points", "point_cloud", "pointcloud", "/rgb/", "compressedDepth", "/infra",
-    # A JPEG stream is still a pixel stream: Spot's hand camera publishes only
-    # `<ns>/camera/hand/compressed`, which is the bulk of those bags and was
-    # being kept because nothing else here matched it.
+    # A JPEG stream is still a pixel stream. A camera driver that publishes only
+    # `<ns>/compressed` matched nothing else here, so its slim copies kept the bulk of
+    # the bag (found 2026-08-05).
     "/compressed",
-    # Spot's REGISTERED DEPTH (`<ns>/depth_registered/hand/image`) matched none
-    # of the patterns above: not "image_raw", not "/depth/" (it is
-    # "/depth_registered/"), not "aligned_depth". So a bag carrying it would
-    # have been "slimmed" with the depth left in — ~0.6 MB per 640x480 16UC1
-    # frame, i.e. the slim copy would have been the same order as the heavy one
-    # and `fetch_slim_bags.sh` would have pulled it over the lab Wi-Fi. Found
-    # while adding `spot_route_replay` (2026-08-05); the /camera_info sibling is
-    # protected by LIGHT_TOPIC_SUFFIXES below, so intrinsics still survive.
+    # REGISTERED depth (`<ns>/depth_registered/...`) matches neither "/depth/" nor
+    # "aligned_depth", so a slim copy kept about 0.6 MB per 640x480 16UC1 frame and was
+    # the same order of size as the full bag (found 2026-08-05). Its camera_info sibling
+    # stays light (CORE_LIGHT_TOPIC_SUFFIXES).
     "depth_registered",
-    # Livox Mid-360S (#109): the CustomMsg point stream (~200k pts/s, ~3 MB/s)
-    # and the FAST-LIO2 registered clouds. `/livox/imu` stays light on purpose:
-    # 200 Hz of sensor_msgs/Imu is ~60 KB/s and the odometry cannot be
-    # re-run without it.
-    "/livox/lidar", "/cloud_registered", "/cloud_effected", "/Laser_map",
 )
 
-#: Never treated as heavy however they are named. Two kinds live here:
-#: camera_info (a few hundred bytes each, and without the intrinsics a recorded
-#: estimate cannot be re-projected), and the #94 debug overlay - which is a
-#: *compressed image* and so would be caught by "/compressed" above, except
-#: that carrying it is the entire point of a light bag (~18 KB/frame at 2 Hz).
-LIGHT_TOPIC_SUFFIXES = ("/camera_info", "/debug/overlay/compressed")
+#: Never treated as heavy however they are named: camera_info is a few hundred bytes, and
+#: without the intrinsics a recorded estimate cannot be re-projected. A project adds its own
+#: suffixes in trials.yaml (``slim_topics: {light_suffixes: [...]}``), for example a small
+#: debug image that is the point of a light bag.
+CORE_LIGHT_TOPIC_SUFFIXES = ("/camera_info",)
 
 
-def is_heavy_topic(topic: str, patterns=HEAVY_TOPIC_PATTERNS) -> bool:
-    """True for image/depth/pointcloud-class topics (the ones bags choke on)."""
-    if topic.endswith(LIGHT_TOPIC_SUFFIXES):
+def _slim_setting(key: str) -> tuple:
+    raw = roots.setting("slim_topics") or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"trials.yaml: slim_topics must be a mapping, got {raw!r}")
+    values = raw.get(key) or []
+    if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
+        raise ValueError(f"trials.yaml: slim_topics.{key} must be a list of strings, got {values!r}")
+    return tuple(values)
+
+
+def heavy_topic_patterns() -> tuple:
+    """The core's heavy patterns plus the project's ``slim_topics.heavy_patterns``."""
+    return CORE_HEAVY_TOPIC_PATTERNS + _slim_setting("heavy_patterns")
+
+
+def light_topic_suffixes() -> tuple:
+    """The core's light suffixes plus the project's ``slim_topics.light_suffixes``."""
+    return CORE_LIGHT_TOPIC_SUFFIXES + _slim_setting("light_suffixes")
+
+
+def is_heavy_topic(topic: str, patterns=None) -> bool:
+    """True for image, depth and point-cloud topics (the ones bags choke on)."""
+    if topic.endswith(light_topic_suffixes()):
         return False
-    return any(p in topic for p in patterns)
+    return any(p in topic for p in (heavy_topic_patterns() if patterns is None else patterns))
 
 
 # ── the command ──────────────────────────────────────────────────────────────────────────

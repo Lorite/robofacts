@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pictures of a trial from its own bag: evenly spaced stills and a camera video (#138).
+"""Pictures of a trial from its own bag: evenly spaced stills and a camera video.
 
 Most trials have no spectator video (``trial_video.mp4`` exists only where an
 experiment rendered one), but many record an onboard camera. An experiment that
@@ -7,7 +7,7 @@ wants its trial cards filled declares that camera once, in
 ``experiments/<exp>/config/trial_media.yaml``::
 
     camera:
-      topic: /crazyflie/aideck/image   # sensor_msgs/Image or sensor_msgs/CompressedImage
+      topic: /drone/camera/image    # sensor_msgs/Image or sensor_msgs/CompressedImage
       label: drone camera              # what the UI calls it, so nobody mistakes it for the trial video
       stills: 8                        # evenly spaced frames per trial
       video: true                      # also an H.264 mp4 of the whole topic
@@ -19,8 +19,8 @@ that streams raw frames or JPEG, a detector overlay or the plain camera)::
 
     camera:
       topic:
-        - {topic: /markerless_position_node/debug/overlay/compressed, label: detector overlay}
-        - {topic: /spot/camera/hand/compressed, label: hand camera}
+        - {topic: /estimator_node/debug/overlay/compressed, label: detector overlay}
+        - {topic: /robot/camera/arm/compressed, label: arm camera}
 
 No topic lives in the code: an experiment without the file has no stills, and the
 UI falls back to the spectator video's poster or to a plot of the trial.

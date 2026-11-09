@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Experiments control surface — the web UI (#96 Phase 5, redrawn from scratch in #131).
+"""Experiments control surface — the web UI (phase 5, redrawn from scratch).
 
 Pick a combination, see how many bags it already has, run it, watch it, and open
 the result — from the laptop browser, while the trial runs wherever it runs.
 
-One information architecture on every page (#131): an experiment, its campaigns
+One information architecture on every page: an experiment, its campaigns
 (each one a plan: wanted, covered, still missing, the gate's verdicts) and its
 trials (one row per trial, every trial, with the slim bag to replay, the layout,
 the video, the analyses that used it, the run log and the verify report). The
@@ -37,6 +37,7 @@ Deliberate design constraints
 from __future__ import annotations
 
 import errno
+import re
 import os
 import secrets
 import shlex
@@ -152,7 +153,7 @@ class ActiveRun:
     #: For an exploration: the condition, how to connect Foxglove, and at the
     #: end the parameters that changed and where the file is.
     explore: Dict[str, Any] = field(default_factory=dict)
-    #: For an exploration (#133): explore.ExploreControls, what the run page may
+    #: For an exploration: explore.ExploreControls, what the run page may
     #: do while the stack runs (actions, set back, record, notes).
     controls: Any = None
     _go: threading.Event = field(default_factory=threading.Event)
@@ -192,10 +193,10 @@ class ActiveRun:
                 src = "stack"
             elif head.startswith("[recorder]"):
                 src = "recorder"
-            elif head.startswith(("[markerless_node]", "[livestream]", "[bridge]")):
-                src = "nodes"
             elif head.startswith(("[launch_stack]", "[aux:", "[record]", "[action:")):
                 src = "runner"          # teardown bookkeeping
+            elif re.match(r"\[[A-Za-z_][\w/]*\]", head):
+                src = "nodes"           # a node's own "[name]" prefix
             else:
                 src = "other"
             self.log.append({"src": src, "lvl": lvl, "text": line})
@@ -409,7 +410,7 @@ class RunManager:
                                  "jog": dict(s.jog),
                                  "simulation": s.simulation, "layouts": list(layouts or []),
                                  # The campaign's swept factors, for "restart with another
-                                 # condition" on the run page (#133).
+                                 # condition" on the run page.
                                  "picker": list(picker or []),
                                  "after": after.run_id if after is not None else ""},
                         controls=ex.ExploreControls())
@@ -509,7 +510,7 @@ def summarize_gate_failure(output: str) -> str:
 class _GatePass:
     def as_metadata(self):
         # verdict/status/mode in the gate's own words, so `trials records` and the
-        # trials table read a UI-gated trial like a CLI-gated one (#131).
+        # trials table read a UI-gated trial like a CLI-gated one.
         return {"gate": "preflight.sh", "result": "pass", "verdict": "GO", "status": "pass",
                 "mode": "binding", "at": datetime.now(timezone.utc).isoformat()}
 
@@ -601,10 +602,10 @@ def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None,
 
 
 def load_preflight_checklist(experiments_root: Path, experiment: str):
-    """The #87 checklist as (items, variables) for display — [] if none exists.
+    """The pre-flight checklist as (items, variables) for display — [] if none exists.
 
     Read directly from the JSON the gate itself uses, so the text shown can
-    never drift from the checks run (the same no-drift property the #87 test
+    never drift from the checks run (the same no-drift property the pre-flight test
     suite enforces).
     """
     path = experiments_root / experiment / "config" / "preflight_checklist.json"
@@ -1241,7 +1242,7 @@ def create_app(experiments_root: Optional[Path] = None,
             return render_template("files.html", experiment=experiment, rel=str(inside) if inside.parts else "",
                                    listing=listing, parent=parent, crumbs=crumbs)
         if inside.parts[:2] == trec.POSTER_DIR.parts and target.suffix == ".jpg":
-            # A trial card's poster frame (#137): made on its first request and
+            # A trial card's poster frame: made on its first request and
             # cached, so the page itself never waits for ffmpeg. The video it stands
             # for must be a served file of this experiment too.
             video = trec.video_of_poster(base, target)
@@ -1312,7 +1313,7 @@ def create_app(experiments_root: Optional[Path] = None,
         return render_template("journal.html", journal=journal.snapshot(),
                                runs=runs.all(), crumbs=[("journal", None)])
 
-    # Old addresses, kept so bookmarks and the docs of before #131 still land.
+    # Old addresses, kept so bookmarks and the docs of an earlier version still land.
     @app.route("/campaign/<experiment>/<name>")
     @requires_auth
     def legacy_campaign(experiment: str, name: str):
@@ -1428,7 +1429,7 @@ def create_app(experiments_root: Optional[Path] = None,
                       after: Optional[ActiveRun] = None):
         """Load the campaign with ``pin`` (the --set path) and start an exploration.
 
-        Shared by the 🔭 Explore buttons and the run page's restart (#133).
+        Shared by the 🔭 Explore buttons and the run page's restart.
         Returns the new run, or an error response.
         """
         crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
@@ -1485,7 +1486,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @action("/run/<run_id>/explore_restart")
     @requires_auth
     def explore_restart(run_id: str):
-        """Explore another condition of the same campaign from the run page (#133).
+        """Explore another condition of the same campaign from the run page.
 
         The form carries one ``f_<factor>`` per swept factor. A live exploration
         is stopped first (its action lands, its recording is finalized), and the
@@ -1518,7 +1519,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @action("/run/<run_id>/explore/<op>")
     @requires_auth
     def explore_control(run_id: str, op: str):
-        """The Explore run page's buttons (#133), answered as JSON for the page's fetch.
+        """The Explore run page's buttons, answered as JSON for the page's fetch.
 
         The browser names an action, a parameter or a note, never a command:
         an action must be one runner.yaml's explore.actions declares, a set
@@ -1563,7 +1564,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @action("/preflight/<experiment>")
     @requires_auth
     def preflight(experiment: str):
-        """Run the #87 gate on the trial host, WITHOUT running anything else.
+        """Run the pre-flight gate on the trial host, WITHOUT running anything else.
 
         Same client-of-the-CLI rule: this invokes the experiment's own
         scripts/preflight.sh through the same remote wrapper the runner uses.
@@ -1881,7 +1882,7 @@ def create_app(experiments_root: Optional[Path] = None,
     def serve_bag(experiment: str, name: str):
         """Serve a SLIM bag so the laptop's Foxglove can stream it over the tunnel.
 
-        Only slim bags (#94) are served, and only by resolving the name against
+        Only slim bags are served, and only by resolving the name against
         the ones that actually exist — never by joining user input onto a path,
         which is how a `..` traversal would get out of the tree. Slim bags are a
         few MB, so streaming beats copying; the heavy originals stay put.
@@ -1968,15 +1969,19 @@ def load_robots(app) -> List[str]:
 
 
 def lease_owners(output: str) -> Optional[List[Dict[str, str]]]:
-    """The lease table of an action's output, when the Spot adapter is enabled, else None."""
+    """The lease table of an action's output: the first enabled adapter whose
+    ``LEASE_TABLE`` reads one from it, else None."""
     from .. import adapters
     try:
-        if "spot" not in adapters.enabled():
-            return None
+        names = adapters.enabled()
     except adapters.AdapterError:
         return None
-    from ..adapters.spot.ui import lease_owners as spot_lease_owners
-    return spot_lease_owners(output)
+    for name in names:
+        reader = getattr(adapters.module(name), "LEASE_TABLE", None)
+        table = reader(output) if reader is not None else None
+        if table:
+            return table
+    return None
 
 
 def load_robot_actions(app) -> Dict[str, List[Dict[str, str]]]:

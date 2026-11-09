@@ -1,5 +1,5 @@
 {#- Shared pieces: one trials table, one status badge, one replay cell, one step list,
-    so every page says the same thing the same way (#131). -#}
+    so every page says the same thing the same way. -#}
 
 {%- macro status_badge(status, title='') -%}
 {#- The paper's class (usable, unverified, excluded) first; an excluded trial adds its
@@ -40,7 +40,7 @@
 {%- endmacro -%}
 
 {%- macro view_toggle(table_id) -%}
-{#- Table or cards (#137), the cards by default since 2026-10-22. Hidden until
+{#- Table or cards, the cards by default since 2026-10-22. Hidden until
     app.js shows it: without the script the table is the whole page. -#}
 <div class="viewbar" data-views="{{ table_id }}" hidden>
   <span class="seg" role="group" aria-label="show the trials as">
@@ -56,7 +56,7 @@
 {#- The same records as the table, one card each: a picture box, when it started,
     its name, class, gate, and the links to replay, analyses and files. The picture
     box has one layer per source, in this order: the trial video (its poster frame,
-    trial_records.make_poster), the declared camera (trial_media, #138: its stills,
+    trial_records.make_poster), the declared camera (trial_media: its stills,
     scrubbed on pointer move, and its video, labeled with the camera's name), and
     the trial's result plots (first instead, when trial_media.yaml says card: {first:
     plots}). With more than one, a row of tags on top switches the

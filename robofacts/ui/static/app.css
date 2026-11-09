@@ -1,4 +1,4 @@
-/* The trials UI (#131). A lab console, not a document: high contrast, generous hit
+/* The trials UI. A lab console, not a document: high contrast, generous hit
    targets (it is operated one-handed while holding a drone), and colour reserved for
    state. Two themes: dark follows the OS by default, and the switch in the top bar
    (Auto, Dark, Light, remembered per browser) overrides it, because a darkened flight
@@ -195,7 +195,7 @@ td.statuscol .why { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-
 .topbar .themetoggle { margin-left: auto; }
 .topbar .runpill + .themetoggle { margin-left: .5rem; }
 
-/* ------------------------------------------------- table or cards (#137) -- */
+/* ------------------------------------------------- table or cards -- */
 /* The hidden attribute must win over a display set by a class (.tcards is a grid). */
 [hidden] { display: none !important; }
 .viewbar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .4rem 0; }

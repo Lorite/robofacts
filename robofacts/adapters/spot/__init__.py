@@ -5,6 +5,8 @@ of a node that publishes the map alignment). UI: ``ui.lease_owners`` turns an ac
 of ``<robot>/status/leases`` into a table of who holds each lease resource.
 """
 
+from .ui import lease_owners as LEASE_TABLE  # noqa: E402,F401 (read by the web interface)
+
 #: The default namespace of the robot the record profiles build topics from.
 NAMES = {"spot_name": "spot"}
 

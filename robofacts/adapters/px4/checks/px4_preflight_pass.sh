@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PX4 itself reports that it would arm now: pre_flight_checks_pass is true.
 #
-# Why this exists (SAC 2027 framework paper, E1 phase B, 2026-10-01). With
+# Why this exists (2026-10-01). With
 # the airframe's NAV_DLL_ACT 2 and no ground station, PX4 refuses to arm with
 # "Preflight Fail: No connection to the GCS" (the arming blocker found in the
 # PX4 SITL feasibility check). Every other check of the PX4 gate passes on such

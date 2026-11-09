@@ -4,7 +4,7 @@
 # appeared in 1.0 % of /poses messages, with gaps up to 0.97 s - the EKF flew
 # blind and ran away. Presence-on-average is not presence.
 #
-#   rigidbody_continuity.sh name=cf1 [topic=/poses] [min_pct=90] [window_s=5]
+#   rigidbody_continuity.sh name=robot1 [topic=/poses] [min_pct=90] [window_s=5]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="rigidbody_continuity.sh name=<rigid body> [topic=/poses] [min_pct=90] [window_s=5] [min_frames=100] [cache_s=20]"
 pf_parse_args "$@"
@@ -30,7 +30,7 @@ CACHE_S="$(pf_arg cache_s 20)"
 #   FAIL rigidbody_continuity: only 0 then 0 frames across TWO attempts
 #
 # measured in the same gate where mocap_stream clocked /mocap/drone_pose at
-# 90.5 Hz and an operator probe showed cfb1_bare, spot, spot_hand and tablet_cam
+# 90.5 Hz and an operator probe showed four other bodies
 # all at 408/408. A retry does not help: both attempts come back empty, so this
 # is systematic rather than a lost race - something about the first echo's
 # teardown stops the next one attaching within the window.
@@ -90,4 +90,4 @@ HITS="$(grep -c "name: ${NAME}\$" "$CAP")"
 if [ $((HITS * 100)) -ge $((FRAMES * MIN_PCT)) ]; then
     pf_pass "rigid body '$NAME' present in $HITS/$FRAMES frames (>= ${MIN_PCT} %)${CACHE_AGE}"
 fi
-pf_fail "rigid body '$NAME' present in only $HITS/$FRAMES frames (< ${MIN_PCT} %) - wrong name, or the launch spot is a tracking dead zone"
+pf_fail "rigid body '$NAME' present in only $HITS/$FRAMES frames (< ${MIN_PCT} %) - wrong name, or the launch position is a tracking dead zone"

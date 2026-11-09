@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # A live node's parameter holds the value the trial declares, right now.
 #
-# Why this exists (2026-10-14, SAC 2027 framework paper, realized conditions).
+# Why this exists (2026-10-14, realized conditions).
 # Some levels are node parameters that no launch argument of the experiment
-# sets: the RealSense depth preset lives in the camera launch's own default
+# sets: a depth camera's preset lives in the camera launch's own default
 # and the operator changes it at the rig. Without a check, a trial declared
 # `visual_preset=3` is a claim nobody verified. This reads the parameter from
 # the running node with `ros2 param get`, so a factor can declare it with a
 # per-level `expected` value (`check:` in factors.yaml) and the runner adds it
 # to the trial's gate with the trial's level.
 #
-#   ros_param_equals.sh node=/camera/d435 param=depth_module.visual_preset expected=3 [timeout_s=10]
+#   ros_param_equals.sh node=/camera param=depth_module.visual_preset expected=3 [timeout_s=10]
 #
-# Arrays (2026-11-09, the lab's #170 teleop box): Humble prints `Double values are:
+# Arrays (2026-11-09): Humble prints `Double values are:
 # array('d', [-0.6, 0.7])` (or a plain list for strings); declare `expected=[-0.6, 0.7]` and the
 # lists compare element by element, numbers numerically, the rest as text.
 # Numbers compare numerically (4 equals 4.0), everything else as text, case

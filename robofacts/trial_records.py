@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every trial of an experiment as one record: the join behind ``trials records`` and the web UI (#131).
+"""Every trial of an experiment as one record: the join behind ``trials records`` and the web UI.
 
 The coverage index (``trial_index``) answers "which bags count". The operator who
 just ran a trial and the analyst who reads a cohort also ask "where is everything
@@ -105,7 +105,7 @@ class TrialRecord:
     videos: List[Path] = field(default_factory=list)
     code_version: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    #: Pictures from the trial's own bag (trial_media, #138): evenly spaced stills and
+    #: Pictures from the trial's own bag (trial_media): evenly spaced stills and
     #: a video of the camera the experiment declares, named by its label ("drone
     #: camera"), never mixed with ``videos`` (a rendered trial video).
     stills: List[Path] = field(default_factory=list)
@@ -235,7 +235,7 @@ def _gate_summary(source: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if verdict is None and "status" in source:
         verdict = "GO" if source.get("status") == "pass" else "NO-GO"
     if verdict is None and "result" in source:
-        # The web UI's shell gate before #131 stamped {"gate", "result"} only.
+        # The web UI's shell gate in an earlier version stamped {"gate", "result"} only.
         verdict = "GO" if source.get("result") == "pass" else "NO-GO"
     return {
         "verdict": verdict or "?",
@@ -329,7 +329,7 @@ def _videos_in(path: Path) -> List[Path]:
 
 
 # --------------------------------------------------------------------------- #
-# Poster frames: the still a trial card shows before its video plays (#137)
+# Poster frames: the still a trial card shows before its video plays
 # --------------------------------------------------------------------------- #
 #: Where the poster frames live, inside the experiment: ``runs/`` is git-ignored
 #: and served read-only by the UI's files route, so no new route and no new root.

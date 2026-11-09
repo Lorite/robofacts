@@ -5,10 +5,10 @@
 # Half of the "mystery" failures in this workspace are leftovers from the
 # previous run, not bugs in the new one. Observed repeatedly:
 #
-#   - a previous rig still holding the RealSense D435, so the new one starts
+#   - a previous rig still holding a depth camera, so the new one starts
 #     with an "up" camera node that never produces frames (2026-07-23)
 #   - stacked motion_capture_tracking clients on UDP 1511 starving every new
-#     NatNet client, which looks exactly like "Motive is unreachable"
+#     NatNet client, which looks exactly like "the motion-capture system is unreachable"
 #     (2026-07-23; see docs/TROUBLESHOOTING_REFERENCE.md fault C)
 #   - a stale ros2 daemon making `ros2 node list` / `service list` silently
 #     empty, which NO-GO'd a healthy stack four times (2026-07-22)
@@ -49,7 +49,7 @@ Usage: scripts/kill_ros.sh [--all] [--dry-run] [--grace <seconds>] [--verbose]
   --verbose        Print the full command line of every matched process.
   -h, --help       Show this help.
 
-Kills the ROS 2 nodes, launches, bag recorders, RViz, Gazebo/gz, the RealSense and
+Kills the ROS 2 nodes, launches, bag recorders, RViz, Gazebo/gz, the depth camera and
 motion-capture drivers and component containers of your ROS_DOMAIN_ID (unset
 means 0), then restarts the ros2 daemon of that domain. Processes on other
 domains are listed and left alone, unless --all. Safe to run from a terminal you

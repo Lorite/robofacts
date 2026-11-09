@@ -13,7 +13,7 @@
 #
 #   ./scripts/estop.sh              # E-STOP every robot, in parallel
 #   ./scripts/estop.sh --soft       # land / halt gracefully instead
-#   ./scripts/estop.sh --robot crazyflie
+#   ./scripts/estop.sh --robot robot1
 #   ./scripts/estop.sh --list       # show what is configured, do nothing
 #   ./scripts/estop.sh --dry-run    # print the exact commands, run nothing
 #
@@ -23,7 +23,7 @@
 # THIS IS NOT THE PRIMARY KILL. It travels laptop -> ssh -> container -> DDS,
 # and every hop can fail: on 2026-07-22 the e-stop terminal had no DDS discovery
 # while everything else looked healthy. The physical kill switch stays primary,
-# and the #87 estop_reachable check must pass before every flight.
+# and the estop_reachable check must pass before every flight.
 # =============================================================================
 
 set -uo pipefail
@@ -122,7 +122,7 @@ PY
 # is not flying the drone. With the laptop's container named, the local docker
 # inspect below succeeds and the stop goes straight into it:
 #
-#   RIG_CONTAINER=ros2_humble_dev ./scripts/estop.sh --robot crazyflie
+#   RIG_CONTAINER=ros2_humble_dev ./scripts/estop.sh --robot robot1
 #
 build_command() {
     local host="$1" container="$2" shell="$3" inner="$4"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-experiment trial index and coverage report (#96 Phase 1).
+"""Cross-experiment trial index and coverage report (phase 1).
 
 Answers the question that used to need reading notebooks: **which combinations
 do we already have bags for, and which cells are still empty?**
@@ -18,7 +18,7 @@ A coverage grid built on bad metadata looks authoritative while being wrong, so
 every row carries its contract verdict. Trials that violate the schema are
 counted separately and never silently inflate a cell — the audit found 63 of 179
 existing trials missing ``aborted`` alone. Aborted trials are likewise counted
-apart from usable ones: 22 spot trials really were aborted, and a cell showing
+apart from usable ones: 22 walking-robot trials really were aborted, and a cell showing
 "22 bags" that are all aborted is worse than a cell showing zero.
 
 Usage
@@ -27,8 +27,8 @@ Usage
     python3 experiments/common/scripts/trial_index.py --summary
 
     # a coverage grid over chosen axes
-    python3 .../trial_index.py --experiment ros2_spot_crazyflie_crazyswarm2_apriltag_mocap \\
-        --factors apriltag_backend,spot_arm_camera_mode
+    python3 .../trial_index.py --experiment my_experiment \\
+        --factors detector_backend,arm_camera_mode
 
     # a report to drop into Obsidian
     python3 .../trial_index.py --report /tmp/coverage.md
@@ -184,7 +184,7 @@ def load_trials(experiments_root: Optional[Path] = None,
         validate_metadata = None
 
     # The slim directories carry a COPY of trial_metadata.json alongside the
-    # slim bag (#94), so counting them naively doubled coverage for every
+    # slim bag, so counting them naively doubled coverage for every
     # slimmed trial — which is why they were excluded outright. They are read
     # again now, deduplicated by trial_id with the full bag winning, because
     # excluding them made every REMOTELY recorded trial invisible: the runner

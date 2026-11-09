@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Pre-flight checklist for the framework demo (#87). Only machine checks that",
+    "Pre-flight checklist for the framework demo. Only machine checks that",
     "need no hardware, so the gate genuinely passes on any machine — that is what",
     "makes this usable as a smoke test of the whole chain."
   ],

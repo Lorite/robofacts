@@ -1,29 +1,29 @@
 """Per-robot reset steps, declared once in ``common/config/robots.yaml`` (2026-11-04).
 
 Why. A robot can carry state from the previous session into the next trial, and the stack then
-fails in ways that look like something else. On 2026-11-04 the crazyswarm2 server hung twice at
-the first trial of a run because the Crazyflie still streamed the log blocks of the previous
+fails in ways that look like something else. On 2026-11-04 a swarm server hung twice at
+the first trial of a run because the drone still streamed the log blocks of the previous
 session ("Received unrequested data for block: 6", no parameter TOC, killed after 50 s), while the
 repeat trials, which ran a campaign's radio power cycle first, never hung. The reset belongs to the
 robot, not to one campaign: every experiment that flies that robot needs it.
 
 How. ``robots.yaml`` gives a robot an optional ``reset:`` list, next to its ``estop``::
 
-    crazyflie:
+    drone:
       reset:
-        - name: cf_radio_power_cycle
-          command: python3 scripts/crazyflie_bench/cf_power_cycle_check.py 1
+        - name: drone_radio_power_cycle
+          command: python3 scripts/bench/drone_power_cycle_check.py 1
           when: always           # always (default) or repeat; first is allowed too
           required: true         # default true: a failing reset blocks the trial
-        - name: aideck_access_point_back
+        - name: camera_access_point_back
           command: bash -c '...'
-          only_with: aideck      # only for experiments that declare this feature
+          only_with: camera      # only for experiments that declare this feature
 
 An experiment declares the robots it uses in ``config/runner.yaml``::
 
-    robots: [crazyflie]                                   # or
-    robots: [{name: crazyflie, with: [aideck]}]           # features for only_with
-    robots: [{name: crazyflie, reset: false}]             # the experiment opts out
+    robots: [drone]                                       # or
+    robots: [{name: drone, with: [camera]}]               # features for only_with
+    robots: [{name: drone, reset: false}]                 # the experiment opts out
 
 and a campaign opts out with ``robot_reset: false``. The runner runs the resets after
 runner.yaml's own setup steps and the pre-launch checks, and before the campaign's setup steps and

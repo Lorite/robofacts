@@ -89,7 +89,8 @@ def test_names_come_from_trials_yaml_and_the_call(project):
         "markerless_node: /estimator, watchdog: /localization_watchdog}\n")
     assert build_topics("flight")[0] == "/lab_drone/pose"
     assert "/lab_spot/odometry" in build_topics("with_robot")
-    listed = build_topics("full", cf_name="drone9", node="/mk", watchdog="/wd", camera="/cam")
+    listed = build_topics("full", cf_name="drone9", markerless_node="/mk", watchdog="/wd",
+                          camera="/cam")
     assert "/drone9/battery" in listed and "/mk/position" in listed
     assert "/wd/health" in listed and "/cam/color/image_raw" in listed
 
@@ -188,9 +189,9 @@ def test_record_command_no_duration_has_no_wrapper(project):
 
 # --- heavy topics and slim_bag ---------------------------------------------------
 
-def test_camera_info_and_the_debug_overlay_are_light_but_pixels_are_not():
+def test_camera_info_is_light_but_pixels_are_not():
     assert not is_heavy_topic("/camera/color/camera_info")
-    assert not is_heavy_topic("/estimator/debug/overlay/compressed")
+    assert is_heavy_topic("/estimator/debug/overlay/compressed"), "a JPEG stream is heavy by default"
     assert is_heavy_topic("/camera/color/image_raw")
     assert is_heavy_topic("/camera/aligned_depth_to_color/image_raw")
     assert is_heavy_topic("/camera/color/image_raw/compressed")
@@ -207,9 +208,21 @@ def test_registered_depth_and_jpeg_streams_are_heavy_but_their_intrinsics_are_no
     assert not is_heavy_topic("/robot/depth_registered/hand/camera_info")
 
 
-def test_lidar_point_streams_are_heavy_but_the_imu_is_not():
-    assert is_heavy_topic("/livox/lidar") and is_heavy_topic("/cloud_registered")
-    assert not is_heavy_topic("/livox/imu") and not is_heavy_topic("/Odometry")
+def test_a_project_adds_heavy_patterns_and_light_suffixes(project):
+    """slim_topics in trials.yaml: a lidar driver's stream the core cannot know, and a small
+    debug image that is the point of a light bag."""
+    assert not is_heavy_topic("/lidar/raw") and is_heavy_topic("/estimator/debug/overlay/compressed")
+    (project / "trials.yaml").write_text(
+        "experiments_root: experiments\nproject_root: .\n"
+        "slim_topics: {heavy_patterns: [/lidar/raw], light_suffixes: [/debug/overlay/compressed]}\n")
+    assert is_heavy_topic("/lidar/raw") and not is_heavy_topic("/lidar/imu")
+    assert not is_heavy_topic("/estimator/debug/overlay/compressed")
+    assert is_heavy_topic("/camera/color/image_raw/compressed")
+    assert rp.HEAVY_TOPIC_PATTERNS[-1] == "/lidar/raw"
+    (project / "trials.yaml").write_text(
+        "experiments_root: experiments\nproject_root: .\nslim_topics: {heavy_patterns: x}\n")
+    with pytest.raises(ValueError, match="heavy_patterns"):
+        is_heavy_topic("/x")
 
 
 BAG_TOPICS = [
@@ -222,7 +235,10 @@ BAG_TOPICS = [
 ]
 
 
-def test_slim_drops_only_the_heavy_topics():
+def test_slim_drops_only_the_heavy_topics(project):
+    (project / "trials.yaml").write_text(
+        "experiments_root: experiments\nproject_root: .\n"
+        "slim_topics: {light_suffixes: [/debug/overlay/compressed]}\n")
     kept = select_topics(BAG_TOPICS, [], [])
     assert "/camera/color/image_raw" not in kept
     assert "/camera/aligned_depth_to_color/image_raw" not in kept

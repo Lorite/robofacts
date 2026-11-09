@@ -1,4 +1,4 @@
-# Metadata contract for the framework demo (#96 Phase 0).
+# Metadata contract for the framework demo.
 version: 1
 fields:
   chatter_rate:

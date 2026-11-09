@@ -23,9 +23,9 @@
 version: 1
 
 robots: {}
-  # crazyflie:
+  # drone1:
   #   host: my-robot-host
   #   container: ros2_humble_dev
   #   shell: zsh
-  #   soft_stop: "touch /tmp/trial_stop_latch && ros2 service call /all/land crazyflie_interfaces/srv/Land '{height: 0.0, duration: {sec: 3}}'"
+  #   soft_stop: "touch /tmp/trial_stop_latch && ros2 service call /all/land my_interfaces/srv/Land '{height: 0.0, duration: {sec: 3}}'"
   #   estop: "touch /tmp/trial_stop_latch && ros2 service call /all/emergency std_srvs/srv/Empty"

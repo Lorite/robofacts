@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Post-flight check: were the external poses the drone fused fresh while it flew?
 
-Born 2026-10-14, from the SAC 2027 lab day of 2026-10-07. ``crazyflie_server``
+Born 2026-10-14, from a day of team flights on 2026-10-07. ``crazyflie_server``
 logged ``Motion capture rate off`` warnings that read like 1.2 s and 7 s pose
-gaps. The bag of team trial ``20261007T115452_rep01`` proved them a bookkeeping
-artifact of the server: ``/poses``, ``/poses_full`` and ``/poses_full_gt`` had no
+gaps. The bag of one of those trials proved them a bookkeeping artifact of the
+server: ``/poses``, ``/poses_full`` and ``/poses_full_gt`` had no
 gap over 100 ms at about 110 Hz, and the drone's own ``ext_pose_age`` had a
 maximum of 2 ms over 237 samples. So the server's warning is never evidence of
 pose loss, and the drone's own report is the evidence this check reads.
 
-What the topic is. Every crazyswarm2 ``crazyflies.yaml`` of the lab declares a
+What the topic is. The project's crazyswarm2 ``crazyflies.yaml`` declares a
 ``custom_topics: ext_pose_age`` log block with ``locSrv.ageMs`` as its first
 variable, published as ``/<drone>/ext_pose_age``
-(``crazyflie_interfaces/msg/LogDataGeneric``, about 10 Hz). The firmware fork
-sets ``locSrv.ageMs`` to the age, in milliseconds, of the last external pose the
-drone received, as the host stamped it at transmit (issue #80). A value above
+(``crazyflie_interfaces/msg/LogDataGeneric``, about 10 Hz). This needs a firmware
+build that sets ``locSrv.ageMs`` to the age, in milliseconds, of the last external
+pose the drone received, as the host stamped it at transmit (the check was written
+against a modified firmware, not the stock one). A value above
 the threshold means the drone was steering on a stale pose (a slow estimator, a
 held pose, a latency spike). The value does not grow when no packet arrives at
 all: radio loss of fresh packets is ``verify_broadcast_sag.py``'s question, and a
@@ -35,10 +36,10 @@ verdict).
 
 Threshold. ``--max-age-ms`` and ``--min-consecutive`` are declared by the
 experiment. ``--expected-latency-ms`` adds a latency the trial injects on purpose
-(the position-only experiment's ``injected_latency_ms`` level holds each pose for
+(an experiment's ``injected_latency_ms`` level that holds each pose for
 100 or 180 ms, and the firmware duly reads 102 to 186 ms), so a deliberate
 condition is not read as pose loss. With vision in the loop the age is the
-pipeline's own latency (280 to 340 ms on the Spot rig, 2026-09-12), so such a
+pipeline's own latency (280 to 340 ms with a camera on a quadruped, 2026-09-12), so such a
 campaign must declare its own threshold rather than inherit the mocap default.
 
 Requirements. ``--require NAME`` fails the trial when the bag holds no

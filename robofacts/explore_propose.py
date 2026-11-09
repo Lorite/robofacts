@@ -1,4 +1,4 @@
-"""Where a parameter's value is declared, and the edit that would keep a new one (#133).
+"""Where a parameter's value is declared, and the edit that would keep a new one.
 
 robofacts Explore never applies anything: a value worth keeping goes back into the
 declarations as a reviewed change. This module finds the candidates for that change,

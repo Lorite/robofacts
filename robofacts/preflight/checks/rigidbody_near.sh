@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # The rigid body stands within max_m of a point, sampled NOW, seconds before
 # arming. Born 2026-10-29 for the gamepad teleoperation of a drone on an
-# external pose (#168): crazyswarm2's teleop node (cmd_vel_world) integrates the
+# external pose: a teleop node (cmd_vel_world) integrates the
 # stick velocities from its `initial_position` parameter, with no feedback of
 # where the drone really is, so the first setpoint after takeoff drags the drone
 # from wherever it took off to that point. A pad 1.2 m from the configured point
 # is a 1.2 m dash at 0.5 m above the floor, over whatever stands there (the first
-# scripted hover of 2026-10-29 did exactly this toward the origin, over Spot).
+# scripted hover of 2026-10-29 did exactly this toward the origin, over a robot).
 #
 # The point comes either from the checklist (x=, y=) or, better, from the live
 # node that will use it (node=/teleop reads <param_prefix>.x and .y with
 # `ros2 param get`), so the gate and the node can never disagree.
 #
-#   rigidbody_near.sh name=cf1 x=0.0 y=0.0 [max_m=0.25] [topic=/poses] [timeout_s=6]
-#   rigidbody_near.sh name=cf1 node=/teleop [param_prefix=initial_position] [max_m=0.25]
+#   rigidbody_near.sh name=robot1 x=0.0 y=0.0 [max_m=0.25] [topic=/poses] [timeout_s=6]
+#   rigidbody_near.sh name=robot1 node=/teleop [param_prefix=initial_position] [max_m=0.25]
 #
 # The topic is a motion_capture_tracking_interfaces NamedPoseArray (one echo,
 # the body picked by name). No sample, a missing body or a non-finite position

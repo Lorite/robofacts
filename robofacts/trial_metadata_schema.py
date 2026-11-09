@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The trial-metadata contract: shared core + per-experiment fields (#96 Phase 0).
+"""The trial-metadata contract: shared core + per-experiment fields (phase 0).
 
 An index is only as trustworthy as the metadata under it, and a coverage grid
 built on holes looks authoritative while being wrong. So the contract is a file
 (``experiments/common/config/trial_metadata_core.yaml`` plus an optional
 ``experiments/<name>/config/trial_metadata_schema.yaml``), validation is a
-function, and a test enforces it — the same shape as the #87 pre-flight
+function, and a test enforces it — the same shape as the pre-flight
 checklists.
 
 Two entry points:
@@ -71,7 +71,7 @@ class Schema:
 
     @property
     def factors(self) -> List[str]:
-        """Fields the coverage grid may group by (#96 Phase 1)."""
+        """Fields the coverage grid may group by (phase 1)."""
         return sorted(n for n, f in self.fields.items() if f.factor)
 
 
@@ -80,7 +80,7 @@ class Schema:
 # --------------------------------------------------------------------------- #
 #: Parsed schema files by (path, mtime, size). ``trial_index.load_trials`` validates
 #: every trial against its experiment's schema, and parsing the YAML again for each
-#: one made the index of a 128-trial experiment take 6 s (2026-10-16, #131: the web
+#: one made the index of a 128-trial experiment take 6 s (2026-10-16: the web
 #: UI's trials table). A changed file has a new mtime, so an edit is never missed.
 _PARSED: Dict[tuple, Dict[str, "FieldSpec"]] = {}
 
@@ -213,7 +213,7 @@ def annotate(metadata: Dict[str, Any], experiment: Optional[str] = None,
 def audit(experiments_root: Path, experiment: Optional[str] = None) -> Dict[str, List[str]]:
     """Validate every recorded trial. Returns {bag path: problems}."""
     results: Dict[str, List[str]] = {}
-    # "bags*" would also match bags_slim/, whose metadata is a copy (#94).
+    # "bags*" would also match bags_slim/, whose metadata is a copy.
     prefix = f"{experiment}/" if experiment else "*/"
     meta_paths = []
     for record_dir in ("bags", "bags_issues"):

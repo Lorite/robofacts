@@ -1,4 +1,4 @@
-# Factors for the framework demo (#96).
+# Factors for the framework demo.
 #
 # The "robot" is `demo_nodes_cpp talker`, so this runs anywhere ROS 2 is
 # installed — no drone, no mocap, no radio. It exists so the framework can be

@@ -36,12 +36,12 @@ L6  an experiment that flies must declare verify_steps — an action's exit code
     e-stop produced a "successful" trial with the drone on the ground.)
 L7  a command may not reference a script that does not exist.
     L4 and L7 also cover the commands only Explore runs: `explore.viewers`
-    (2026-10-17) and `explore.actions` (the run page's buttons, #133).
+    (2026-10-17) and `explore.actions` (the run page's buttons).
 L8  a campaign's preflight_checklist must exist and be coherent. A campaign may
     declare its own T-0 gate; naming one that is missing or malformed would fail
     at T-0 on the rig, with the stack up and the operator waiting.
 L9  every record profile (and every record_profile factor level) must be a legal
-    value of the metadata contract's enum. (`markerless_replay` was added to the
+    value of the metadata contract's enum. (a new replay profile was added to the
     profiles and to the factor on 2026-08-03 but not to the contract, which would
     have made every week-33 replay flight count as `unverified` rather than
     `usable` and had the campaign ask for flights that already happened.)
@@ -55,7 +55,7 @@ L10 every campaign must LOAD — or be refused only because it asks for a level
     that refusal a reviewed declaration instead of a broken file.)
 L11 every record profile, and every explicit record_topics list, must record
     /rosout. On goTo flights the /rosout log is a recorder of the commanded
-    reference itself (crazyflie_server logs every go_to call, and the
+    reference itself (the swarm server logs every go_to call, and the
     2026-08-13 goto_tracking analysis reconstructs lateral tracking from it),
     besides being the trim-window and backfill source for every bag. A profile
     edit that drops it would silently make future flights unanalyzable, so the
@@ -83,7 +83,7 @@ L13 a factor of `maps_to.kind: operator` (a level the operator realizes by
 L14 every runner.yaml declares `simulation: true|false` explicitly (2026-10-06).
     Every trial records its `domain` (simulation or hardware) from that key,
     and the coverage view per condition counts the two domains apart. A
-    missing key reads as hardware, which put the PX4 SITL demo's simulated
+    missing key reads as hardware, which put an autopilot SITL demo's simulated
     trials in the hardware column until it was added.
 L15 a campaign's spoken cues (`voice_cues`, `voice_announce`, 2026-10-13) are
     well formed (campaign_spec.voice_problems, also enforced by L10), every
@@ -169,8 +169,8 @@ def command_templates(config) -> list[tuple[str, str]]:
 
 
 def explore_templates(config) -> list[tuple[str, str]]:
-    """(where, template) of the commands only Explore runs (explore.viewers and,
-    since #133, explore.actions). Kept apart from command_templates because a
+    """(where, template) of the commands only Explore runs (explore.viewers and
+    explore.actions). Kept apart from command_templates because a
     trial never runs them, so a factor they name is not thereby consumed (L3)."""
     block = config.explore or {}
     return [(f"explore.{group}:{v['name']}", v["command"])
@@ -342,7 +342,7 @@ def test_flight_experiments_declare_a_verify_step(experiment):
     """L6 — an exit code describes a process; only the bag describes the trial."""
     config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
     # The original heuristic read the action string for "trajector"/"flight". That misses
-    # an experiment whose action DISPATCHES on a factor — the Spot observer rig flies only
+    # an experiment whose action DISPATCHES on a factor — an observer rig flies only
     # when drone_state=flying, and its action names neither word, so the rule silently
     # skipped exactly the experiment it should police. Also ask the factor space: any level
     # that says something flies makes this a flight experiment.
@@ -441,7 +441,7 @@ def test_every_record_profile_is_a_legal_metadata_level():
     """L9 - a record profile missing from the metadata contract invalidates every
     trial recorded on it.
 
-    The incident: `markerless_replay` landed on 2026-08-03 in
+    The incident: a replay profile landed on 2026-08-03 in
     record_profiles.PROFILES and in the record_profile FACTOR, but not in the
     contract's enum. Nothing failed, and the failure would have been silent and
     late: the week-33 flights would have recorded fine, then been counted
@@ -482,7 +482,7 @@ def test_every_record_profile_records_rosout():
     """L11 - /rosout is a recorder of the commanded reference, not just a log.
 
     On goTo flights nothing streams a setpoint topic: the reference is
-    reconstructed from crazyflie_server's go_to log on /rosout (the
+    reconstructed from the swarm server's go_to log on /rosout (the
     goto_tracking analysis, 2026-08-13), cross-checked against the flight-time
     commanded_waypoints.json. /rosout is also what the trim windows and the
     metadata backfill read. Today every profile inherits it from a composed
@@ -582,7 +582,7 @@ def test_runner_declares_its_domain(experiment):
         f"records its domain from it (simulation or hardware), and a missing key reads "
         f"as hardware. Write `simulation: true` for simulated robots (or none at all), "
         f"`simulation: false` for real ones, and map a level that runs without hardware "
-        f"(a crazyswarm2 backend: sim) with `domain:` in factors.yaml")
+        f"(a swarm server backend: sim) with `domain:` in factors.yaml")
 
 
 def voice_lint_problems(path: Path, factors: dict, action_timeout_s) -> list[str]:
@@ -634,4 +634,4 @@ def test_explore_does_not_open_every_parameter_of_a_real_robot(experiment):
     assert not wide, (
         f"{experiment}: explore.param_whitelist has {wide}, which matches every parameter. "
         f"On real robots Explore lets a Foxglove tab change these on the running stack, so "
-        f"name the parameters you allow, one pattern each (for example '^/cf1/controller\\.kp$')")
+        f"name the parameters you allow, one pattern each (for example '^/drone1/controller\\.kp$')")

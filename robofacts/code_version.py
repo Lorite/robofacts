@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Which code produced a trial (#96, 2026-08-04).
+"""Which code produced a trial (2026-08-04).
 
 The metadata contract already answered *which machine* ran a trial
 (``execution_host``) and *which image* it ran in (``execution_container``), but
 nothing recorded *which code*. That gap is the reason a six-week-old bag cannot
-be reasoned about: the framework itself keeps changing under the trials (the
-``markerless_replay`` profile appeared mid-campaign, the metadata contract grew
+be reasoned about: the framework itself keeps changing under the trials (a new
+replay record profile appeared mid-campaign, the metadata contract grew
 fields, the verify steps got stricter), so "this old bag looks odd" and "this
 old bag predates commit X" are the same observation with and without a stamp.
 

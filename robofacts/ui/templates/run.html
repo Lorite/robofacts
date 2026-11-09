@@ -157,7 +157,7 @@ async function poll() {
       document.getElementById('waitmsg').textContent = 'do the 👤 manual steps below, then confirm. Nothing has launched yet; the T-0 gate runs right after this.';
       document.getElementById('waitbtn').textContent = '✔ Steps done: launch the trial';
     } else if (d.awaiting_kind === 'pose') {
-      document.getElementById('waitmsg').textContent = 'T-0 gate PASSED: pose the rig now (stand Spot, set the gripper). Recording and the action start on your confirm.';
+      document.getElementById('waitmsg').textContent = 'T-0 gate PASSED: pose the rig now (stand the robot up, set its tools). Recording and the action start on your confirm.';
       document.getElementById('waitbtn').textContent = '✔ Posed: record and run';
     }
   }

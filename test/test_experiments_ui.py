@@ -1393,7 +1393,7 @@ def test_the_campaign_page_and_the_scratch_list_have_the_switch_too(client, root
 def test_the_switch_is_remembered_per_viewer_and_survives_a_private_window():
     js = (Path(ui.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
     assert "localStorage.getItem(VIEW_KEY)" in js and "localStorage.setItem(VIEW_KEY" in js
-    view = js[js.index("table or cards (#137)"):]
+    view = js[js.index("--- table or cards --"):]
     view = view[:view.index("Click a still")]
     assert view.count("try {") >= 2, "every storage access is guarded: a private window throws"
     assert "get('view')" in view, "?view=cards (or table) wins, so a link can open the cards"
@@ -1546,7 +1546,7 @@ def test_the_trial_page_shows_the_camera_video_and_every_still(client, root):
 
 def test_the_script_scrubs_stills_on_pointer_move():
     js = (Path(ui.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
-    scrub = js[js.index("Stills of the declared camera (#138)"):]
+    scrub = js[js.index("Stills of the declared camera:"):]
     assert "pointermove" in scrub and "data-stills" in scrub and "pointerout" in scrub
     assert "img.hasAttribute('data-src')" in scrub, "no still is fetched before the cards are shown"
 

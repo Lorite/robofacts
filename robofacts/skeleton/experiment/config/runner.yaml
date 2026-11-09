@@ -21,7 +21,7 @@ launch:
 # order. A required step that fails aborts the trial.
 # setup_steps:
 #   - {name: clean_slate, command: "trials tool kill_ros.sh"}
-#   - {name: robot_ready, command: "trials tool robot_action.sh spot stand", required: false}
+#   - {name: robot_ready, command: "trials tool robot_action.sh quadruped stand", required: false}
 
 # Long-running helpers started with the stack and stopped before it.
 # aux_launches:

@@ -1,4 +1,4 @@
-# How to run one trial of the framework demo (#96 Phase 4).
+# How to run one trial of the framework demo.
 # `ros2 run demo_nodes_cpp talker` — a single node, not a launch file.
 # No robot at all, only software: its trials count in the `simulation` domain of the
 # coverage view (2026-10-06), which means "no hardware involved".

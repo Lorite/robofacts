@@ -1,6 +1,6 @@
-// The trials UI's shared behaviour (#131): the stop bar's pin, sortable tables, copy
+// The trials UI's shared behaviour: the stop bar's pin, sortable tables, copy
 // buttons, operator steps run by INDEX, filter forms that apply on change, and the
-// table or cards switch with its video dialog (#137).
+// table or cards switch with its video dialog.
 // Every page also works without this file: the filters are plain GET forms.
 (function () {
   // ------------------------------------------------------------ stop bar pin --
@@ -43,7 +43,7 @@
 
   // ------------------------------------------------------------ sort tables --
   // Click a header to sort; a cell may carry data-sort for a value other than its text.
-  // A sorted or narrowed table tells its card view (#137) with a 'trials:changed' event.
+  // A sorted or narrowed table tells its card view with a 'trials:changed' event.
   const changed = (table) => table.dispatchEvent(new CustomEvent('trials:changed'));
   const sortBy = (table, col, asc) => {
     const headers = table.querySelectorAll('thead th');
@@ -99,7 +99,7 @@
     input.addEventListener('input', apply);
   });
 
-  // --------------------------------------------------- table or cards (#137) --
+  // --------------------------------------------------- table or cards --
   // The cards are the table's own rows drawn differently: the same records, kept in
   // the table's order and narrowed by the same find box, so switching views keeps
   // the filters (in the URL) and the sort (on the table). The choice is a per-viewer
@@ -135,7 +135,7 @@
       if (asCards) {
         sync();
         // Only now do the stills load, and the browser still fetches them lazily. A
-        // layer behind a tag (#138) loads when its tag is picked.
+        // layer behind a tag loads when its tag is picked.
         cards.querySelectorAll('img[data-src]').forEach((img) => {
           if (img.closest('[data-layer][hidden]')) return;
           img.src = img.dataset.src;
@@ -166,7 +166,7 @@
     show(urlView || storedView() || 'cards', Boolean(urlView));
   });
 
-  // Stills of the declared camera (#138): moving the pointer across a card's picture
+  // Stills of the declared camera: moving the pointer across a card's picture
   // scrubs through them, and leaving it shows the first again. The bar shows where.
   const stillsOf = (el) => {
     if (!el._stills) { try { el._stills = JSON.parse(el.dataset.stills); } catch (e) { el._stills = []; } }
@@ -192,7 +192,7 @@
     if (el && !el.contains(e.relatedTarget)) scrubTo(el, 0);
   });
 
-  // The tags on a card's picture (#138): trial video, camera, each plot. A tag shows
+  // The tags on a card's picture: trial video, camera, each plot. A tag shows
   // its layer and hides the others, and its image loads only now.
   document.addEventListener('click', (e) => {
     const tab = e.target.closest('.ptab');

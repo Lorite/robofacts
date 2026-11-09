@@ -31,7 +31,7 @@ def _num(text: str) -> str:
 
 
 def _topic_words(topic: str) -> str:
-    """``/cf1/flow_log`` -> ``flow log``: the last name, spoken."""
+    """``/drone1/flow_log`` -> ``flow log``: the last name, spoken."""
     last = [p for p in topic.split("/") if p]
     return (last[-1] if last else topic).replace("_", " ")
 
@@ -71,9 +71,9 @@ def _topic_value(detail: str) -> str:
 
 
 def _rigidbody_continuity(detail: str) -> str:
-    """Name the body: the check guards Spot's body in the Livox walks and the drone's in the flights. On
+    """Name the body: the check guards a robot's body in the walks and the drone's in the flights. On
     2026-11-09 'Mocap does not track the drone' sent the operator looking for a drone that the campaign
-    did not use, while Motive was not solving the rigid body 'spot'."""
+    did not use, while the motion-capture system was not solving the walking robot's rigid body."""
     m = re.search(r"rigid body '([^']+)'", detail)
     if m:
         return f"Mocap does not track the rigid body {m.group(1).replace('_', ' ')}."

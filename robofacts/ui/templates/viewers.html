@@ -14,8 +14,8 @@
   <li>On the laptop: <code>ssh -N -L 8765:localhost:8765 &lt;trial-host&gt;</code></li>
   <li>In Foxglove: <b>Open connection → Foxglove WebSocket → <code>ws://localhost:8765</code></b></li>
 </ol>
-<p class="small muted">A TCP websocket, so it avoids the lab Wi-Fi's fragmented-UDP ceiling that makes cross-host DDS unreliable. The bridge is read-only: a browser cannot publish to the rig.</p>
-<p class="small">RViz instead (needs working cross-host DDS): <code>rviz2 -d experiments/common/config/rviz/markerless_debug.rviz</code></p>
+<p class="small muted">A TCP websocket, so it avoids the Wi-Fi networks that drop fragmented UDP and make cross-host DDS unreliable. The bridge is read-only: a browser cannot publish to the rig.</p>
+<p class="small">RViz instead (needs working cross-host DDS): <code>rviz2 -d &lt;your .rviz config&gt;</code></p>
 </div>
 <div class="panel">
 <h3>Recorded</h3>

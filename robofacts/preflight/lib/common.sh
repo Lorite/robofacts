@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Shared helpers for the modular pre-flight checks (#87)
+# Shared helpers for the modular pre-flight checks
 # =============================================================================
 # Every check script sources this, parses key=value arguments, and exits with:
 #
@@ -94,9 +94,9 @@ pf_require_ros() {
 #
 # Counts the '---' separator ros2 topic echo prints after EVERY message, NOT
 # header stamps: `--field header.stamp` yields nothing for headerless types
-# (std_msgs/String — e.g. the markerless estimator's ~/status), which made a
+# (std_msgs/String — e.g. an estimator's ~/status), which made a
 # topic_rate check read a permanent 0.0 Hz "stalled or dead" against a node
-# that was demonstrably firing (2026-07-31, the #79 shadow campaign's T-0
+# that was demonstrably firing (2026-07-31, a shadow campaign's T-0
 # gate). --no-arr keeps image/array payloads cheap to render.
 #
 #   pf_topic_hz <topic> <window_s>
@@ -146,7 +146,7 @@ pf_node_exists() {
 }
 
 # Exact variant: the whole `ros2 node list` line must equal <name> (e.g.
-# /apriltag_node). The substring form above let apriltag_mocap_pose_bridge
+# /detector_node). The substring form above let a pose bridge node
 # satisfy a check aimed at the detector while both detector components had
 # failed to load (2026-08-12), so any check whose target has similarly-named
 # neighbours must use this one.

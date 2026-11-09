@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Enough free MEMORY on the recording host, now.
 #
-# Born 2026-10-01 (#105/#107): the laptop reached 29 of 30 GiB used with a load of 21 while it
-# streamed the AI deck, and that corrupted a latency run. A host that is swapping drops frames
+# Born 2026-10-01: the laptop reached 29 of 30 GiB used with a load of 21 while it
+# streamed a camera, and that corrupted a latency run. A host that is swapping drops frames
 # and stamps late, and nothing else in the gate notices, because every stream still "flows".
 # Reads MemAvailable from /proc/meminfo. Inside a dev container that is the HOST's memory (the
 # kernel is shared), which is the number that matters here.

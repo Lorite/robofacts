@@ -12,14 +12,14 @@
 # /parameter_events and /rosout - a foreign or stale participant. The old
 # name-only gate PASSED against a kill path that did not exist, which is exactly
 # the "the stop can be aimed at the wrong machine entirely" failure the flight
-# checklist says this gate exists to catch (#100).
+# checklist says this gate exists to catch.
 #
 # So the gate now resolves the OWNING NODE, and optionally asserts which node it
 # must be - pin `node=` whenever the stack's host is known, because a reachable
 # service on somebody else's machine is worse than no service at all: it reads
 # as a verified kill path.
 #
-#   estop_reachable.sh [service=emergency] [node=/crazyflie_server]
+#   estop_reachable.sh [service=emergency] [node=/driver_server]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="estop_reachable.sh [service=emergency] [node=<expected owning node>]"
 pf_parse_args "$@"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Block a trial from starting without a fresh pre-flight PASS (#87).
+"""Block a trial from starting without a fresh pre-flight PASS.
 
 ``run_preflight.py`` answers "is the stack safe right now". This makes that
 answer *binding*: an automated sweep cannot record a trial unless the gate
@@ -18,7 +18,7 @@ and can be excluded from analysis on purpose rather than by accident.
 Why the default freshness window is zero
 ----------------------------------------
 The 2026-07-22 incident flew with three safety layers down, each "verified"
-earlier in the session. The lesson recorded in #87 is that a check which passed
+earlier in the session. The lesson recorded is that a check which passed
 minutes ago is worthless. So ``max_age_s=0`` re-runs the gate before *every*
 trial. Raising it trades that guarantee for sweep speed — a deliberate,
 per-experiment decision, recorded in the metadata as ``reused_age_s``.
@@ -30,8 +30,8 @@ verdict survived only in the terminal and the per-trial run log. Every verdict
 (GO, NO-GO, overridden, shadow, disabled) is now also appended as one JSON line
 to ``experiments/<experiment>/runs/preflight_gate.jsonl`` when the gate knows
 where that is (``log_path``, set by the runner's ``build_gate``). The line
-format is the one ``experiments/px4_sitl_offboard_demo/GATE_LOG_TODO.md``
-specified. Writing it is never fatal: a read-only ``runs/`` must not turn a GO
+format is the one an experiment's gate-log specification
+defined. Writing it is never fatal: a read-only ``runs/`` must not turn a GO
 into a crash.
 
 Modes (2026-10-01, the ``gate`` factor kind)

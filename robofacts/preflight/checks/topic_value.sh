@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Generic: a sensor stream is ALIVE, not only flowing. A topic can publish at its
-# full rate while the sensor behind it is stuck: on 2026-11-04 the Crazyflie's
-# Flow deck (PMW3901) came up after a boot with motion.squal 0, motion.shutter
-# frozen at 900 and zero flow deltas, while /<cf>/flow_log streamed at 50 Hz and
+# full rate while the sensor behind it is stuck: on 2026-11-04 a drone's
+# optical-flow sensor came up after a boot with motion.squal 0, motion.shutter
+# frozen at 900 and zero flow deltas, while /<robot>/flow_log streamed at 50 Hz and
 # the boot log was normal. topic_rate passed it. One radio power cycle fixed it.
 #
 #   topic_value.sh topic=<name> field=<path> [min=<n>] [max=<n>] [vary=true]
@@ -19,9 +19,9 @@
 # a field that is not in the message, or a value that is not a number is a FAIL.
 # required=false turns "topic not advertised" into SKIP.
 #
-# Example (the Flow deck, flow_log = deltaX, deltaY, squal, shutter, zrange, asl):
-#   topic_value.sh topic=/cf1/flow_log field=values[2] min=50
-#   topic_value.sh topic=/cf1/flow_log field=values[3] vary=true window_s=2
+# Example (an optical-flow sensor, flow_log = deltaX, deltaY, squal, shutter, zrange, asl):
+#   topic_value.sh topic=/robot1/flow_log field=values[2] min=50
+#   topic_value.sh topic=/robot1/flow_log field=values[3] vary=true window_s=2
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="topic_value.sh topic=<name> field=<values[i] | dotted.path> [min=<n>] [max=<n>] [vary=true] [window_s=2] [min_samples=5] [required=true]"
 pf_parse_args "$@"

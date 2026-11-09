@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Slim an already-recorded heavy bag (#94): drop the image/depth topics + zstd.
+"""Slim an already-recorded heavy bag: drop the image/depth topics + zstd.
 
-The 6-10 GB markerless flight bags are ~99 % raw colour + aligned depth. Every
+A 6-10 GB flight bag with a depth camera is ~99 % raw colour + aligned depth. Every
 other question ("where did the estimator think the drone was", "which gate
 fired", "what did the safety latch do") is answerable from the remaining few
 tens of MB — which fit in a scp/rsync of a few seconds instead of a
 half-hour copy off the rig.
 
 This wraps ``ros2 bag convert``: it reads the input bag's topic list, drops the
-heavy ones (``record_profiles.HEAVY_TOPIC_PATTERNS`` by default), and writes a
+heavy ones (``record_profiles.heavy_topic_patterns()`` by default), and writes a
 compressed copy. An explicit INCLUDE list is generated rather than an exclude
 regex, so the result is deterministic and the script prints exactly what it kept.
 
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
-from .record_profiles import HEAVY_TOPIC_PATTERNS, is_heavy_topic  # noqa: E402
+from .record_profiles import is_heavy_topic  # noqa: E402
 
 
 def bag_topics(bag_dir: Path) -> List[str]:
@@ -92,7 +92,7 @@ def select_topics(all_topics: List[str], extra_excludes: List[str],
         if topic in keep:
             kept.append(topic)
             continue
-        if is_heavy_topic(topic, HEAVY_TOPIC_PATTERNS):
+        if is_heavy_topic(topic):
             continue
         if any(pattern in topic for pattern in extra_excludes):
             continue

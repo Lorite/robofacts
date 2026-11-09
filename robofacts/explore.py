@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Explore one campaign condition live: its stack, a Foxglove view that may change parameters.
 
-Added 2026-10-16 (#131). Before a campaign runs, its author debugs and tunes the
+Added 2026-10-16. Before a campaign runs, its author debugs and tunes the
 stack: watch it in Foxglove, change a gain, see what happens. Doing that by hand
 means retyping the launch command and its arguments, and it leaves no record of
 which values were tried. Explore brings up exactly the stack a trial of the
@@ -22,7 +22,7 @@ arguments, the aux launches) and adds two things a trial never has:
   read live (the run page's change table) and, at stop, every parameter that
   changed (from, to) goes to
   ``runs/explore/<stamp>_explore[_<label>]/parameter_changes.yaml``;
-* since #133 (2026-10-17), ``ExploreControls``: what the run page may do while
+* since 2026-10-17, ``ExploreControls``: what the run page may do while
   the stack runs. Start one of runner.yaml's ``explore.actions`` at a time
   (take off, fly a route, land) and stop it with SIGTERM, set a changed
   parameter back to its starting value, record the running stack to a scratch
@@ -105,9 +105,9 @@ class ExploreSettings:
     address: str
     #: explore.viewers: the windows Explore opens after the bridge, as {name, command}.
     viewers: List[Dict[str, Any]] = field(default_factory=list)
-    #: explore.actions (#133): the run page's buttons, as {name, command}. Never run by a trial.
+    #: explore.actions: the run page's buttons, as {name, command}. Never run by a trial.
     actions: List[Dict[str, Any]] = field(default_factory=list)
-    #: explore.jog (#133): {topic, max_speed_mps, step_s, max_yaw_rate_rps}, or empty: no jog pad.
+    #: explore.jog: {topic, max_speed_mps, step_s, max_yaw_rate_rps}, or empty: no jog pad.
     jog: Dict[str, Any] = field(default_factory=dict)
     #: The experiment's `simulation:`. On hardware the UI asks for the arm checkbox.
     simulation: bool = False
@@ -391,7 +391,7 @@ def kill_action(proc, target, cmd: List[str]) -> None:
 
 
 class ExploreControls:
-    """What the run page may do to a live exploration (#133, 2026-10-17).
+    """What the run page may do to a live exploration (2026-10-17).
 
     run_explore binds it once the stack is READY and unbinds it in its
     ``finally``, before the stack comes down: a running action gets SIGTERM
@@ -424,7 +424,7 @@ class ExploreControls:
         self._record: Optional[Dict[str, Any]] = None
         self.recordings: List[Dict[str, Any]] = []
         self.notes: List[str] = []
-        #: Analyses of the recordings (#133), newest last; they outlive the stack.
+        #: Analyses of the recordings, newest last; they outlive the stack.
         self.analyses: List[Dict[str, Any]] = []
         self._kept: Optional[Dict[str, Any]] = None
         self._final: Optional[Dict[str, List[Dict[str, Any]]]] = None
@@ -925,7 +925,7 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
     setup steps, parameter log, stack, aux launches, bridge. The parameter log
     starts before the stack so it hears every node declare its parameters.
     Teardown runs in reverse, in a ``finally``, so a crash still stops the stack.
-    ``controls`` (#133) is bound when the stack is ready and shut down first in
+    ``controls`` is bound when the stack is ready and shut down first in
     the teardown: a running action lands and a recording is finalized before
     anything else stops.
     """
@@ -1078,7 +1078,7 @@ def run_explore(campaign: "cs.Campaign", config: tr.RunnerConfig, experiments_ro
             "condition": dict(spec.values), "started": started,
             "stopped": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "status": result.status, "writable": list(s.param_whitelist),
-            # What the run page kept (#133): the notes (also in notes.md) and the
+            # What the run page kept: the notes (also in notes.md) and the
             # scratch recordings, so this one file lists everything of the session.
             "notes": list(controls.notes) if controls is not None else [],
             "recordings": ([r["bag_dir"] for r in controls.recordings]

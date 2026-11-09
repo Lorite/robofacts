@@ -85,9 +85,13 @@ An adapter's checks are found after the project's own checks and before the core
 
 The stop sweeps match the processes of the project's workspace. What only the project knows goes in `trials.yaml` under `stop_patterns:`: `recorder_scripts` (wrappers that exec `ros2 bag record`), `owned_containers` (composable containers its launches start, matched by node name so an orphan is found), and `kinds` (extra named patterns, regex templates with `{workspace}`).
 
+A slim copy of a bag drops the image, depth and point-cloud topics (`trials slim`, and the runner after each trial). The core's rules cover the common names (`image_raw`, `compressed`, `compressedDepth`, `depth_registered`, `points`, ...) and keep every `camera_info`. A project adds its own in `trials.yaml`: `slim_topics: {heavy_patterns: [/my_lidar/points_raw], light_suffixes: [/debug/overlay/compressed]}`, where a heavy pattern is a substring of the topic name and a light suffix keeps a topic that a heavy pattern would drop.
+
+The core names no robot and no lab. `test/test_core_names_no_robot.py` fails the build when a core file names a robot family or a lab (a short allowlist covers facts about third-party tools), so robot code goes into an adapter and a lab's names into its project.
+
 ## Record profiles
 
-A record profile is a named topic list that a trial records. The project declares its profiles in `experiments/common/config/record_profiles.yaml`, and the package ships none: a topic set describes one lab's robots, drivers and nodes, so it belongs to the project. The file has reusable `blocks` (topic lists) and `profiles` (a list of blocks, optional extra `topics`, and an optional `size` note). A topic may hold `{name}` placeholders, filled from the `record_profiles:` names in `trials.yaml`. `trials init` writes a commented template.
+A record profile is a named topic list that a trial records. The project declares its profiles in `experiments/common/config/record_profiles.yaml`, and the package ships none: a topic set describes one project's robots, drivers and nodes, so it belongs to the project. The file has reusable `blocks` (topic lists) and `profiles` (a list of blocks, optional extra `topics`, and an optional `size` note). A topic may hold `{name}` placeholders, filled from the `record_profiles:` names in `trials.yaml`. `trials init` writes a commented template.
 
 ```yaml
 blocks:

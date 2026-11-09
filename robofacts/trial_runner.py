@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run the trials a campaign still needs (#96 Phase 4).
+"""Run the trials a campaign still needs (phase 4).
 
 Composes the pieces that already exist, in the order the lab incidents taught:
 
-    pre-flight gate (#87) -> launch (local or remote) -> record profile (#94)
+    pre-flight gate -> launch (local or remote) -> record profile
       -> stop -> trial_metadata.json -> slim bag -> back into the index
 
 Everything experiment-specific is declared, not coded: ``experiments/<name>/
@@ -16,7 +16,7 @@ Two properties that are not negotiable
 --------------------------------------
 * **The gate is not optional.** A trial that cannot pass pre-flight is not run,
   unless the operator ticked the override, in which case the reason and the
-  failing checks land in the bag's metadata (#87).
+  failing checks land in the bag's metadata.
 * **Factor values are written into the trial metadata under their
   ``metadata_key``.** This is what closes the loop: without it, the bag this
   runner just produced would not be findable by the index or countable by the
@@ -112,7 +112,7 @@ class RunnerConfig:
     action: str = ""
     #: Foreground commands run after the gate and before anything is launched:
     #: the "do this once, in order, or the trial is invalid" steps the run
-    #: notebooks kept as their own cells (Spot arm-camera mode, spot setup/
+    #: notebooks kept as their own cells (arm-camera mode, robot setup/
     #: stand, EKF priming). Each is {name, command, optional required: false}.
     setup_steps: List[Dict[str, Any]] = field(default_factory=list)
     #: The robots this experiment uses (runner.yaml ``robots:``, 2026-11-04) and the reset steps
@@ -121,7 +121,7 @@ class RunnerConfig:
     robots: List[Dict[str, Any]] = field(default_factory=list)
     robot_resets: List[Dict[str, Any]] = field(default_factory=list)
     #: Extra long-running launches started alongside the main stack and torn
-    #: down with it (e.g. Spot arm-tracking). Each is {name, command}.
+    #: down with it (e.g. arm tracking). Each is {name, command}.
     aux_launches: List[Dict[str, Any]] = field(default_factory=list)
     #: Post-trial checks against the RECORDED BAG ({bag} placeholder), run once
     #: the recorder has stopped. A non-zero exit marks the trial failed and
@@ -133,7 +133,7 @@ class RunnerConfig:
     verify_steps: List[Dict[str, Any]] = field(default_factory=list)
     #: Provenance probed on the host that flew, AFTER the trial, into the
     #: metadata under ``key`` (first line of stdout). Each is {key, command}.
-    #: Added 2026-10-01 for the PX4 SITL demo, whose stack version (the PX4
+    #: Added 2026-10-01 for an autopilot SITL demo, whose stack version (the autopilot
     #: checkout under lib/, the Gazebo release) is a fact about THAT
     #: experiment's apparatus, not about this repo's HEAD, which code_version
     #: already records. Never fatal, never a factor: a finished trial outranks
@@ -187,7 +187,7 @@ class RunnerConfig:
     #: SIGTERM through the same path as the UI's stop (the flight actions treat
     #: a signal as "land every drone now"), and the trial is aborted with the
     #: timeout as its reason. Found by the lab-day sim test: an action blocked on
-    #: a dead crazyswarm2 server kept the trial, and the recorder, open forever.
+    #: a dead swarm server kept the trial, and the recorder, open forever.
     action_timeout_s: Optional[float] = None
     #: The EXPLORE block (2026-10-16, explore.py): which parameters the explore
     #: bridge may change from Foxglove, and where it listens. Empty means the
@@ -395,7 +395,7 @@ def _explore_block(raw: Any, path: Path) -> Dict[str, Any]:
         # Windows for a human (a simulator GUI, RViz), started by Explore only.
         out["viewers"] = _named_commands(raw["viewers"], "explore.viewers", path)
     if "actions" in raw:
-        # Buttons on the Explore run page (#133): take off, fly a route, land.
+        # Buttons on the Explore run page: take off, fly a route, land.
         # Run by Explore only, one at a time, never by a trial.
         out["actions"] = _named_commands(raw["actions"], "explore.actions", path)
         names = [a["name"] for a in out["actions"]]
@@ -414,7 +414,7 @@ JOG_MAX_STEP_S = 5.0
 
 
 def _explore_jog(raw: Any, path: Path) -> Dict[str, Any]:
-    """explore.jog (#133): the velocity topic of the run page's jog pad and its limits.
+    """explore.jog: the velocity topic of the run page's jog pad and its limits.
 
     The limits are required, not defaulted: a jog pad publishes velocities, and
     how fast is a reviewed decision of the experiment, like a safety limit.
@@ -454,7 +454,7 @@ def _named_commands(raw: Any, field_name: str, path: Path) -> List[Dict[str, Any
     """Validate a list of {name, command} entries.
 
     Named, because a trial that fails half way through its setup must be able to
-    say *which* step failed — "setup failed" over three Spot commands is not a
+    say *which* step failed — "setup failed" over three robot commands is not a
     diagnosis.
     """
     if raw is None:
@@ -619,7 +619,7 @@ def launch_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
         # Found 2026-08-14, lab day 5: `pose_source: mocap` sets
         # `observer_pose_topic_override: ""` (added with the Exp 3 Part A wiring
         # in 6e06c10db9 and first RUN today), which blocked the T-0 gate with
-        # three failures that all read like dead hardware — no Spot driver node,
+        # three failures that all read like dead hardware — no robot driver node,
         # no /mocap/drone_pose, no mocap frames — because the stack never
         # started at all. The declared default for that argument is likewise "",
         # so dropping it is behaviour-preserving.
@@ -679,7 +679,7 @@ def action_command(trial: cs.TrialSpec, config: RunnerConfig,
     ``commanded_waypoints.json``, next to the bag it belongs to) and the
     resolved ``{arg_<name>}`` launch arguments. Added 2026-08-13 so the
     commanded reference of a goTo flight is recorded by the flight itself,
-    not only by crazyflie_server's /rosout log.
+    not only by the swarm server's /rosout log.
     """
     if not config.action:
         return []
@@ -696,10 +696,10 @@ def action_command(trial: cs.TrialSpec, config: RunnerConfig,
 #: must leave room. 200 is that, with headroom.
 #:
 #: This is not hypothetical tidiness. On 2026-08-19 three new factors
-#: (arm_aim, max_pose_age_s, ext_pos_std_dev) pushed a markerless trial id to 260
+#: (arm_aim, max_pose_age_s, ext_pos_std_dev) pushed a trial id to 260
 #: bytes and the trial died mid-run with
 #:   OSError: [Errno 36] File name too long
-#: after the stack was up and Spot had been readied. Every factor added to an
+#: after the stack was up and the robot had been readied. Every factor added to an
 #: experiment lengthens every id that varies it, so the ceiling has to be enforced
 #: here rather than remembered by whoever adds the next axis.
 MAX_TRIAL_ID_BYTES = 200
@@ -1089,7 +1089,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # OPERATOR STEPS, shown and WAITED ON before anything runs (2026-08-12,
     # the operator): the CLI runner never displayed the campaign's operator_steps
     # at all — the web UI shows them, the CLI silently assumed them done — so
-    # the T-0 gate raced the operator's physical prep (the Motive body switch
+    # the T-0 gate raced the operator's physical prep (the motion-capture body switch
     # for the patched arm lost that race today and blocked a healthy trial).
     # The confirmation SURFACE is a seam: the default is the CLI's tty prompt
     # (which passes straight through when stdin is not a tty), and the web UI
@@ -1528,7 +1528,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             print(f"[calibrate] {entry['factor']}={entry['level']} -> {json.dumps(parsed)}")
 
         # OPERATOR PAUSE (2026-08-11): the runner used to roll straight from a
-        # gate PASS into recording, so every operator act (stand Spot, set the
+        # gate PASS into recording, so every operator act (stand the robot, set the
         # gripper) had to race the dwell — the operator missed the window twice.
         # Same seam as the operator steps above: the default is the tty Enter
         # wait, and a caller with its own surface (the web UI) passes
@@ -1811,7 +1811,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # campaign pays one ssh round-trip rather than 40. Never fatal: the trial
     # has already flown, and losing it to a git query would be absurd.
     stamp_code_version(metadata, target)
-    # Experiment-declared provenance (the PX4 checkout, the Gazebo release):
+    # Experiment-declared provenance (the autopilot checkout, the Gazebo release):
     # facts about the apparatus that code_version's repo HEAD cannot carry.
     # A checked factor's realized value, measured from the bag (2026-10-06):
     # the gate measured the condition before recording, this measures what the
@@ -1871,7 +1871,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # before the slim copy, which carries it (2026-10-14). Never fatal.
     export_rosout(bag_dir, target, hooks, cwd)
 
-    # Leave a slim, transferable copy (#94). Never fatal: the trial has flown.
+    # Leave a slim, transferable copy. Never fatal: the trial has flown.
     if slim:
         try:
             from .slim_bag_archive import archive_and_sync
@@ -1879,7 +1879,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         except Exception as exc:  # noqa: BLE001
             local_slim = None
             print(f"[runner] slim archiving skipped ({exc})")
-        # The trial card's stills and camera video (#138), from the local slim copy,
+        # The trial card's stills and camera video, from the local slim copy,
         # when the experiment declares a camera (config/trial_media.yaml). Never fatal.
         from .trial_media import make_after_trial
         make_after_trial(local_slim, bag_dir if target is None else None)
@@ -2467,7 +2467,7 @@ def build_gate(campaign: "cs.Campaign", experiments_root: Path, *,
     2026-08-11: until today the CLI never constructed a gate at all — run_plan
     was called with gate=None, so `--execute` launched, recorded and "verified"
     trials with the checklist never run. The web UI gated; the CLI did not. It
-    was found the expensive way: a trial recorded 2x120 s against a Spot whose
+    was found the expensive way: a trial recorded 2x120 s against a robot whose
     proxy was unreachable the whole time (the checklist's HARD host_reachable
     and topic_rate probes would have refused it before the recorder started).
 
@@ -2556,7 +2556,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-pause", action="store_true",
                     help="do not wait for Enter between the T-0 gate and the "
                          "recorder (the pause exists so the operator can pose "
-                         "the rig - stand Spot, set the gripper - without "
+                         "the rig (stand the robot up, set its tools) without "
                          "racing the dwell).")
     ap.add_argument("--quiet-stack", action="store_true",
                     help="child process output (stack, aux, recorder) goes only to "
@@ -2567,7 +2567,7 @@ def main(argv=None) -> int:
     ap.add_argument("--gate-override", metavar="REASON",
                     help="proceed past a FAILED T-0 gate. The reason and the "
                          "failed checks are stamped into trial_metadata.json forever "
-                         "(#87's escape hatch — visible, never silent).")
+                         "(an escape hatch that is visible, never silent).")
     ap.add_argument("--no-voice", action="store_true",
                     help="print the spoken cues but send none (sets TRIALS_VOICE=off for "
                          "this run and its child processes). Cues go to the laptop's voice "

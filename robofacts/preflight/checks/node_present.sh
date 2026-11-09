@@ -4,14 +4,14 @@
 # health/data check where the node offers one.
 #
 # Substring match by default. Pass exact=true to require the FULL node name
-# exactly as `ros2 node list` prints it (e.g. /apriltag_node). Use exact
-# whenever the target has similarly-named neighbours: the substring "apriltag"
-# was satisfied by apriltag_mocap_pose_bridge while both Isaac detector
+# exactly as `ros2 node list` prints it (e.g. /detector_node). Use exact
+# whenever the target has similarly-named neighbours: the substring "detector"
+# was satisfied by a pose bridge node while both detector
 # components had failed to load, so the gate blessed a rig with no detector
 # (2026-08-12).
 #
-#   node_present.sh name=/crazyflie_server
-#   node_present.sh name=/apriltag_node exact=true
+#   node_present.sh name=/driver_server
+#   node_present.sh name=/detector_node exact=true
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="node_present.sh name=<node name substring> [exact=true  # full-name match]"
 pf_parse_args "$@"

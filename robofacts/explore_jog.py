@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One jog step of robofacts Explore: publish a velocity for a moment, then a zero twist.
 
-The Explore run page's jog pad (#133, 2026-10-17) starts this for each press, in the
+The Explore run page's jog pad (2026-10-17) starts this for each press, in the
 same one-at-a-time slot as the ``explore.actions``, so the red stop ends it too. The
 runner, not the browser, publishes: the Foxglove bridge of an exploration never
 publishes on a topic. The topic and the limits come from runner.yaml's
@@ -10,7 +10,7 @@ publishes on a topic. The topic and the limits come from runner.yaml's
 It publishes ``geometry_msgs/Twist`` at ``--rate`` Hz for ``--seconds``, then a zero
 twist a few times, and exits 0. A SIGTERM or SIGINT ends the step early, also with
 the zero twist, so a stop never leaves a velocity behind. A node that keeps the last
-command it received (``ros_gz_crazyflie_control``) then holds its position.
+command it received (a simulated drone controller, for example) then holds its position.
 
 Self-contained on purpose (no robofacts import), like explore_params.py: run by file
 path locally, as ``python3 -m robofacts.explore_jog`` on a remote host.

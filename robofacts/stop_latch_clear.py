@@ -2,8 +2,8 @@
 """The operator stop latch: its one freshness rule, the setup step and the T-0 gate check.
 
 Every robots.yaml stop command writes the stop latch (``latch_path()``) first, and
-the flight actions refuse to START over a latch younger than 120 s (issue
-#100). They check it only once they run, which is after the stack, the T-0 gate
+the flight actions refuse to START over a latch younger than 120 s (found
+in an earlier incident). They check it only once they run, which is after the stack, the T-0 gate
 and the recorder are already up: a stopped rig was brought up and recorded
 for nothing, and the operator learned it a minute late. As the first setup
 step this refuses before anything is launched (2026-10-02, lab-day sim test).

@@ -144,7 +144,7 @@ const ctlUrl = (op) => location.origin + {{ url_for('explore_control', run_id=ru
 let lastLog = [];
 let lastLive = null;
 
-// Foxglove opens by itself (#133). Chrome launches the FIRST foxglove:// link of a
+// Foxglove opens by itself. Chrome launches the FIRST foxglove:// link of a
 // page without a click (measured 2026-10-17: "Launched external handler"), and
 // refuses a second one until the next click ("a user gesture is required"). So the
 // page opens it once per exploration, when the bridge is ready. Foxglove 3.4

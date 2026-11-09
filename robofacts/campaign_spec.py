@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Declarative trial and campaign specification (#96 Phase 2).
+"""Declarative trial and campaign specification (phase 2).
 
 A trial used to exist only as loose variables inside a run notebook, so nothing
 could enumerate the space, diff it against what had been recorded, or hand a
@@ -63,7 +63,7 @@ CHECK_RESERVED = {"script", "args", "per_level", "realized", "text", "hard", "ca
 #: The two domains a trial can belong to (2026-10-06, the coverage view per
 #: condition and domain). A trial is `simulation` when its runner.yaml says
 #: `simulation: true`, or when one of its factor levels declares the trial
-#: simulated (a crazyswarm2 `backend: sim`), else `hardware`.
+#: simulated (a swarm server's `backend: sim`), else `hardware`.
 DOMAINS = ("simulation", "hardware")
 
 #: What a campaign does with its factors' checks. `binding`: the checks join
@@ -140,7 +140,7 @@ class Factor:
     #: unverifiable condition is a reviewed decision rather than an omission.
     unchecked: str = ""
     #: level -> "simulation" | "hardware", for a factor whose level decides
-    #: the trial's domain (crazyswarm2's `backend: sim` runs no hardware in an
+    #: the trial's domain (a swarm server's `backend: sim` runs no hardware in an
     #: experiment that otherwise flies). Levels not named follow runner.yaml.
     domain: Dict[Any, str] = field(default_factory=dict)
 
@@ -158,7 +158,7 @@ class Factor:
 
 #: Parsed YAML by (path, mtime, size), handed out as deep copies. A page that
 #: lists 27 campaigns parsed the shared factors.yaml 27 times on every request,
-#: which made the web UI's experiment page take seconds (2026-10-16, #131). A
+#: which made the web UI's experiment page take seconds (2026-10-16). A
 #: changed file has a new mtime, so an edit is never missed.
 _YAML_CACHE: Dict[tuple, Any] = {}
 
@@ -463,7 +463,7 @@ def load_factors(experiment: Optional[str] = None,
     return factors
 
 
-#: When a step applies within ONE runner invocation (2026-11-04, the lab's #159): ``first``
+#: When a step applies within ONE runner invocation (2026-11-04): ``first``
 #: only on its first trial, ``repeat`` only on the trials after it, ``always`` on every
 #: trial (the default, which is every step before this key existed). A repeated trial of a
 #: campaign rarely needs the whole setup again: a 16 s square uses almost no battery, and
@@ -599,7 +599,7 @@ class TrialSpec:
             if isinstance(resolved, dict):
                 # Per-argument values: one level can mean different things to
                 # different arguments (a pose_fusion level picks BOTH the
-                # crazyflies config and which node feeds /poses).
+                # swarm config and which node feeds /poses).
                 for arg_name, arg_value in resolved.items():
                     args[str(arg_name)] = arg_value
             else:
@@ -648,7 +648,7 @@ class Campaign:
     verify_steps: List[Dict[str, Any]] = field(default_factory=list)
     #: Campaign-scoped setup steps (2026-11-04), run AFTER runner.yaml's ``setup_steps``
     #: and before the stack launches, ``{name, command, required, when}``. The reset a
-    #: repeated trial needs (the Crazyflie's radio power cycle, so its frame restarts
+    #: repeated trial needs (a drone's radio power cycle, so its frame restarts
     #: where it landed) belongs to the campaign that repeats, not to every trial of the
     #: experiment. ``{factor}`` and ``{arg_*}`` placeholders fill as in runner.yaml.
     setup_steps: List[Dict[str, Any]] = field(default_factory=list)

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Post-trial check for ANY flight experiment: did the drone actually fly?
 
-(#96 verify step — lives in common/ because every flight experiment needs it.)
-
 Born 2026-07-29. A latched firmware e-stop (``/all/emergency`` stays latched
 until the drone is power-cycled) meant the drone never left the ground, the
 trajectory script still exited 0, and the runner reported "flew and recorded".

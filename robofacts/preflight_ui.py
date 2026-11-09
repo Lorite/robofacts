@@ -32,7 +32,7 @@ def load_checklist(checklist_path: Optional[Path] = None) -> List[str]:
     - {"checklist": ["item 1", "item 2", ...]}
     - {"checklist": [{"text": "item", "check": "mocap_stream", "args": {...}}, ...]}
 
-    The third form is the modular pre-flight framework (#87), where an entry may
+    The third form is the modular pre-flight framework, where an entry may
     reference the check script that verifies it. Only the human-readable text is
     shown here; running the checks is run_preflight.py's job.
     """

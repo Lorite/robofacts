@@ -1,13 +1,13 @@
-# Shared core of the trial-metadata contract (#96 Phase 0).
+# Shared core of the trial-metadata contract .
 #
 # Every recorded trial must carry these, whatever the experiment. Per-experiment
 # additions live in experiments/<name>/config/trial_metadata_schema.yaml and are
 # merged on top of this file — the same common/ + <name>/ split the pre-flight
-# checklists use (#87), where the file is the contract and a test enforces it.
+# checklists use, where the file is the contract and a test enforces it.
 #
 # Why this exists: an index is only as trustworthy as its metadata, and an audit
-# of the 179 existing trials found real holes — battery_start_v null on 34 of 37
-# position-only trials, demo_name null on 6 apriltag bags, aborted null on 2 spot
+# of 179 existing trials found real holes — battery_start_v null on 34 of 37
+# position-only trials, demo_name null on 6 fiducial-detector bags, aborted null on 2 quadruped
 # bags. A coverage grid built on those looks authoritative while being wrong.
 #
 # Recovered values are marked, always (2026-08-05). A field this contract makes
@@ -22,7 +22,7 @@
 #   "_backfilled": {"altitude": {"value": "1.0", "recovered_at": "...",
 #                                "by": "...backfill_trial_metadata.py",
 #                                "source": "bag:/rosout",
-#                                "evidence": ["[CrazyflieAPI] ... altitude=1.00 m ...", ...],
+#                                "evidence": ["[DroneAPI] ... altitude=1.00 m ...", ...],
 #                                "from_bag": "..."}}
 #
 # The stamp is not decoration: a value that was recovered afterwards is a weaker
@@ -126,7 +126,7 @@ fields:
     required: false
     type: dict
     factor: false
-    describe: "The #87 gate result, including any operator override and its reason.
+    describe: "The gate result, including any operator override and its reason.
                Absent means the trial predates the gate."
 
   # 2026-10-06, SAC 2027 framework paper: the coverage view per condition and

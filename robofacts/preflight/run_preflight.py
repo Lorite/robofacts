@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Composition driver for the modular pre-flight check framework (#87).
+"""Composition driver for the modular pre-flight check framework.
 
 Reads an experiment's ``config/preflight_checklist.json``, runs the machine
 check referenced by each machine-checkable item, and fails atomically: either
@@ -45,7 +45,7 @@ hardware gate took about a minute (lab day 2026-10-07). In ``concurrent`` mode
 (the default) consecutive entries that may run in parallel form one batch whose
 checks run together in a thread pool. An entry that may not runs alone, after
 every earlier entry has finished and before any later one starts, so it is
-also an ordering barrier (the PX4 ``/fmu`` check that must start after the
+also an ordering barrier (a flight-controller topic check that must start after the
 ground-truth window, 2026-10-01). ``sequential`` mode is the old loop. Both
 modes print, return and report exactly the same lines in checklist order, so
 the gate log, the trial metadata's ``preflight`` block and the verdict do not
@@ -215,7 +215,7 @@ SEQUENTIAL_CHECKS = {
     "ros_clean_slate": (
         "counts matching processes with pgrep and deliberately does not exclude its "
         "siblings (lib/common.sh pf_count_processes), so a concurrent check whose "
-        "command line holds the pattern (file_exists path=.../px4_sitl_default/bin/px4) "
+        "command line holds the pattern (a file_exists path that names the same binary) "
         "would count as a leftover"),
     "rigidbody_continuity": (
         "its entries share one capture file per topic (/tmp/pf_rbc_<uid>_<topic>.cap, "
@@ -561,7 +561,7 @@ def parse_vars(pairs: Optional[List[str]]) -> Dict[str, str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Run an experiment's pre-flight checks (#87).")
+    parser = argparse.ArgumentParser(description="Run an experiment's pre-flight checks.")
     parser.add_argument("--checklist", required=True, type=Path, help="path to config/preflight_checklist.json")
     parser.add_argument("--var", action="append", metavar="NAME=VALUE",
                         help="fill ${NAME} placeholders in check arguments (repeatable)")

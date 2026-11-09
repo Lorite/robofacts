@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Named analyses as a headless API (#96 Phase 4b).
+"""Named analyses as a headless API (phase 4b).
 
 The analysers already exist as CLI scripts writing into
 ``experiments/<name>/results/<timestamp>_*/``. What was missing is everything
@@ -21,10 +21,10 @@ aborted or contract-violating bag must not silently enter a mean.
 Analyses are declared in ``experiments/<name>/config/analyses.yaml``:
 
     analyses:
-      apriltag_vs_mocap:
-        describe: "AprilTag pose against mocap ground truth"
+      fiducial_vs_mocap:
+        describe: "Fiducial pose against mocap ground truth"
         per: bag                       # or: cohort (one run over all of them)
-        command: "python3 .../analyze_apriltag_vs_mocap_bag.py {bag} --output-dir {results}"
+        command: "python3 .../analyze_fiducial_vs_mocap_bag.py {bag} --output-dir {results}"
 
 so adding an analysis is a config edit, and the UI (Phase 5) drives the same
 declarations rather than growing its own list.
@@ -212,7 +212,7 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
         "bags": bag_names,
         "commands": [shlex.join(c) for c in commands],
         "failed_commands": failures,
-        # Provenance the caller adds, e.g. a scratch recording of robofacts Explore (#133).
+        # Provenance the caller adds, e.g. a scratch recording of robofacts Explore.
         **(extra_metadata or {}),
     }, indent=2), encoding="utf-8")
 

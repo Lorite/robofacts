@@ -5,7 +5,7 @@ was wrong (a rule written for one mode that misfires in another), the trial
 stays ``aborted`` although its data is valid, and the only ways out were to fly
 it again or to edit ``trial_metadata.json`` by hand, which robofacts never does.
 The first case was ``20261029T162519_hover_s-60_pose_feed-none_rep01`` of
-``ros2_crazyflie_shadow_sensors_flight``: the receive-rate rule of the mocap
+an experiment that flies a drone: the receive-rate rule of the mocap
 flights failed a Flow-deck-only hover whose every block arrived at its rate.
 
 ``trials reverify <exp> <trial> --reason "..."`` finds the trial's campaign and

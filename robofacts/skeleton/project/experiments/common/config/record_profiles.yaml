@@ -10,8 +10,8 @@
 # profile must record /rosout (lint rule L11).
 #
 # A topic may hold {name} placeholders, filled from `record_profiles:` in trials.yaml
-# (cf_name, spot_name, camera, markerless_node, extpos_bridge, watchdog, or any name the
-# project adds there). A profile lists blocks, and its topic list keeps their order and
+# (the project's own names, such as a robot, a camera namespace or a node, plus the defaults of
+# an enabled adapter). A profile lists blocks, and its topic list keeps their order and
 # drops repeats. Check a profile with `trials profiles <name> --topics-only`.
 #
 # Example:

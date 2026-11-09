@@ -8,11 +8,11 @@
 # what the config enumerates and nothing else, so the CLI, the web UI and any
 # future rqt frontend cannot drift apart.
 #
-#   ./scripts/robot_action.sh spot ready          # claim + power + stand + arm carry
-#   ./scripts/robot_action.sh spot sit
-#   ./scripts/robot_action.sh spot lease          # who holds the body lease
+#   ./scripts/robot_action.sh quadruped ready          # claim + power + stand + arm carry
+#   ./scripts/robot_action.sh quadruped sit
+#   ./scripts/robot_action.sh quadruped lease          # who holds the body lease
 #   ./scripts/robot_action.sh --list              # everything configured
-#   ./scripts/robot_action.sh --dry-run spot sit  # print the wrapped command
+#   ./scripts/robot_action.sh --dry-run quadruped sit  # print the wrapped command
 #
 # ⚠️ Actions that CLAIM the lease (ready/stand) trip the observer's hijack
 # policy if its node is already up — see the caution in robots.yaml. Keep the

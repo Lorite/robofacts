@@ -141,7 +141,7 @@
     <br><i class="muted">no record ⇒ the trial can never count as coverage; no action ⇒ the stack holds for
     <input type="text" name="hold_s" value="60" size="3"> s (a manual window)</i></p>
   <p class="small"><label><input type="checkbox" name="pose_pause" value="1" checked> ⏸ pause before recording</label>
-    <span class="muted">after the T-0 gate, wait for a confirm on the run page so you can pose the rig (stand Spot, set the gripper) without racing the dwell</span></p>
+    <span class="muted">after the T-0 gate, wait for a confirm on the run page so you can pose the rig (stand the robot, set the gripper) without racing the dwell</span></p>
   <p class="small"><label><input type="checkbox" name="keep_stack" value="yes"> ⏩ continuous session: keep the stack up between trials</label>
     <br><i class="muted">launch once, then per trial only record → action → stop recorder. Saves the settle and the camera, mocap and radio re-init each time; the gate still runs before every trial but skips the ros2 daemon bounce. The stack comes down when the batch ends, aborts or fails.</i></p>
   {% if not plan.needed %}<div class="callout small">This campaign is complete: no cell is still missing. To run more, raise its <code>repetitions</code>, or make a scratch recording (below).</div>{% endif %}

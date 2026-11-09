@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep a slim, transferable copy of every recorded bag (#94).
+"""Keep a slim, transferable copy of every recorded bag.
 
 ``slim_bag.py`` slims one bag on demand. This is the layer above it: a stable
 place for slim copies, a post-record hook so one is made automatically, and a
@@ -53,7 +53,7 @@ from typing import Iterable, List, Optional
 
 
 from . import roots
-from .record_profiles import HEAVY_TOPIC_PATTERNS, is_heavy_topic  # noqa: E402
+from .record_profiles import is_heavy_topic  # noqa: E402
 from .slim_bag import bag_topics, dir_size_bytes, human, slim  # noqa: E402
 
 SLIM_SUFFIX = "_slim"
@@ -115,7 +115,7 @@ def find_bag_dirs(experiments_root: Path, experiment: Optional[str] = None,
 # --------------------------------------------------------------------------- #
 def _has_heavy_topics(bag_dir: Path) -> bool:
     try:
-        return any(is_heavy_topic(t, HEAVY_TOPIC_PATTERNS) for t in bag_topics(bag_dir))
+        return any(is_heavy_topic(t) for t in bag_topics(bag_dir))
     except Exception:
         return False
 

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # A node's own /rosout reports contain what the trial needs, and NOT what it must not have.
 #
-# Born 2026-10-01 (#107, #110): the AI deck's GAP8 streamer has a build-time JPEG mode
-# (STREAM_JPEG=1). Flashed with it, the stream still "flows" (8.0 to 8.2 fps of decoded frames
-# on image_raw) and every rate check can be satisfied, but the trial records the wrong
-# representation. aideck_camera_node says which mode it receives in its 5 s rate report: raw
+# Born 2026-10-01: a camera streamer can have a build-time JPEG mode. Flashed with it,
+# the stream still "flows" (8.0 to 8.2 fps of decoded frames on image_raw) and every rate check can be satisfied, but the trial records the wrong
+# representation. the camera node says which mode it receives in its 5 s rate report: raw
 # "10.8 fps, 1234 frames total", JPEG "8.1 fps, 1234 frames total, JPEG 5303 B mean". So the
 # evidence is the node's own report: at least one line with `present`, none with `absent`.
 #
 # Seeing NO report is a FAIL, never a pass: silence would also mean "no JPEG".
 #
-#   rosout_report.sh node=aideck_camera_node present='fps, ' absent=JPEG [window_s=7]
+#   rosout_report.sh node=camera_node present='fps, ' absent=JPEG [window_s=7]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="rosout_report.sh node=<node name substring> present=<text> [absent=<text>] [window_s=7]"
 pf_parse_args "$@"

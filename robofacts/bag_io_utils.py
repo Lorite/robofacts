@@ -16,7 +16,7 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .pose_error_analysis import PoseSample
+from .pose_sample import PoseSample
 
 
 __all__ = [
@@ -77,10 +77,10 @@ def read_messages_with_time(input_bag: Path, topics=None):
 
     ``t_s`` is the bag RECEIVE time in seconds (float, Unix epoch): the
     recorder's clock, i.e. the one timeline every topic in the bag shares.
-    That matters for cross-topic windows (verify_vision_in_the_loop scopes
-    the bridge latch against the drone's IS_FLYING edges): header stamps are
-    set on different machines (the crazyflie status is stamped on the drone,
-    a bridge status String has no header at all), receive time is not.
+    That matters for cross-topic windows (a verify step that scopes one
+    node's state against the drone's flying edges): header stamps are set on
+    different machines (a drone's status is stamped on the drone, a status
+    String has no header at all), receive time is not.
     """
     storage_id = detect_storage_id(input_bag)
     reader = rosbag2_py.SequentialReader()
@@ -120,7 +120,7 @@ def load_pose_samples(
     Handles two message shapes:
 
     * ``geometry_msgs/PoseStamped`` — a single ``pose`` + ``header`` (the default,
-      e.g. an AprilTag or ``/mocap/drone_pose`` topic).
+      e.g. a fiducial detector's pose or ``/mocap/drone_pose``).
     * ``motion_capture_tracking_interfaces/NamedPoseArray`` — a ``poses`` list of
       named bodies + ``header`` (the MOCAP stream: ``/poses``, ``/poses_full``,
       ``/poses_full_gt``). When *rigid_body* is given, the matching named body is

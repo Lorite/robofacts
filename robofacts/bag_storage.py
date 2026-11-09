@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Where heavy bags are written and where they are moved to (#96, 2026-08-04).
+"""Where heavy bags are written and where they are moved to (2026-08-04).
 
 The plumbing shared by the two halves of the replay-grade storage path:
 
 * ``trial_runner`` asks :func:`resolve_bags_dir` where to WRITE a trial's bag,
-  so a campaign can put fat ``markerless_replay`` bags straight onto external
+  so a campaign can put fat replay-grade bags straight onto external
   storage instead of the rig's internal disk.
 * ``offload_bags`` asks :func:`external_dest` where to MOVE finished bags, and
   uses :func:`file_manifest` / :func:`verify_copy` to prove a copy landed
