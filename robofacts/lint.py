@@ -453,8 +453,10 @@ def test_every_record_profile_is_a_legal_metadata_level():
     Both directions are checked, because either gap has the same consequence:
     a profile the recorder can produce, and a level a campaign can pin.
     """
-    from .record_profiles import PROFILES
+    from .record_profiles import profiles
     from .trial_metadata_schema import load_schema
+
+    PROFILES = profiles(EXPERIMENTS_ROOT)
 
     enum = set(load_schema(None, EXPERIMENTS_ROOT).fields["record_profile"].enum or [])
     assert enum, "the contract must constrain record_profile, or it constrains nothing"
@@ -488,10 +490,10 @@ def test_every_record_profile_records_rosout():
     silently drop the channel and make every flight recorded on it
     unanalyzable.
     """
-    from .record_profiles import PROFILES, build_topics
+    from .record_profiles import build_topics, profiles
 
-    for profile in PROFILES:
-        topics = build_topics(profile)
+    for profile in profiles(EXPERIMENTS_ROOT):
+        topics = build_topics(profile, experiments_root=EXPERIMENTS_ROOT)
         assert "/rosout" in topics, (
             f"record profile {profile!r} does not record /rosout. That channel "
             f"carries the go_to log (the commanded reference of goTo flights), "

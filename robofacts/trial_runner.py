@@ -107,7 +107,7 @@ class RunnerConfig:
     #: files. Making it explicit beats guessing from the file extension.
     launch_mode: str = "launch"
     #: Explicit topic list, when the experiment does not use a named record
-    #: profile from record_profiles.py (which encodes the flight topic sets).
+    #: profile of the project's common/config/record_profiles.yaml.
     record_topics: List[str] = field(default_factory=list)
     action: str = ""
     #: Foreground commands run after the gate and before anything is launched:
@@ -153,6 +153,10 @@ class RunnerConfig:
     #: roots.project_root() (flag, environment, trials.yaml, else the parent of
     #: the experiments root) unless runner.yaml says `project_root:`.
     project_root: Path = field(default_factory=lambda: roots.project_root())
+    #: The experiments root this file was loaded from. The record profiles are read from it
+    #: (``common/config/record_profiles.yaml``), so a runner given an explicit root records
+    #: that project's topic sets, not the ones of the working directory's project.
+    experiments_root: Optional[Path] = None
     source: Optional[Path] = None
     #: WHERE THE HEAVY BAG IS WRITTEN (2026-08-04). None means the repo's
     #: experiments/<name>/bags, which is what every trial recorded before that
@@ -320,6 +324,7 @@ class RunnerConfig:
             action_timeout_s=_positive_or_none(raw.get("action_timeout_s"), "action_timeout_s", path),
             explore=_explore_block(raw.get("explore"), path),
             explore_declared="explore" in raw,
+            experiments_root=experiments_root,
         )
 
 
@@ -628,16 +633,25 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                    config: RunnerConfig, bag_dir: Path) -> List[str]:
     if config.record_topics:
         # An explicit list beats a named profile for experiments whose topics are
-        # not one of the flight sets in record_profiles.py.
+        # not one of the project's named sets.
         return (["ros2", "bag", "record", "-s", config.record_storage, "-o", str(bag_dir)]
                 + list(config.record_topics))
 
-    from .record_profiles import build_record_command
+    from .record_profiles import build_record_command, default_record_profile
 
-    profile = "position_only"
+    profile = None
     for name, value in trial.values.items():
         if name in factors and factors[name].maps_to.get("kind") == "record_profile":
             profile = str(value)
+    if profile is None:
+        profile = default_record_profile()
+    if profile is None:
+        # The package used to fall back to a flight set of one lab here. A trial without a
+        # declared topic set must not record a guess: it would look finished and hold nothing.
+        raise RunnerError(
+            f"experiment {trial.experiment!r} declares no topics to record: add a factor with "
+            f"maps_to kind record_profile, record_topics in runner.yaml, or "
+            f"default_record_profile in trials.yaml")
     # The TRIAL's drone name wins over runner.yaml's default: a factor that
     # renames the drone also renames every one of its topics, and recording the
     # configured name instead would produce a bag full of topics that do not
@@ -646,7 +660,8 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
 
     cf_name = trial.launch_args(factors).get("cf_name") or config.cf_name or default_cf_name()
     return build_record_command(profile, str(bag_dir), cf_name=str(cf_name),
-                                storage=config.record_storage)
+                                storage=config.record_storage,
+                                experiments_root=config.experiments_root)
 
 
 def action_command(trial: cs.TrialSpec, config: RunnerConfig,
@@ -1838,7 +1853,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         metadata["notes"] = detail
     try:
         from .trial_metadata_schema import annotate
-        annotate(metadata, config.experiment)
+        # Against the contract of the root this config came from, not the working
+        # directory's project (found 2026-11-09: a test root was checked against the
+        # example project's contract).
+        annotate(metadata, config.experiment, experiments_root=config.experiments_root)
     except Exception as exc:  # noqa: BLE001 - never lose a finished trial
         print(f"[runner] metadata validation unavailable ({exc}) - continuing")
 

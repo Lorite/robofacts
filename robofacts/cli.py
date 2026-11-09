@@ -100,6 +100,11 @@ def _storage(argv):
     return bag_storage.main(argv)
 
 
+def _profiles(argv):
+    from . import record_profiles
+    return record_profiles.main(argv)
+
+
 def _slim(argv):
     from . import slim_bag_archive
     return slim_bag_archive.main(argv)
@@ -228,6 +233,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "check": (_check, "validate one campaign file, or list an experiment's factor space"),
     "metadata": (_metadata, "audit the recorded trial metadata against the contract"),
     "storage": (_storage, "where this host writes heavy bags"),
+    "profiles": (_profiles, "the record profiles in force (--list), or one profile's topics or record command"),
     "slim": (_slim, "archive slim copies of recorded bags"),
     "version": (_version_probe, "the code version stamped into trials"),
     "ui": (_ui, "the web interface"),

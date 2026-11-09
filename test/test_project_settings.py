@@ -40,20 +40,23 @@ def test_the_neutral_defaults_without_a_project(no_project):
     assert slc.latch_path() == Path("/tmp/trial_stop_latch")
     assert rp.names() == rp.DEFAULT_NAMES
     assert rp.default_cf_name() == "cf1"
-    topics = rp.build_topics("markerless_light")
-    assert "/cf1/pose" in topics and "/estimator/position" in topics and "/camera/color/camera_info" in topics
-    assert any(t.startswith("/spot/") for t in rp.build_topics("spot_observer"))
+    assert rp.profiles() == {}, "without a project there are no record profiles"
     assert rp.SPOT_NAME == "spot" and rp.CAMERA == "/camera"
 
 
 def test_a_project_sets_its_own_names(project):
     assert slc.latch_path() == Path("/tmp/lab_stop_latch")
     assert rp.default_cf_name() == "lab_drone"
-    topics = rp.build_topics("markerless_light")
+    profiles = project / "experiments" / rp.PROJECT_PROFILES_REL
+    profiles.parent.mkdir(parents=True)
+    profiles.write_text(yaml.safe_dump({
+        "blocks": {"all": ["/{cf_name}/pose", "{markerless_node}/position", "{camera}/color/camera_info",
+                           "{watchdog}/health", "/{spot_name}/odometry"]},
+        "profiles": {"position_only": {"blocks": ["all"]}}}))
+    topics = rp.build_topics("position_only")
     assert "/lab_drone/pose" in topics and "/lab_estimator/position" in topics
     assert "/lab_cam/color/camera_info" in topics and "/lab_watchdog/health" in topics
-    assert all(t.startswith("/lab_spot/") or t == "/mocap/poses"
-               for t in rp.build_topics("livox_mapping_spot") if "spot" in t)
+    assert "/lab_spot/odometry" in topics
     assert rp.SPOT_NAME == "lab_spot"
     cmd = rp.build_record_command("position_only", "/tmp/x")
     assert "/lab_drone/pose" in cmd

@@ -31,6 +31,7 @@ fields:
   aborted: {required: true, type: bool}
 """
 RUNNER = """
+record_topics: [/rosout]
 launch: {package: demo_pkg, file: demo.launch.py}
 action: {command: "python3 fly.py"}
 verify_steps:

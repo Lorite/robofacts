@@ -76,6 +76,8 @@ def root(tmp_path: Path) -> Path:
     (tmp_path / "common" / "config").mkdir(parents=True)
     (tmp_path / "common" / "config" / "factors.yaml").write_text(CORE, encoding="utf-8")
     (tmp_path / "common" / "config" / "trial_metadata_core.yaml").write_text(CONTRACT, encoding="utf-8")
+    (tmp_path / "common" / "config" / "record_profiles.yaml").write_text(
+        "profiles: {position_only: {topics: [/poses, /tf, /rosout]}}\n", encoding="utf-8")
     (tmp_path / "expA" / "config").mkdir(parents=True)
     (tmp_path / "expA" / "config" / "runner.yaml").write_text(RUNNER, encoding="utf-8")
     (tmp_path / "expA" / "campaigns").mkdir(parents=True)
@@ -268,7 +270,8 @@ def test_record_profile_factor_selects_the_topic_set(pieces, monkeypatch):
 
     monkeypatch.setitem(sys.modules, "robofacts.record_profiles",
                         type("m", (), {"build_record_command": staticmethod(fake_build),
-                                       "default_cf_name": staticmethod(lambda: "cf1")}))
+                                       "default_cf_name": staticmethod(lambda: "cf1"),
+                                       "default_record_profile": staticmethod(lambda: None)}))
     tr.record_command(trial, factors, config, Path("/bags/x"))
     assert captured["profile"] == "position_only"
 

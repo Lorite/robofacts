@@ -1,171 +1,195 @@
 #!/usr/bin/env python3
-"""Unit tests for the #94 record profiles and the bag-slimming topic selection.
+"""Record profiles are project data: the loader, the merge order, the placeholders, the
+record command, and the bag-slimming topic selection.
 
-Pure Python — no ROS graph, no bag, no hardware. These pin the two properties
-that make the "light bag instead of a forensics video" loop work:
-
-  * the light profile carries every #94 debug channel and NO image/depth topic
-    (that ratio is the whole 6-10 GB -> tens-of-MB difference);
-  * ``position_only`` is bit-identical to the topic list the run notebook used
-    before the profiles existed, so old trials stay comparable;
-  * ``slim_bag``'s selection drops exactly the heavy topics of an existing bag
-    and keeps everything else, including the compressed overlay.
-
-Run directly (inside the container, with the workspace sourced):
-  python3 test_record_profiles.py
-or under pytest:
-  pytest test_record_profiles.py
+Pure Python: no ROS graph, no bag, no hardware. A project's own profiles are tested in that
+project (the robotics lab pins its profiles in its own test_lab_record_profiles.py).
 """
-
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import pytest
+import yaml
+
+from robofacts import record_profiles as rp
+from robofacts import roots
+from robofacts.record_profiles import build_record_command, build_topics, is_heavy_topic
+from robofacts.slim_bag import select_topics
+
+PROFILE_FILE = {
+    "blocks": {
+        "drone": ["/{cf_name}/pose", "/{cf_name}/battery", "/tf", "/rosout"],
+        "estimator": {"topics": ["{markerless_node}/position", "{watchdog}/health",
+                                 "{camera}/color/camera_info"]},
+        "pixels": ["{camera}/color/image_raw"],
+        "robot": ["/{spot_name}/odometry", "/tf"],
+    },
+    "profiles": {
+        "flight": {"blocks": ["drone"], "size": "~5 MB/min"},
+        "debug": {"blocks": ["drone", "estimator"], "topics": ["/joy"]},
+        "full": {"blocks": ["drone", "estimator", "pixels"]},
+        "with_robot": {"blocks": ["drone", "robot"]},
+    },
+}
 
 
-from robofacts.record_profiles import (  # noqa: E402
-    PROFILES,
-    PROFILE_NOTES,
-    build_record_command,
-    build_topics,
-    is_heavy_topic,
-)
-from robofacts.slim_bag import select_topics  # noqa: E402
-from robofacts import record_profiles  # noqa: E402
-
-CF = "cf1"
-
-# The exact list the notebook's build_record_command() hard-coded before #94.
-LEGACY_POSITION_ONLY = [
-    "/poses", "/poses_full", "/poses_full_gt", "/poses_degraded",
-    f"/{CF}/pose", f"/{CF}/odom",
-    f"/{CF}/cmd_full_state",
-    f"/{CF}/commands_received_position",
-    f"/{CF}/ext_pose_age",
-    f"/{CF}/localization_cov", f"/{CF}/altitude_debug",
-    f"/{CF}/motors", f"/{CF}/battery", f"/{CF}/status",
-    "/tf", "/tf_static", "/rosout",
-]
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    """A project with a trials.yaml and a record_profiles.yaml, and no root variables."""
+    for var in (roots.ENV_EXPERIMENTS_ROOT, roots.ENV_PROJECT_ROOT):
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n")
+    config = tmp_path / "experiments" / rp.PROJECT_PROFILES_REL
+    config.parent.mkdir(parents=True)
+    config.write_text(yaml.safe_dump(PROFILE_FILE))
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
-def test_position_only_profile_is_unchanged():
-    assert build_topics("position_only", cf_name=CF) == LEGACY_POSITION_ONLY
+def _write(project, data):
+    (project / "experiments" / rp.PROJECT_PROFILES_REL).write_text(yaml.safe_dump(data))
 
 
-def test_light_profile_has_the_debug_channels_and_no_pixels():
-    topics = build_topics("markerless_light", cf_name=CF)
-    for required in ("/estimator/position",
-                     "/estimator/status",
-                     "/estimator/debug/markers",
-                     "/estimator/debug/metrics",
-                     "/estimator/debug/overlay/compressed",
-                     "/estimator_bridge/status",
-                     "/estimator_bridge/debug/metrics",
-                     "/localization_watchdog/health",
-                     "/tf", "/tf_static", "/poses", "/poses_full"):
-        assert required in topics, f"light profile is missing {required}"
-    heavy = [t for t in topics if is_heavy_topic(t)]
-    assert heavy == [], f"the light profile must carry no pixels, got {heavy}"
+def test_the_package_ships_no_profiles():
+    """The package holds the mechanism, a project holds the topic sets."""
+    assert not rp.PACKAGE_PROFILES_FILE.is_file() or not rp._read(rp.PACKAGE_PROFILES_FILE)["profiles"]
 
 
-def test_light_profile_is_a_superset_of_position_only():
-    light = build_topics("markerless_light", cf_name=CF)
-    assert all(t in light for t in LEGACY_POSITION_ONLY)
+def test_profiles_come_from_the_project_file(project):
+    assert rp.profile_files() == [project / "experiments" / rp.PROJECT_PROFILES_REL]
+    assert rp.PROFILES == {"flight": ["drone"], "debug": ["drone", "estimator"],
+                           "full": ["drone", "estimator", "pixels"],
+                           "with_robot": ["drone", "robot"]}
+    assert rp.PROFILE_NOTES == {"flight": "~5 MB/min"}
 
 
-def test_full_profile_adds_the_camera_streams():
-    full = build_topics("markerless_full", cf_name=CF)
-    light = build_topics("markerless_light", cf_name=CF)
-    added = [t for t in full if t not in light]
-    assert added == ["/camera/color/image_raw",
-                     "/camera/aligned_depth_to_color/image_raw",
-                     "/camera/aligned_depth_to_color/camera_info"]
+def test_blocks_are_concatenated_in_order_with_the_neutral_names(project):
+    assert build_topics("flight") == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout"]
+    assert build_topics("debug") == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout",
+                                     "/estimator/position", "/localization_watchdog/health",
+                                     "/camera/color/camera_info", "/joy"]
 
 
-def test_replay_profile_adds_only_the_compressed_streams():
-    # The 08-03 replay-grade tier: compressed pixels + intrinsics, no raw.
-    replay = build_topics("markerless_replay", cf_name=CF)
-    light = build_topics("markerless_light", cf_name=CF)
-    added = [t for t in replay if t not in light]
-    assert added == [
-        "/camera/color/image_raw/compressed",
-        "/camera/aligned_depth_to_color/image_raw/compressedDepth",
-        "/camera/aligned_depth_to_color/camera_info",
-    ]
-    assert "/camera/color/image_raw" not in replay
-    assert "/camera/aligned_depth_to_color/image_raw" not in replay
+def test_repeated_topics_are_recorded_once(project):
+    assert build_topics("with_robot") == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout",
+                                          "/spot/odometry"]
 
 
-def test_replay_profile_is_a_superset_of_light():
-    replay = build_topics("markerless_replay", cf_name=CF)
-    light = build_topics("markerless_light", cf_name=CF)
-    assert all(t in replay for t in light)
+def test_names_come_from_trials_yaml_and_the_call(project):
+    (project / "trials.yaml").write_text(
+        "experiments_root: experiments\nproject_root: .\n"
+        "record_profiles: {cf_name: lab_drone, camera: /lab_cam, spot_name: lab_spot}\n")
+    assert build_topics("flight")[0] == "/lab_drone/pose"
+    assert "/lab_spot/odometry" in build_topics("with_robot")
+    listed = build_topics("full", cf_name="drone9", node="/mk", watchdog="/wd", camera="/cam")
+    assert "/drone9/battery" in listed and "/mk/position" in listed
+    assert "/wd/health" in listed and "/cam/color/image_raw" in listed
 
 
-def test_replay_streams_stay_heavy_for_slimming():
-    # slim_bag must still be able to strip a replay bag down to a light one —
-    # the compressed pixel streams are heavy on purpose, only the debug
-    # overlay and camera_info are exempt.
-    assert is_heavy_topic("/camera/color/image_raw/compressed")
-    assert is_heavy_topic(
-        "/camera/aligned_depth_to_color/image_raw/compressedDepth")
-    assert not is_heavy_topic("/camera/aligned_depth_to_color/camera_info")
+def test_an_unknown_name_names_itself(project):
+    _write(project, {"blocks": {"b": ["/{rover}/odom"]}, "profiles": {"p": {"blocks": ["b"]}}})
+    with pytest.raises(rp.ProfileError, match="rover"):
+        build_topics("p")
 
 
-def test_camera_info_is_light_but_image_raw_is_not():
-    # camera_info is a handful of floats and is needed to re-project the estimate.
-    assert not is_heavy_topic("/camera/color/camera_info")
-    assert is_heavy_topic("/camera/color/image_raw")
-    assert is_heavy_topic("/camera/aligned_depth_to_color/image_raw")
-    assert is_heavy_topic("/nvblox_node/static_esdf_pointcloud")
-    assert not is_heavy_topic("/estimator/debug/overlay/compressed")
-
-
-def test_profiles_have_no_duplicate_topics():
-    for name in PROFILES:
-        topics = build_topics(name, cf_name=CF)
-        assert len(topics) == len(set(topics)), f"{name} has duplicates"
-
-
-def test_unknown_profile_raises():
-    try:
+def test_an_unknown_profile_raises(project):
+    with pytest.raises(ValueError, match="nope"):
         build_topics("nope")
-    except ValueError as exc:
-        assert "nope" in str(exc)
-    else:
-        raise AssertionError("an unknown profile must raise")
 
 
-def test_record_command_shape():
-    cmd = build_record_command("markerless_light", "/tmp/bag_x", cf_name=CF,
-                               max_duration_sec=30, compression=True)
+def test_an_unknown_block_names_its_profile(project):
+    _write(project, {"blocks": {}, "profiles": {"p": {"blocks": ["missing"]}}})
+    with pytest.raises(rp.ProfileError, match="'p' names unknown blocks"):
+        rp.load()
+
+
+@pytest.mark.parametrize("data, match", [
+    ({"profile": {}}, "unknown top-level keys"),
+    ({"blocks": {"b": {"topic": ["/x"]}}}, "topic list or a mapping"),
+    ({"blocks": {"b": [1]}}, "list of topic names"),
+    ({"profiles": {"p": {"blocks": "b"}}}, "list of block names"),
+    ({"profiles": {"p": {"block": ["b"]}}}, "mapping of blocks"),
+])
+def test_a_malformed_file_is_refused(project, data, match):
+    _write(project, data)
+    with pytest.raises(rp.ProfileError, match=match):
+        rp.load()
+
+
+def test_a_later_file_replaces_a_block_of_the_same_name(project, monkeypatch, tmp_path):
+    adapter = tmp_path / "adapter_profiles.yaml"
+    adapter.write_text(yaml.safe_dump({"blocks": {"drone": ["/adapter"], "extra": ["/x"]},
+                                       "profiles": {"adapter_only": {"blocks": ["extra"]}}}))
+    monkeypatch.setattr(rp, "adapter_profile_files", lambda: [adapter])
+    assert rp.profile_files()[0] == adapter
+    assert build_topics("flight") == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout"]
+    assert build_topics("adapter_only") == ["/x"]
+
+
+def test_no_project_means_no_profiles(tmp_path, monkeypatch):
+    for var in (roots.ENV_EXPERIMENTS_ROOT, roots.ENV_PROJECT_ROOT):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert rp.profiles() == {}
+
+
+def test_the_default_profile_is_a_project_setting(project):
+    assert rp.default_record_profile() is None
+    (project / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n"
+                                         "default_record_profile: flight\n")
+    assert rp.default_record_profile() == "flight"
+
+
+def test_the_cli_lists_and_prints(project, capsys):
+    assert rp.main(["--list"]) == 0
+    assert "flight" in capsys.readouterr().out
+    assert rp.main(["flight", "--topics-only"]) == 0
+    assert capsys.readouterr().out.split() == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout"]
+
+
+# --- the record command ----------------------------------------------------------
+
+def test_record_command_shape(project):
+    cmd = build_record_command("debug", "/tmp/bag_x", max_duration_sec=30, compression=True)
     # Humble's ros2bag has no --max-duration: the duration is a timeout -s INT
     # wrapper in front of the argv (2026-08-10), so the bag closes as on Ctrl-C.
     assert cmd[:5] == ["timeout", "--preserve-status", "-s", "INT", "30"]
     assert cmd[5:11] == ["ros2", "bag", "record", "-s", "mcap", "-o"]
-    assert "/tmp/bag_x" in cmd
-    assert "--max-duration" not in cmd
+    assert "/tmp/bag_x" in cmd and "--max-duration" not in cmd
     assert cmd[cmd.index("--compression-format") + 1] == "zstd"
-    assert cmd[-1].startswith("/")
+    assert cmd[-1] == "/joy"
 
 
-def test_record_command_no_duration_has_no_wrapper():
-    cmd = build_record_command("markerless_light", "/tmp/bag_x", cf_name=CF)
-    assert cmd[:6] == ["ros2", "bag", "record", "-s", "mcap", "-o"]
-    assert "timeout" not in cmd
+def test_record_command_no_duration_has_no_wrapper(project):
+    cmd = build_record_command("flight", "/tmp/bag_x", cf_name="cf2")
+    assert cmd == ["ros2", "bag", "record", "-s", "mcap", "-o", "/tmp/bag_x",
+                   "/cf2/pose", "/cf2/battery", "/tf", "/rosout"]
 
 
-def test_custom_names_propagate():
-    topics = build_topics("markerless_light", cf_name="drone9",
-                          node="/mk", bridge="/br", watchdog="/wd", camera="/cam")
-    assert "/drone9/battery" in topics
-    assert "/mk/debug/metrics" in topics
-    assert "/br/status" in topics and "/br/debug/metrics" in topics
-    assert "/wd/health" in topics
-    assert "/cam/color/camera_info" in topics
+# --- heavy topics and slim_bag ---------------------------------------------------
+
+def test_camera_info_and_the_debug_overlay_are_light_but_pixels_are_not():
+    assert not is_heavy_topic("/camera/color/camera_info")
+    assert not is_heavy_topic("/estimator/debug/overlay/compressed")
+    assert is_heavy_topic("/camera/color/image_raw")
+    assert is_heavy_topic("/camera/aligned_depth_to_color/image_raw")
+    assert is_heavy_topic("/camera/color/image_raw/compressed")
+    assert is_heavy_topic("/camera/aligned_depth_to_color/image_raw/compressedDepth")
+    assert is_heavy_topic("/nvblox_node/static_esdf_pointcloud")
 
 
-# --- slim_bag topic selection ------------------------------------------------
+def test_registered_depth_and_jpeg_streams_are_heavy_but_their_intrinsics_are_not():
+    """The 2026-08-05 slimming fix: a JPEG stream and a registered depth stream matched no
+    pattern, so slim copies kept them and were the same order of size as the heavy bag."""
+    assert is_heavy_topic("/robot/camera/hand/compressed")
+    assert is_heavy_topic("/robot/depth_registered/hand/image")
+    assert not is_heavy_topic("/robot/camera/hand/camera_info")
+    assert not is_heavy_topic("/robot/depth_registered/hand/camera_info")
+
+
+def test_lidar_point_streams_are_heavy_but_the_imu_is_not():
+    assert is_heavy_topic("/livox/lidar") and is_heavy_topic("/cloud_registered")
+    assert not is_heavy_topic("/livox/imu") and not is_heavy_topic("/Odometry")
+
 
 BAG_TOPICS = [
     "/tf", "/tf_static", "/rosout", "/poses", "/poses_full",
@@ -191,231 +215,3 @@ def test_slim_extra_excludes_and_keeps():
     assert "/rosout" not in kept
     kept = select_topics(BAG_TOPICS, [], ["/camera/color/image_raw"])
     assert "/camera/color/image_raw" in kept, "--keep must override the heavy rule"
-
-
-# --------------------------------------------------------------------------- #
-# The route-demo profile has to satisfy the verifier that reads its bags
-# --------------------------------------------------------------------------- #
-#: Every topic verify_route_demo.py reads. A profile that flies this campaign
-#: and omits one of them produces a bag whose verifier silently reports nothing
-#: about it, which is indistinguishable from "nothing happened".
-ROUTE_DEMO_TOPICS_THE_VERIFIER_READS = (
-    "/poses",
-    "/mocap/poses",
-    "/estimator/status",
-    "/estimator/position",
-    "/estimator_bridge/status",
-    "/localization_watchdog/health",
-    "/route_demo/loop_closure_cm",
-    "/graph_nav_map_tf/status",
-)
-
-
-def test_route_profile_records_everything_the_verifier_reads():
-    """Close the loop between what is recorded and what is checked afterwards."""
-    topics = set(build_topics("spot_route_replay", cf_name=CF))
-    missing = [t for t in ROUTE_DEMO_TOPICS_THE_VERIFIER_READS if t not in topics]
-    assert not missing, f"spot_route_replay omits topics verify_route_demo reads: {missing}"
-
-
-def test_route_profile_records_the_localization_watchdog():
-    """REGRESSION (2026-08-05): the only Spot campaign that ARMS had no watchdog.
-
-    spot_route_replay composes markerless_debug_handcam, which drops the
-    watchdog health channel because "the shadow campaigns fly nothing" -- true
-    of those campaigns, false of this one. On this route the 0.3 s localization
-    watchdog is what lands the drone when the hand camera loses it, so "did it
-    fire, and on which leg" is the first question a mid-route landing raises.
-    """
-    assert "/localization_watchdog/health" in build_topics(
-        "spot_route_replay", cf_name=CF)
-
-
-def test_the_handcam_shadow_profile_still_has_no_watchdog():
-    """The fix belongs to the route group, not to the shared handcam one."""
-    assert "/localization_watchdog/health" not in build_topics(
-        "spot_observer_handcam", cf_name=CF)
-
-
-def test_route_profile_carries_replay_grade_pixels():
-    """Outside the volume the camera is the only witness there is."""
-    # Looked up in the test, not at import: the project settings (and with them the robot's
-    # name) are the conftest fixture's example project only while a test runs.
-    SPOT = record_profiles.SPOT_NAME
-    topics = build_topics("spot_route_replay", cf_name=CF)
-    assert f"/{SPOT}/camera/hand/compressed" in topics
-    assert f"/{SPOT}/depth_registered/hand/image" in topics
-    assert f"/{SPOT}/camera/hand/camera_info" in topics
-
-
-def test_spot_hand_pixels_are_heavy_but_their_intrinsics_are_not():
-    """Both halves of the 2026-08-05 slimming fix, pinned.
-
-    A slim copy must drop Spot's JPEG colour and its REGISTERED depth (neither
-    matched the old patterns, so slim copies were the same order of size as the
-    heavy bag and got pulled over the lab Wi-Fi) and must keep camera_info,
-    without which a recorded estimate cannot be re-projected.
-    """
-    SPOT = record_profiles.SPOT_NAME
-    assert is_heavy_topic(f"/{SPOT}/camera/hand/compressed")
-    assert is_heavy_topic(f"/{SPOT}/depth_registered/hand/image")
-    assert not is_heavy_topic(f"/{SPOT}/camera/hand/camera_info")
-    assert not is_heavy_topic(f"/{SPOT}/depth_registered/hand/camera_info")
-
-
-def test_the_debug_overlay_survives_the_compressed_rule():
-    """"/compressed" is a heavy pattern, and the 2 Hz overlay is the exception."""
-    assert not is_heavy_topic("/estimator/debug/overlay/compressed")
-    assert is_heavy_topic("/camera/color/image_raw/compressed")
-
-
-def test_route_profile_is_a_superset_of_the_handcam_observer_profile():
-    base = set(build_topics("spot_observer_handcam", cf_name=CF))
-    route = set(build_topics("spot_route_replay", cf_name=CF))
-    assert base <= route
-
-
-def _run_all() -> int:
-    tests = [v for k, v in sorted(globals().items())
-             if k.startswith("test_") and callable(v)]
-    failures = 0
-    for fn in tests:
-        try:
-            fn()
-            print(f"PASS {fn.__name__}")
-        except AssertionError as exc:
-            failures += 1
-            print(f"FAIL {fn.__name__}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            print(f"ERROR {fn.__name__}: {type(exc).__name__}: {exc}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(_run_all())
-
-
-# --- Livox Mid-360S profiles (#109) -------------------------------------------
-
-def test_livox_mapping_has_the_raw_stream_and_fast_lio_outputs():
-    topics = build_topics("livox_mapping")
-    for t in ("/livox/lidar", "/livox/imu", "/Odometry", "/cloud_registered", "/tf",
-              "/tf_static"):
-        assert t in topics, t
-    # the accumulated map is redundant with the registered scans, and multi-GB
-    assert "/Laser_map" not in topics
-    # no camera or mocap in the desk profile
-    assert not any("/camera" in t or "/mocap" in t for t in topics)
-
-
-def test_livox_mapping_spot_adds_spot_state_and_mocap():
-    desk = build_topics("livox_mapping")
-    spot = build_topics("livox_mapping_spot")
-    assert set(desk) <= set(spot)
-    for t in ("/spot/odometry", "/spot/joint_states",
-              "/mocap/poses"):
-        assert t in spot, t
-
-
-def test_livox_point_stream_is_heavy_but_the_imu_is_not():
-    assert is_heavy_topic("/livox/lidar")
-    assert is_heavy_topic("/cloud_registered")
-    assert not is_heavy_topic("/livox/imu")
-    assert not is_heavy_topic("/Odometry")
-
-
-# --- AI deck + mocap profile (Paper 3, #107) -----------------------------------
-
-def test_aideck_mocap_records_both_stream_formats_and_the_raw_mocap():
-    topics = build_topics("aideck_mocap", cf_name=CF)
-    for t in (f"/{CF}/aideck/image_raw", f"/{CF}/aideck/image_raw/compressed",
-              f"/{CF}/aideck/camera_info", "/mocap/poses", "/tf", "/tf_static", "/rosout"):
-        assert t in topics, t
-    # no crazyflie_server in a handheld trial: no firmware telemetry, no /poses bridge
-    assert "/poses" not in topics
-    assert f"/{CF}/pose" not in topics
-
-
-def test_aideck_mocap_follows_the_drone_name():
-    topics = build_topics("aideck_mocap", cf_name="other_cf")
-    assert "/other_cf/aideck/image_raw" in topics
-    assert not any(CF in t for t in topics)
-
-
-def test_aideck_frames_are_heavy_and_its_intrinsics_are_not():
-    # slim_bag must strip the frames (a slim copy cannot host a relocalization run) and
-    # keep camera_info, the capture-time calibration provenance.
-    assert is_heavy_topic(f"/{CF}/aideck/image_raw")
-    assert is_heavy_topic(f"/{CF}/aideck/image_raw/compressed")
-    assert not is_heavy_topic(f"/{CF}/aideck/camera_info")
-    assert not is_heavy_topic("/mocap/poses")
-
-
-# --- AI deck VIO in shadow (Paper 3, #122) ---------------------------------------
-
-def test_vio_shadow_is_aideck_mocap_plus_the_imu_log_and_openvins():
-    base = build_topics("aideck_mocap", cf_name=CF)
-    topics = build_topics("aideck_vio_shadow", cf_name=CF)
-    assert topics[:len(base)] == base
-    assert topics[len(base):] == [f"/{CF}/imu_log", "/ov_msckf/odomimu", "/ov_msckf/poseimu"]
-
-
-def test_vio_shadow_keeps_the_relayed_imu_and_rosout():
-    topics = build_topics("aideck_vio_shadow", cf_name=CF)
-    # the relay output that OpenVINS reads, next to the raw log topic it came from
-    assert f"/{CF}/imu" in topics and f"/{CF}/imu_log" in topics
-    assert "/rosout" in topics  # L11: the relay's rate and gap reports live there
-
-
-def test_vio_shadow_follows_the_drone_name():
-    topics = build_topics("aideck_vio_shadow", cf_name="other_cf")
-    assert "/other_cf/imu_log" in topics
-    assert not any(CF in t for t in topics)
-
-
-def test_vio_shadow_estimates_and_imu_are_light():
-    # slim_bag keeps the shadow estimate and both IMU topics, it strips only the frames
-    for t in (f"/{CF}/imu_log", f"/{CF}/imu", "/ov_msckf/odomimu", "/ov_msckf/poseimu"):
-        assert not is_heavy_topic(t), t
-    assert is_heavy_topic(f"/{CF}/aideck/image_raw")
-
-
-def test_vio_shadow_record_command():
-    cmd = build_record_command("aideck_vio_shadow", "bags/x", cf_name=CF)
-    assert cmd[:6] == ["ros2", "bag", "record", "-s", "mcap", "-o"]
-    assert cmd[-3:] == [f"/{CF}/imu_log", "/ov_msckf/odomimu", "/ov_msckf/poseimu"]
-    assert "aideck_vio_shadow" in PROFILE_NOTES
-
-
-def test_teleop_shadow_flight_is_shadow_flight_plus_the_pad():
-    """#168 (2026-10-29): the teleoperated flight records the same bag as shadow_flight plus
-    /joy. The teleop setpoints need no extra topic: /<cf>/cmd_full_state is in mocap_firmware."""
-    shadow = build_topics("shadow_flight", cf_name="cfb1")
-    teleop = build_topics("teleop_shadow_flight", cf_name="cfb1")
-    assert set(teleop) - set(shadow) == {"/joy"}
-    assert set(shadow) <= set(teleop)
-    assert "/cfb1/cmd_full_state" in teleop
-    assert not is_heavy_topic("/joy")
-
-
-def test_spot_observer_handcam_vio_is_the_handcam_bag_plus_the_drone_vio():
-    """#170 (2026-11-05): Spot's markerless estimate and the drone's VIO in one bag."""
-    handcam = build_topics("spot_observer_handcam", cf_name="cfb1")
-    vio = build_topics("aideck_vio_shadow", cf_name="cfb1")
-    both = build_topics("spot_observer_handcam_vio", cf_name="cfb1")
-    assert set(handcam) <= set(both)
-    assert set(vio) - set(handcam) <= set(both)
-    assert "/ov_msckf/odomimu" in both and "/cfb1/aideck/image_raw" in both
-    assert "spot_observer_handcam_vio" in PROFILE_NOTES
-
-
-def test_spot_observer_handcam_teleop_is_the_replay_bag_plus_the_pad():
-    """#170 (2026-11-09): hand-camera pixels of a teleoperated drone, as detector training data."""
-    replay = build_topics("spot_observer_handcam_replay", cf_name="cfb1")
-    teleop = build_topics("spot_observer_handcam_teleop", cf_name="cfb1")
-    assert set(replay) <= set(teleop)
-    assert set(teleop) - set(replay) == {"/joy"}
-    assert "/cfb1/cmd_full_state" in teleop and "/poses" in teleop
-    assert "spot_observer_handcam_teleop" in PROFILE_NOTES

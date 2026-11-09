@@ -100,27 +100,13 @@ fields:
     required: false
     type: str
     factor: true
-    # markerless_replay, static_sweep and static_sweep_light added 2026-08-04.
-    # They existed in record_profiles.PROFILES but not here, and the consequence
-    # is the one the describe below warns about: a trial recorded on a profile
-    # missing from this list fails the contract, so trial_index counts it
-    # `unverified` instead of `usable`, campaign_plan reports the cell as STILL
-    # TO FLY, and the campaign asks for a flight that already happened. Caught
-    # by test_experiment_config_lint L9, which now fails the build on the gap.
-    # spot_route_replay added 2026-08-05 with the beyond-the-volume route campaign,
-    # in the same commit as the profile itself — L9 exists because the previous
-    # profile was added without this line.
-    # spot_observer_handcam_replay added 2026-08-11 with the depth-confounds
-    # campaign, same commit as the profile itself (the shadow rig's bag with
-    # replay-grade hand-camera pixels; static material only).
-    # livox_mapping and livox_mapping_spot added 2026-09-30 with the Livox Mid-360S
-    # profiles (#109), in the same commit as the profiles: L9 caught the gap at push.
-    # aideck_mocap added 2026-10-01 with the Paper 3 handheld relocalization experiment
-    # (#107), in the same change as the profile.
-    # Every profile the package ships (record_profiles.PROFILES, pinned by lint L9), plus
-    # custom (runner.yaml record_topics) and unknown.
-    enum: [aideck_mocap, aideck_vio_shadow, shadow_flight, teleop_shadow_flight, spot_observer_handcam_vio, spot_observer_handcam_teleop, livox_mapping, livox_mapping_spot, markerless_full, markerless_light, markerless_replay, position_only, spot_observer, spot_observer_handcam, spot_observer_handcam_replay, spot_route_replay, static_sweep, static_sweep_light, custom, unknown]
-    describe: "Which topic set was recorded (#94). Determines what the bag can answer. Keep in sync with common/scripts/record_profiles.py — a profile missing here invalidates every trial recorded on it."
+    # Add each profile of common/config/record_profiles.yaml here, in the same change as
+    # the profile. A trial recorded on a profile missing from this list fails the contract,
+    # so trial_index counts it `unverified` instead of `usable`, campaign_plan reports its
+    # cell as still missing, and the campaign asks for a trial that already happened. Lint
+    # rule L9 fails the build on the gap. `custom` is runner.yaml's record_topics list.
+    enum: [custom, unknown]
+    describe: "Which topic set was recorded. Determines what the bag can answer. Keep in sync with common/config/record_profiles.yaml: a profile missing here invalidates every trial recorded on it."
 
   aborted:
     required: true

@@ -49,6 +49,7 @@ fields:
 """
 
 RUNNER = """
+record_topics: [/rosout]
 launch: {package: demo_nodes_cpp, file: talker}
 action: {command: "echo fly --shape {trajectory}"}
 hosts:

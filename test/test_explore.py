@@ -51,6 +51,7 @@ fields:
 
 RUNNER_SIM = """
 simulation: true
+record_topics: [/rosout]
 launch: {package: demo_pkg, file: stack.launch.py}
 action: {command: "echo fly"}
 setup_steps:

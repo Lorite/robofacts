@@ -67,6 +67,21 @@ Every command resolves the experiments root in this order: the `--experiments-ro
 
 Besides the two roots, `trials.yaml` may hold the names a project gives to what used to be constants in the code, so that the package itself knows no robot: `stop_latch` (the file every stop command writes first, which the gate's `stop_latch` check refuses while it is younger than 120 s, default `/tmp/trial_stop_latch`) and `record_profiles` (the drone, quadruped, camera and node names the named record profiles build their topic lists from, defaults `cf1`, `spot`, `/camera`, `/estimator`, `/estimator_bridge`, `/localization_watchdog`). An experiment's `runner.yaml` may still say `cf_name:` for its own drone. The environment variables the package reads all start with `TRIALS_`: `TRIALS_EXPERIMENTS_ROOT`, `TRIALS_PROJECT_ROOT`, `TRIALS_STOP_LATCH`, `TRIALS_PREFLIGHT_CONCURRENCY`, `TRIALS_PREFLIGHT_TIMING_LOG`, `TRIALS_VOICE`, `TRIALS_VOICE_HOST`, `TRIALS_VOICE_PORT`, `TRIALS_ROBOTS_CONFIG`.
 
+## Record profiles
+
+A record profile is a named topic list that a trial records. The project declares its profiles in `experiments/common/config/record_profiles.yaml`, and the package ships none: a topic set describes one lab's robots, drivers and nodes, so it belongs to the project. The file has reusable `blocks` (topic lists) and `profiles` (a list of blocks, optional extra `topics`, and an optional `size` note). A topic may hold `{name}` placeholders, filled from the `record_profiles:` names in `trials.yaml`. `trials init` writes a commented template.
+
+```yaml
+blocks:
+  robot_state: ["/{cf_name}/pose", "/{cf_name}/battery", /tf, /tf_static, /rosout]
+  camera_debug: ["{camera}/color/camera_info"]
+profiles:
+  flight: {blocks: [robot_state], size: "~5 MB/min"}
+  flight_with_camera: {blocks: [robot_state, camera_debug], topics: [/joy]}
+```
+
+A trial picks its profile with a factor whose `maps_to` has `kind: record_profile`. Without such a factor the runner uses `default_record_profile` from `trials.yaml`, and without that it refuses the trial rather than record a guess. An experiment whose topics are its own lists them in `runner.yaml` as `record_topics`, which wins over any profile. The lint checks that every profile is a level of `record_profile` in the metadata contract (L9) and records `/rosout` (L11). `trials profiles --list` prints the profiles in force and the files they came from, and `trials profiles <name> --topics-only` prints one profile's topics.
+
 ## The commands
 
 | command | does |

@@ -56,6 +56,7 @@ robots:
     estop: {command: "true"}
 """
 RUNNER = """
+record_topics: [/rosout]
 launch: {package: demo_pkg, file: demo.launch.py}
 action: {command: "python3 fly.py"}
 robots: [{name: crazyflie, with: [aideck]}]
