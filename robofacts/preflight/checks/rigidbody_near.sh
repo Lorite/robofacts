@@ -48,7 +48,10 @@ if [ -n "$NODE" ]; then
     SOURCE="x=$X y=$Y from $NODE $PREFIX"
 fi
 
-RESULT="$(timeout "$TIMEOUT" ros2 topic echo "$TOPIC" --once 2>/dev/null | python3 - "$NAME" "$X" "$Y" "$MAX_M" <<'PYEOF'
+# The program goes in with -c, not as `python3 - <<EOF`: a heredoc REPLACES stdin, so the echo
+# piped into it never arrived and the check said "no sample" for every pose (found on the
+# Orin 2026-11-10, the drone 1 cm from the origin).
+PY_NEAR="$(cat <<'PYEOF'
 import math
 import sys
 
@@ -87,6 +90,7 @@ if verdict == "FAIL":
 print(f"{verdict}|{detail}")
 PYEOF
 )"
+RESULT="$(timeout "$TIMEOUT" ros2 topic echo "$TOPIC" --once 2>/dev/null | python3 -c "$PY_NEAR" "$NAME" "$X" "$Y" "$MAX_M")"
 
 case "$RESULT" in
     PASS\|*) pf_pass "${RESULT#PASS|} [$SOURCE]" ;;
