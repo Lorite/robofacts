@@ -223,7 +223,17 @@ class RunnerConfig:
         whose daemon was down, and hung — from inside the container there is no
         ssh key anyway, and from the host the alias resolution is a network
         dependency a trial should not have.
+
+        A level the experiment does not declare is refused (2026-11-16). Before, it ran on the
+        runner's own machine without a word, so a trial labeled with the robot computer could
+        run on the laptop. A level declared with no settings and no registry entry still runs
+        locally.
         """
+        if host_level is not None and str(host_level) not in self.hosts:
+            raise RunnerError(
+                f"execution host {host_level!r} is not declared in this experiment's runner.yaml "
+                f"hosts: (declared: {sorted(self.hosts) or 'none'}). Add the level there; "
+                f"its settings come from common/config/hosts.yaml.")
         spec = self.hosts.get(str(host_level)) if host_level is not None else None
         if not spec or spec.get("local", False):
             return None
@@ -285,8 +295,15 @@ class RunnerConfig:
         for required in ("package", "file"):
             if not launch.get(required):
                 raise RunnerError(f"{path}: launch.{required} is required")
-        for level, spec in (raw.get("hosts") or {}).items():
-            env_setup = (spec or {}).get("env_setup") if isinstance(spec, dict) else None
+        # The experiment's levels, each filled from common/config/hosts.yaml (host_registry.py).
+        from . import host_registry
+        try:
+            hosts = host_registry.resolve(host_registry.load(experiments_root),
+                                          raw.get("hosts"), str(path))
+        except host_registry.HostRegistryError as exc:
+            raise RunnerError(str(exc)) from exc
+        for level, spec in hosts.items():
+            env_setup = spec.get("env_setup")
             if env_setup is not None and (not isinstance(env_setup, list)
                                           or not all(isinstance(f, str) and f for f in env_setup)):
                 raise RunnerError(f"{path}: hosts.{level}.env_setup must be a list of file paths "
@@ -314,7 +331,7 @@ class RunnerConfig:
                             if isinstance(raw.get("livestream"), dict)
                             else raw.get("livestream") or "")).strip(),
             cf_name=(str(raw["cf_name"]) if raw.get("cf_name") else None),
-            hosts=raw.get("hosts") or {},
+            hosts=hosts,
             project_root=(Path(raw["project_root"]).expanduser() if raw.get("project_root")
                           else roots.project_root(experiments=experiments_root)),
             source=path,

@@ -56,9 +56,12 @@ verify_steps:
 # metadata_probes:
 #   - {key: firmware_version, command: "cat firmware/version.txt"}
 
-# One entry per level of the execution_host factor. `local: true` runs here;
-# a remote host gets `ssh <host> docker exec <container> <shell> -lc ...` around
-# every command, and the bag is brought back after the trial.
+# One entry per level of the execution_host factor that this experiment may run
+# on. `local: true` runs here; a remote host gets `ssh <host> docker exec
+# <container> <shell> -lc ...` around every command, and the bag is brought back
+# after the trial. When the project has common/config/hosts.yaml, a level with
+# no value takes its settings from there, and a level with keys writes only what
+# differs. A trial on a level not listed here is refused.
 hosts:
   laptop:
     local: true
