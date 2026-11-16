@@ -1931,15 +1931,19 @@ def robot_hosts(app) -> List[Dict[str, str]]:
     path = app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
     if not path.is_file():
         return []
+    from .. import host_registry
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    # Each robot's declared host (host_level through hosts.yaml, 2026-11-16), not a running
+    # trial's: the clean slate is for the machines the robots normally live on.
+    targets = host_registry.robot_targets(path, raw.get("robots") or {})
     seen, out = set(), []
-    for spec in (raw.get("robots") or {}).values():
-        key = (spec.get("host", ""), spec.get("container", ""))
+    for target in targets.values():
+        host = "" if target.host == "local" else target.host
+        key = (host, target.container)
         if key in seen:
             continue
         seen.add(key)
-        out.append({"host": spec.get("host", ""), "container": spec.get("container", ""),
-                    "shell": spec.get("shell", "zsh")})
+        out.append({"host": host, "container": target.container, "shell": target.shell})
     return out
 
 

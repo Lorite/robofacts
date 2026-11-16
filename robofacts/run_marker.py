@@ -49,6 +49,47 @@ def read(experiments_root: Path, *, now: Optional[float] = None) -> Optional[Dic
         return None
 
 
+def read_live(experiments_root: Path, *, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Like :func:`read`, and also None when the marker's runner is gone (2026-11-16).
+
+    A marker written on this machine whose process no longer exists is a leftover of a killed
+    runner, even when it is younger than 12 hours. The stop must not follow such a marker. A
+    marker written on another machine (a runner inside a container) cannot be checked here and
+    counts while it is fresh.
+    """
+    record = read(experiments_root, now=now)
+    if record and record.get("host") == socket.gethostname():
+        try:
+            os.kill(int(record.get("pid")), 0)
+        except ProcessLookupError:
+            return None
+        except (PermissionError, TypeError, ValueError):
+            pass
+    return record
+
+
+def note(experiments_root: Path, **info: Any) -> None:
+    """Add or replace fields of the marker this process holds (2026-11-16).
+
+    The runner notes each trial's ``execution_host``, the robots its experiment declares and
+    whether it is a simulation, so a stop typed on this machine (``estop.sh``) reaches the
+    host that runs the stack. A marker held by no block of this process is left alone.
+    Never fatal to a trial.
+    """
+    root = Path(experiments_root)
+    if _depth.get(root, 0) == 0:
+        return
+    path = marker_path(root)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record.update(info)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(record, indent=1, default=str) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except (OSError, ValueError) as exc:
+        print(f"[runner] could not update {path} ({exc}) - continuing")
+
+
 @contextmanager
 def running(experiments_root: Path, **info: Any) -> Iterator[None]:
     """Hold the marker for the duration of the block. Nested blocks (a campaign

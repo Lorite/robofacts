@@ -72,7 +72,12 @@ def _spec(value: Any, where: str) -> Dict[str, Any]:
 
 def load(experiments_root: Path) -> HostRegistry:
     """Read hosts.yaml. A missing file means an empty registry, not an error."""
-    path = Path(experiments_root) / REGISTRY_FILE
+    return load_file(Path(experiments_root) / REGISTRY_FILE)
+
+
+def load_file(path: Path) -> HostRegistry:
+    """Read one hosts.yaml file. A missing file means an empty registry."""
+    path = Path(path)
     if not path.is_file():
         return HostRegistry()
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -114,3 +119,103 @@ def resolve(registry: HostRegistry, declared: Any, where: str,
     if rig_host and registry.rig in merged and not merged[registry.rig].get("local", False):
         merged[registry.rig]["host"] = rig_host
     return merged
+
+
+# --------------------------------------------------------------------------- #
+# Where a robot's stop and actions go (estop.sh, robot_action.sh, the web interface)
+# --------------------------------------------------------------------------- #
+@dataclass
+class StopTarget:
+    """Where one robot's commands run: ``host`` is an ssh alias or ``local``."""
+    robot: str
+    host: str
+    container: str
+    shell: str
+    #: Why this target, in words, for ``estop.sh --list`` and the stop output.
+    source: str
+
+
+class StopTargetError(ValueError):
+    """A host level that the registry does not define, or a malformed robots.yaml entry."""
+
+
+def experiments_root_of(robots_config: Path) -> Optional[Path]:
+    """The experiments root of ``<root>/common/config/robots.yaml``, else None."""
+    path = Path(robots_config).resolve()
+    if path.parent.name == "config" and path.parent.parent.name == "common":
+        return path.parent.parent.parent
+    return None
+
+
+def _target_from_level(robot: str, registry: HostRegistry, level: str, source: str,
+                       env: Mapping[str, str]) -> StopTarget:
+    if level not in registry.hosts:
+        where = registry.source or "hosts.yaml (not found)"
+        raise StopTargetError(f"robot {robot!r}: host level {level!r} is not defined in {where} "
+                              f"(levels: {sorted(registry.hosts) or 'none'})")
+    spec = registry.hosts[level]
+    local = bool(spec.get("local", False))
+    host = "local" if local else str(spec.get("host") or "")
+    if not host:
+        raise StopTargetError(f"robot {robot!r}: host level {level!r} has neither 'local: true' "
+                              f"nor 'host' in {registry.source}")
+    rig_host = str(env.get(RIG_HOST_ENV, "") or "").strip()
+    if rig_host and level == registry.rig and not local:
+        host, source = rig_host, f"{source}, {RIG_HOST_ENV} replaced {spec.get('host')}"
+    return StopTarget(robot, host, str(spec.get("container") or ""),
+                      str(spec.get("shell") or "zsh"), source)
+
+
+def robot_targets(robots_config: Path, robots: Mapping[str, Any], *,
+                  level: Optional[str] = None,
+                  marker: Optional[Mapping[str, Any]] = None,
+                  env: Optional[Mapping[str, str]] = None) -> Dict[str, StopTarget]:
+    """Where each robot's stop goes, in this order of precedence:
+
+    1. ``level``, the operator's ``--host-level`` for this one call.
+    2. The live run marker of a HARDWARE trial on this machine (run_marker.py), for the robots
+       its experiment declares under ``robots:``, or every robot when it declares none: the
+       stack, and so the robot's driver, runs on the trial's execution host. A simulated trial
+       never moves a stop, because a simulation on the laptop must not pull the stop of a real
+       robot away from the rig.
+    3. The robot's ``host_level`` in robots.yaml, resolved through hosts.yaml next to it.
+    4. The robot's own ``host``, ``container`` and ``shell`` (a project without hosts.yaml).
+       ``RIG_HOST`` replaces any non-local host here, as estop.sh always did.
+
+    ``RIG_HOST`` also replaces the alias of the registry's ``rig`` level in 1 to 3.
+    """
+    env = os.environ if env is None else env
+    registry = load_file(Path(robots_config).parent / "hosts.yaml")
+    trial_level: Optional[str] = None
+    trial_robots: Optional[set] = None
+    if marker and not marker.get("simulation") and marker.get("execution_host") is not None:
+        candidate = str(marker["execution_host"])
+        if candidate in registry.hosts:
+            trial_level = candidate
+            declared = marker.get("robots")
+            trial_robots = None if declared is None else {str(r) for r in declared}
+    targets: Dict[str, StopTarget] = {}
+    for name, raw in robots.items():
+        name = str(name)
+        spec = raw if isinstance(raw, dict) else {}
+        if level:
+            targets[name] = _target_from_level(name, registry, str(level),
+                                               f"--host-level {level}", env)
+        elif trial_level is not None and (trial_robots is None or name in trial_robots):
+            label = marker.get("label") or marker.get("campaign") or marker.get("experiment")
+            targets[name] = _target_from_level(
+                name, registry, trial_level,
+                f"the running trial ({label}, execution_host={trial_level}, "
+                f"pid {marker.get('pid')} on {marker.get('host')})", env)
+        elif spec.get("host_level"):
+            targets[name] = _target_from_level(name, registry, str(spec["host_level"]),
+                                               f"robots.yaml host_level {spec['host_level']}", env)
+        else:
+            host = str(spec.get("host") or "local")
+            source = "robots.yaml host"
+            rig_host = str(env.get(RIG_HOST_ENV, "") or "").strip()
+            if rig_host and host != "local":
+                host, source = rig_host, f"{RIG_HOST_ENV} (robots.yaml says {spec.get('host')})"
+            targets[name] = StopTarget(name, host, str(spec.get("container") or ""),
+                                       str(spec.get("shell") or "zsh"), source)
+    return targets

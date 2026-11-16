@@ -45,5 +45,7 @@ def test_an_executed_trial_holds_the_marker_and_a_dry_run_does_not(tmp_path, mon
     tr.run_trial(trial, {}, None, bags, campaign_name="c", dry_run=False)
     tr.run_trial(trial, {}, None, bags, campaign_name="c", dry_run=True)
     assert seen[0]["experiment"] == "expA" and seen[0]["campaign"] == "c"
+    # The stop resolver reads where the trial runs (host_registry.robot_targets).
+    assert "execution_host" in seen[0] and seen[0]["simulation"] is False
     assert seen[1] is None
     assert not run_marker.marker_path(tmp_path).exists()

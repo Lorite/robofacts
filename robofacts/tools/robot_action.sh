@@ -13,6 +13,10 @@
 #   ./scripts/robot_action.sh quadruped lease          # who holds the body lease
 #   ./scripts/robot_action.sh --list              # everything configured
 #   ./scripts/robot_action.sh --dry-run quadruped sit  # print the wrapped command
+#   ./scripts/robot_action.sh --host-level laptop quadruped sit
+#
+# The host is resolved like estop.sh's (2026-11-16): --host-level, else the
+# running hardware trial of this machine, else the robot's host_level.
 #
 # ⚠️ Actions that CLAIM the lease (ready/stand) trip the observer's hijack
 # policy if its node is already up — see the caution in robots.yaml. Keep the
@@ -40,6 +44,8 @@ find_robots_config() {
     printf '%s\n' "experiments/$rel"
 }
 CONFIG="$(find_robots_config)"
+PKG_PARENT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+HOST_LEVEL=""
 DRY_RUN=0
 LIST=0
 TIMEOUT=90
@@ -52,6 +58,7 @@ while [ $# -gt 0 ]; do
         --dry-run) DRY_RUN=1; shift ;;
         --list) LIST=1; shift ;;
         --config) CONFIG="$2"; shift 2 ;;
+        --host-level) HOST_LEVEL="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) ARGS+=("$1"); shift ;;
@@ -90,9 +97,9 @@ ACTION="${ARGS[1]}"
 
 # One TAB-separated line: host, container, shell, command (same emit rules as
 # estop.sh — never an empty field, tabs collapse under IFS).
-LINE=$(python3 - "$CONFIG" "$ROBOT" "$ACTION" <<'PY'
+LINE=$(python3 - "$CONFIG" "$ROBOT" "$ACTION" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
 import sys, yaml
-config_path, robot, action = sys.argv[1], sys.argv[2], sys.argv[3]
+config_path, robot, action, level, pkg = sys.argv[1:6]
 with open(config_path) as fh:
     data = yaml.safe_load(fh) or {}
 robots = data.get("robots") or {}
@@ -106,10 +113,20 @@ if not entry or not entry.get("command"):
     have = ", ".join(sorted(actions)) or "none"
     print(f"__ERROR__\trobot {robot!r} has no action {action!r}; declared: {have}")
     sys.exit(0)
+try:
+    sys.path.insert(0, pkg)
+    from robofacts import host_registry as hr, run_marker
+    root = hr.experiments_root_of(config_path)
+    marker = run_marker.read_live(root) if root else None
+    target = hr.robot_targets(config_path, {robot: spec}, level=level or None,
+                              marker=marker)[robot]
+except Exception as exc:
+    print(f"__ERROR__\tcannot resolve where {robot!r} runs ({type(exc).__name__}: {exc})")
+    sys.exit(0)
 print("\t".join([
-    str(spec.get("host", "local")) or "local",
-    str(spec.get("container", "")) or "-",
-    str(spec.get("shell", "zsh")) or "zsh",
+    target.host or "local",
+    target.container or "-",
+    target.shell or "zsh",
     entry["command"].strip(),
 ]))
 PY

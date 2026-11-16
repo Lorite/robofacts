@@ -2061,10 +2061,40 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
     if kwargs.get("dry_run", True):
         return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
                                  session_id=session_id, ledger=ledger, **kwargs)
-    with run_marker.running(Path(bags_dir).resolve().parents[1], experiment=trial.experiment,
+    root = Path(bags_dir).resolve().parents[1]
+    with run_marker.running(root, experiment=trial.experiment,
                             campaign=campaign_name, label=trial.describe()):
+        # Where this trial's stack runs, for a stop typed on this machine (host_registry
+        # robot_targets): the level, the robots it applies to (None = every robot) and
+        # whether it is a simulation, which never moves a stop.
+        run_marker.note(root, execution_host=trial.host(factors), label=trial.describe(),
+                        robots=[r["name"] for r in getattr(config, "robots", None) or []] or None,
+                        simulation=bool(getattr(config, "simulation", False)))
+        _print_stop_targets(root)
         return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
                                  session_id=session_id, ledger=ledger, **kwargs)
+
+
+def _print_stop_targets(experiments_root: Path) -> None:
+    """Print where a stop typed on this machine goes now (2026-11-16). Never fatal.
+
+    Only for a hardware trial: the resolver ignores a simulation's marker, so the line would
+    only repeat robots.yaml. The operator reads it in the run log before the flight.
+    """
+    from . import host_registry
+    try:
+        record = run_marker.read_live(experiments_root)
+        robots_path = Path(experiments_root) / "common" / "config" / "robots.yaml"
+        if not record or record.get("simulation") or not robots_path.is_file():
+            return
+        import yaml
+        robots = (yaml.safe_load(robots_path.read_text(encoding="utf-8")) or {}).get("robots") or {}
+        targets = host_registry.robot_targets(robots_path, robots, marker=record)
+        where = ", ".join(f"{t.robot} -> {t.host}" + (f"/{t.container}" if t.container else "")
+                          for t in targets.values())
+        print(f"[runner] estop.sh on this machine reaches: {where}")
+    except Exception as exc:  # the line is a help, never a reason to stop a trial
+        print(f"[runner] could not resolve the e-stop targets ({exc}) - estop.sh --list shows them")
 
 
 def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: RunnerConfig,

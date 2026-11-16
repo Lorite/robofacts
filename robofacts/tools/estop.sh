@@ -14,8 +14,14 @@
 #   ./scripts/estop.sh              # E-STOP every robot, in parallel
 #   ./scripts/estop.sh --soft       # land / halt gracefully instead
 #   ./scripts/estop.sh --robot robot1
+#   ./scripts/estop.sh --host-level laptop   # the stack runs on this level, for this call
 #   ./scripts/estop.sh --list       # show what is configured, do nothing
 #   ./scripts/estop.sh --dry-run    # print the exact commands, run nothing
+#
+# WHERE THE STOP GOES (2026-11-16): --host-level, else the running HARDWARE
+# trial of this machine (its run marker names its execution_host), else the
+# robot's host_level in robots.yaml, resolved through hosts.yaml next to it.
+# --list prints the host and the reason for each robot.
 #
 # THE DEFAULT IS THE EMERGENCY. Typing one word must stop everything, because
 # that is the moment you have. Inspection is what needs a flag, not the stop.
@@ -47,6 +53,10 @@ find_robots_config() {
     printf '%s\n' "experiments/$rel"
 }
 CONFIG="$(find_robots_config)"
+# The directory that holds the robofacts package, for the host resolver. readlink -f, because
+# scripts/estop.sh is usually a symlink to this file.
+PKG_PARENT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+HOST_LEVEL=""
 ACTION="estop"
 ROBOT=""
 DRY_RUN=0
@@ -60,6 +70,7 @@ while [ $# -gt 0 ]; do
         --soft) ACTION="soft_stop"; shift ;;
         --estop) ACTION="estop"; shift ;;
         --robot) ROBOT="$2"; shift 2 ;;
+        --host-level) HOST_LEVEL="$2"; shift 2 ;;
         --config) CONFIG="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -71,11 +82,12 @@ done
 
 [ -f "$CONFIG" ] || { echo "Robot config not found: $CONFIG" >&2; exit 2; }
 
-# Emit one TAB-separated line per robot: name, host, container, shell, verified, command
+# Emit one TAB-separated line per robot:
+# name, host, container, shell, verified, command, description, why this host
 read_config() {
-    python3 - "$CONFIG" "$ACTION" "$ROBOT" <<'PY'
+    python3 - "$CONFIG" "$ACTION" "$ROBOT" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
 import sys, yaml
-config_path, action, only = sys.argv[1], sys.argv[2], sys.argv[3]
+config_path, action, only, level, pkg = sys.argv[1:6]
 with open(config_path) as fh:
     data = yaml.safe_load(fh) or {}
 robots = data.get("robots") or {}
@@ -84,6 +96,15 @@ if only:
         print(f"__ERROR__\tunknown robot {only!r}; configured: {', '.join(sorted(robots))}")
         sys.exit(0)
     robots = {only: robots[only]}
+try:
+    sys.path.insert(0, pkg)
+    from robofacts import host_registry as hr, run_marker
+    root = hr.experiments_root_of(config_path)
+    marker = run_marker.read_live(root) if root else None
+    targets = hr.robot_targets(config_path, robots, level=level or None, marker=marker)
+except Exception as exc:  # an unresolvable target must stop the script, loudly
+    print(f"__ERROR__\tcannot resolve where the robots run ({type(exc).__name__}: {exc})")
+    sys.exit(0)
 for name, spec in robots.items():
     entry = (spec or {}).get(action)
     if not entry or not entry.get("command"):
@@ -92,22 +113,25 @@ for name, spec in robots.items():
     # Never emit an EMPTY field: bash `read` with IFS=tab collapses consecutive
     # tabs (tab is whitespace), so a robot with no container would silently
     # shift every later field left - which produced `docker exec zsh ...`.
+    target = targets[name]
     print("\t".join([
         name,
-        str(spec.get("host", "local")) or "local",
-        str(spec.get("container", "")) or "-",
-        str(spec.get("shell", "zsh")) or "zsh",
+        target.host or "local",
+        target.container or "-",
+        target.shell or "zsh",
         "yes" if spec.get("verified") else "NO",
         entry["command"].strip(),
         str(entry.get("description", "")).strip() or "-",
+        target.source.replace("\t", " ") or "-",
     ]))
 PY
 }
 
 # Build the full command for one robot, honouring host + container.
 #
-# RIG_HOST overrides every non-local host in robots.yaml, the same knob
-# rig_tmux.sh grew in 36925616ac. The rig moves between networks (rig router
+# RIG_HOST overrides the rig's ssh alias (the resolver applies it, host_registry
+# robot_targets: the registry's rig level, or every non-local host of a robot
+# without host_level), the same knob rig_tmux.sh grew in 36925616ac. The rig moves between networks (rig router
 # on-site, a VPN when remote, the old lab LAN as legacy) and each has its
 # own ssh alias, so the config cannot name one alias that is always right.
 # Retarget the whole e-stop with one variable instead of editing this file
@@ -127,7 +151,6 @@ PY
 build_command() {
     local host="$1" container="$2" shell="$3" inner="$4"
     local wrapped="$inner"
-    [ -n "${RIG_HOST:-}" ] && [ "$host" != "local" ] && host="$RIG_HOST"
     [ -n "${RIG_CONTAINER:-}" ] && [ "$container" != "-" ] && container="$RIG_CONTAINER"
     [ "$container" = "-" ] && container=""
 
@@ -197,13 +220,12 @@ fi
 
 if [ "$LIST" -eq 1 ]; then
     echo "Configured robots ($CONFIG):"
-    while IFS=$'\t' read -r name host container shell verified command desc; do
+    while IFS=$'\t' read -r name host container shell verified command desc source; do
         [ "$name" = "__SKIP__" ] && { echo "  - $host: $container"; continue; }
-        # Show the host that will actually be dialled, not the one in the file,
-        # so --list cannot reassure you about an alias RIG_HOST has replaced.
-        eff_host="$host"
-        [ -n "${RIG_HOST:-}" ] && [ "$host" != "local" ] && eff_host="$RIG_HOST (RIG_HOST override, config says $host)"
-        echo "  $name  [$ACTION]  host=$eff_host container=$([ "$container" = "-" ] && echo none || echo "$container") verified=$verified"
+        # The host that will actually be dialled and why, so --list cannot reassure
+        # you about an alias that RIG_HOST or a running trial has replaced.
+        echo "  $name  [$ACTION]  host=$host container=$([ "$container" = "-" ] && echo none || echo "$container") verified=$verified"
+        echo "      target: $source"
         echo "      $desc"
         echo "      $command"
     done <<<"$MAPFILE"
@@ -217,7 +239,7 @@ NAMES=()
 TMPDIR_RUN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_RUN"' EXIT
 
-while IFS=$'\t' read -r name host container shell verified command desc; do
+while IFS=$'\t' read -r name host container shell verified command desc source; do
     if [ "$name" = "__SKIP__" ]; then
         echo "  SKIP  $host ($container)"
         continue
@@ -234,7 +256,7 @@ while IFS=$'\t' read -r name host container shell verified command desc; do
     ( timeout "$TIMEOUT" bash -c "$full" >"$TMPDIR_RUN/$name.out" 2>&1; echo $? >"$TMPDIR_RUN/$name.rc" ) &
     PIDS+=("$!")
     NAMES+=("$name")
-    echo "  ... $name ($desc)"
+    echo "  ... $name ($desc) -> $host$([ "$container" = "-" ] || echo "/$container"), $source"
 done <<<"$MAPFILE"
 
 [ "$DRY_RUN" -eq 1 ] && { echo ""; echo "--dry-run: nothing sent."; exit 0; }
