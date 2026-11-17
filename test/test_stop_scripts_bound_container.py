@@ -45,6 +45,9 @@ def fake_path(tmp_path: Path) -> dict:
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env.pop("RIG_HOST", None)
     env.pop("RIG_CONTAINER", None)
+    # Not inside a container, wherever the test runs: inside one, the scripts run the command
+    # directly when it is the target's container, and these tests pin the docker exec path.
+    env["TRIALS_DOCKERENV"] = str(tmp_path / "no-dockerenv")
     return env
 
 
@@ -73,10 +76,6 @@ def assert_killed_inside(marker: Path, started: float) -> None:
     assert not marker.exists(), "the command kept running in the container after the stop gave up"
 
 
-@pytest.mark.skipif(
-    os.path.exists("/.dockerenv"),
-    reason="inside a container estop.sh runs the stop directly, without docker exec",
-)
 def test_estop_bounds_the_command_inside_the_container(tmp_path):
     marker = tmp_path / "finished"
     env = fake_path(tmp_path)

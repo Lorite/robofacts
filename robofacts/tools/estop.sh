@@ -83,7 +83,8 @@ done
 [ -f "$CONFIG" ] || { echo "Robot config not found: $CONFIG" >&2; exit 2; }
 
 # Emit one TAB-separated line per robot:
-# name, host, container, shell, verified, command, description, why this host
+# name, host, container, shell, verified, command, description, why this host,
+# the hostname inside the target's container ("-" when unknown)
 read_config() {
     python3 - "$CONFIG" "$ACTION" "$ROBOT" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
 import sys, yaml
@@ -123,6 +124,7 @@ for name, spec in robots.items():
         entry["command"].strip(),
         str(entry.get("description", "")).strip() or "-",
         target.source.replace("\t", " ") or "-",
+        target.container_hostname or "-",
     ]))
 PY
 }
@@ -148,8 +150,11 @@ PY
 #
 #   RIG_CONTAINER=ros2_humble_dev ./scripts/estop.sh --robot robot1
 #
+# Where the stop runs, "here" detection (2026-11-17): TRIALS_DOCKERENV only lets the tests
+# point the container check at a file of their own.
+DOCKERENV="${TRIALS_DOCKERENV:-/.dockerenv}"
 build_command() {
-    local host="$1" container="$2" shell="$3" inner="$4"
+    local host="$1" container="$2" shell="$3" inner="$4" chost="${5:--}"
     local wrapped="$inner"
     [ -n "${RIG_CONTAINER:-}" ] && [ "$container" != "-" ] && container="$RIG_CONTAINER"
     [ "$container" = "-" ] && container=""
@@ -162,17 +167,25 @@ build_command() {
     # two on-rig cases and skip the hops that would fail — fewer hops is also
     # strictly better for a stop signal:
     #
-    #   1. Already INSIDE a container (/.dockerenv exists): run the command
-    #      directly. There is no docker CLI in here and no ssh alias either;
-    #      the DDS environment is exactly the one the rig uses.
+    #   1. Already INSIDE THE TARGET'S container (/.dockerenv exists and the
+    #      hostname is the target's container_hostname, or the target names no
+    #      container_hostname): run the command directly. There is no docker
+    #      CLI in here; the DDS environment is exactly the one the rig uses.
+    #      Before 2026-11-17 ANY container counted, so a stop typed in the
+    #      laptop's container (hostname ros2-dev), or the web interface's stop
+    #      button served from it, ran the Orin's stop on the laptop and relied on
+    #      Wi-Fi DDS, which the Orin's unicast-only config does not offer. Inside
+    #      another container the ssh path below is taken (the container has the
+    #      host's ssh config, the runner uses the same path).
     #   2. On a host where THIS ROBOT'S container is running (docker inspect
     #      succeeds): we ARE the rig host, so docker exec locally and skip ssh.
     #
-    # Neither can false-positive on the laptop: its devcontainer is
+    # Case 2 cannot false-positive on the laptop: its devcontainer is
     # ros2_humble_dev, not ros2_jetson_dev, so inspect fails and the ssh path
-    # is taken as before. RIG_HOST keeps overriding the remote alias for the
+    # is taken. RIG_HOST keeps overriding the remote alias for the
     # laptop-side cases (rig router vs VPN vs old lab LAN).
-    if [ -n "$container" ] && [ -f /.dockerenv ]; then
+    if [ -n "$container" ] && [ -f "$DOCKERENV" ] \
+        && { [ "$chost" = "-" ] || [ "$(hostname)" = "$chost" ]; }; then
         printf '%s' "$inner"
         return
     fi
@@ -220,12 +233,21 @@ fi
 
 if [ "$LIST" -eq 1 ]; then
     echo "Configured robots ($CONFIG):"
-    while IFS=$'\t' read -r name host container shell verified command desc source; do
+    while IFS=$'\t' read -r name host container shell verified command desc source chost; do
         [ "$name" = "__SKIP__" ] && { echo "  - $host: $container"; continue; }
+        # The route from HERE, from the same function that builds the real stop.
+        probe="$(build_command "$host" "$container" "$shell" "PROBE" "$chost")"
+        case "$probe" in
+            PROBE) route="runs directly here, in this container" ;;
+            docker\ exec*) route="docker exec $container on this machine" ;;
+            ssh*) route="ssh $host, then docker exec $container" ;;
+            *) route="$probe" ;;
+        esac
         # The host that will actually be dialled and why, so --list cannot reassure
         # you about an alias that RIG_HOST or a running trial has replaced.
         echo "  $name  [$ACTION]  host=$host container=$([ "$container" = "-" ] && echo none || echo "$container") verified=$verified"
         echo "      target: $source"
+        echo "      route:  $route"
         echo "      $desc"
         echo "      $command"
     done <<<"$MAPFILE"
@@ -239,12 +261,12 @@ NAMES=()
 TMPDIR_RUN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_RUN"' EXIT
 
-while IFS=$'\t' read -r name host container shell verified command desc source; do
+while IFS=$'\t' read -r name host container shell verified command desc source chost; do
     if [ "$name" = "__SKIP__" ]; then
         echo "  SKIP  $host ($container)"
         continue
     fi
-    full="$(build_command "$host" "$container" "$shell" "$command")"
+    full="$(build_command "$host" "$container" "$shell" "$command" "$chost")"
     if [ "$verified" = "NO" ]; then
         echo "  ⚠ $name: this entry is NOT verified against the real robot (robots.yaml)"
     fi

@@ -309,3 +309,75 @@ def test_the_runner_prints_where_the_stop_goes_for_a_hardware_trial(project, cap
     out = capsys.readouterr().out
     assert out.count("estop.sh on this machine reaches") == 1
     assert "drone -> local" in out and "arm -> robot-lan" in out
+
+
+# --------------------------------------------------------------------------- #
+# A stop typed inside a container runs there only when it is the target's container
+# --------------------------------------------------------------------------- #
+import socket  # noqa: E402
+
+CONTAINER_REGISTRY = """\
+rig: robot
+hosts:
+  here: {local: true}
+  robot: {host: robot-lan, container: robot_dev, container_hostname: HOSTNAME, shell: zsh}
+"""
+
+
+def test_runs_directly_only_in_the_targets_own_container():
+    t = hr.StopTarget("drone", "robot-lan", "robot_dev", "zsh", "s", "robot-dev")
+    assert t.runs_directly_here(in_container=True, hostname="robot-dev")
+    assert not t.runs_directly_here(in_container=True, hostname="laptop-dev"), \
+        "the laptop's container must not run the robot computer's stop"
+    assert not t.runs_directly_here(in_container=False, hostname="robot-dev")
+    legacy = hr.StopTarget("drone", "robot-lan", "robot_dev", "zsh", "s", "")
+    assert legacy.runs_directly_here(in_container=True, hostname="anything"), \
+        "a target without container_hostname keeps the old rule"
+
+
+def _container_project(tmp_path: Path, chost: str) -> Path:
+    cfg = tmp_path / "common" / "config"
+    cfg.mkdir(parents=True)
+    (cfg / "hosts.yaml").write_text(CONTAINER_REGISTRY.replace("HOSTNAME", chost))
+    (cfg / "robots.yaml").write_text(ROBOTS)
+    (tmp_path / "dockerenv").write_text("")
+    return tmp_path
+
+
+def _estop_in_container(project: Path, *args: str) -> str:
+    env = {k: v for k, v in os.environ.items() if k not in ("RIG_HOST", "RIG_CONTAINER")}
+    env["TRIALS_DOCKERENV"] = str(project / "dockerenv")
+    return subprocess.run(["bash", str(TOOLS / "estop.sh"), "--config",
+                           str(project / "common/config/robots.yaml"), *args],
+                          capture_output=True, text=True, timeout=60, env=env).stdout
+
+
+def test_estop_in_another_container_goes_over_ssh(tmp_path):
+    project = _container_project(tmp_path, "some-other-container")
+    out = _estop_in_container(project, "--dry-run", "--robot", "drone")
+    assert "ssh" in out and "robot-lan" in out and "docker\\ exec\\ robot_dev" in out
+    listing = _estop_in_container(project, "--list")
+    assert "route:  ssh robot-lan, then docker exec robot_dev" in listing
+
+
+def test_estop_in_the_targets_own_container_runs_directly(tmp_path):
+    project = _container_project(tmp_path, socket.gethostname())
+    out = _estop_in_container(project, "--dry-run", "--robot", "drone")
+    assert "ssh" not in out and "[drone] echo ESTOP-DRONE" in out
+    assert "route:  runs directly here, in this container" in _estop_in_container(project, "--list")
+
+
+def test_robot_action_in_another_container_goes_over_ssh(tmp_path):
+    project = _container_project(tmp_path, "some-other-container")
+    robots = project / "common/config/robots.yaml"
+    robots.write_text(ROBOTS + "    actions: {sit: {command: 'echo SIT'}}\n")
+    env = {k: v for k, v in os.environ.items() if k != "RIG_HOST"}
+    env["TRIALS_DOCKERENV"] = str(project / "dockerenv")
+    run = lambda: subprocess.run(["bash", str(TOOLS / "robot_action.sh"), "--config", str(robots),
+                                  "--dry-run", "arm", "sit"],
+                                 capture_output=True, text=True, timeout=60, env=env).stdout
+    assert "ssh" in run() and "robot-lan" in run()
+    (project / "common/config/hosts.yaml").write_text(
+        CONTAINER_REGISTRY.replace("HOSTNAME", socket.gethostname()))
+    direct = run()
+    assert "ssh" not in direct and "docker exec" not in direct and "zsh -lc" in direct

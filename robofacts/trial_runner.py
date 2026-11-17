@@ -2090,8 +2090,7 @@ def _print_stop_targets(experiments_root: Path) -> None:
         import yaml
         robots = (yaml.safe_load(robots_path.read_text(encoding="utf-8")) or {}).get("robots") or {}
         targets = host_registry.robot_targets(robots_path, robots, marker=record)
-        where = ", ".join(f"{t.robot} -> {t.host}" + (f"/{t.container}" if t.container else "")
-                          for t in targets.values())
+        where = ", ".join(f"{t.robot} -> {t.describe()}" for t in targets.values())
         print(f"[runner] estop.sh on this machine reaches: {where}")
     except Exception as exc:  # the line is a help, never a reason to stop a trial
         print(f"[runner] could not resolve the e-stop targets ({exc}) - estop.sh --list shows them")

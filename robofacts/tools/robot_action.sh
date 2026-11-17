@@ -128,6 +128,7 @@ print("\t".join([
     target.container or "-",
     target.shell or "zsh",
     entry["command"].strip(),
+    target.container_hostname or "-",
 ]))
 PY
 )
@@ -136,10 +137,20 @@ case "$LINE" in
     __ERROR__*) echo "${LINE#__ERROR__	}" >&2; exit 2 ;;
 esac
 
-IFS=$'\t' read -r HOST CONTAINER SHELL_BIN COMMAND <<<"$LINE"
+IFS=$'\t' read -r HOST CONTAINER SHELL_BIN COMMAND CHOST <<<"$LINE"
 
 wrapped="$COMMAND"
 [ "$CONTAINER" = "-" ] && CONTAINER=""
+# Already inside the target's own container (2026-11-17, the rule of estop.sh): run the
+# command directly, there is no docker CLI in here. Inside another container, ssh as usual.
+DOCKERENV="${TRIALS_DOCKERENV:-/.dockerenv}"
+if [ -n "$CONTAINER" ] && [ -f "$DOCKERENV" ] \
+    && { [ "${CHOST:--}" = "-" ] || [ "$(hostname)" = "$CHOST" ]; }; then
+    # Still a login zsh: CYCLONEDDS_URI is defaulted only in /etc/zsh/zshenv.
+    wrapped="timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
+    CONTAINER=""
+    HOST="local"
+fi
 if [ -n "$CONTAINER" ]; then
     # zsh -lc, never bash: CYCLONEDDS_URI lives in /etc/zsh/zshenv (the
     # documented false-dead trap).

@@ -133,6 +133,36 @@ class StopTarget:
     shell: str
     #: Why this target, in words, for ``estop.sh --list`` and the stop output.
     source: str
+    #: The hostname INSIDE the target's container, when the registry knows it. A stop typed
+    #: inside a container runs directly only when this matches (2026-11-17).
+    container_hostname: str = ""
+
+    def runs_directly_here(self, *, in_container: Optional[bool] = None,
+                           hostname: Optional[str] = None) -> bool:
+        """True when a stop for this target, typed here, runs in the current container.
+
+        Inside a container, the command runs directly only when this container IS the target's
+        container: its hostname matches ``container_hostname``. Before 2026-11-17 any container
+        counted, so a stop typed in the laptop's container for a stack on the robot computer
+        stayed on the laptop. A target without ``container_hostname`` keeps the old rule.
+        """
+        if not self.container:
+            return False
+        if in_container is None:
+            in_container = Path(os.environ.get("TRIALS_DOCKERENV", "/.dockerenv")).exists()
+        if not in_container:
+            return False
+        if not self.container_hostname:
+            return True
+        import socket
+        return (hostname or socket.gethostname()) == self.container_hostname
+
+    def describe(self) -> str:
+        """Where the command goes from here, in words."""
+        if self.runs_directly_here():
+            return "here, in this container"
+        where = self.host
+        return f"{where}/{self.container}" if self.container else where
 
 
 class StopTargetError(ValueError):
@@ -163,7 +193,8 @@ def _target_from_level(robot: str, registry: HostRegistry, level: str, source: s
     if rig_host and level == registry.rig and not local:
         host, source = rig_host, f"{source}, {RIG_HOST_ENV} replaced {spec.get('host')}"
     return StopTarget(robot, host, str(spec.get("container") or ""),
-                      str(spec.get("shell") or "zsh"), source)
+                      str(spec.get("shell") or "zsh"), source,
+                      str(spec.get("container_hostname") or ""))
 
 
 def robot_targets(robots_config: Path, robots: Mapping[str, Any], *,
@@ -217,5 +248,6 @@ def robot_targets(robots_config: Path, robots: Mapping[str, Any], *,
             if rig_host and host != "local":
                 host, source = rig_host, f"{RIG_HOST_ENV} (robots.yaml says {spec.get('host')})"
             targets[name] = StopTarget(name, host, str(spec.get("container") or ""),
-                                       str(spec.get("shell") or "zsh"), source)
+                                       str(spec.get("shell") or "zsh"), source,
+                                       str(spec.get("container_hostname") or ""))
     return targets
