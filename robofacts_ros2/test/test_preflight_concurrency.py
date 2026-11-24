@@ -195,16 +195,42 @@ def test_every_check_script_is_classified_exactly_once():
         f"Read the new check's code and add it to PARALLEL_SAFE_CHECKS or SEQUENTIAL_CHECKS")
 
 
-@pytest.mark.parametrize("adapter", adapters.AVAILABLE)
+#: The ROS 2 package of this repository, and the robot adapters it ships.
+ROS_PACKAGE = HERE.parent / "robofacts_ros2"
+ADAPTER_NAMES = sorted(d.name for d in (ROS_PACKAGE / "adapters").iterdir() if (d / "__init__.py").is_file())
+
+
+def test_every_ros2_check_script_is_classified_exactly_once_by_the_backend():
+    import robofacts_ros2 as ros2
+    scripts = {p.stem for p in (ROS_PACKAGE / "checks").glob("*.sh")}
+    safe, alone = set(ros2.PARALLEL_SAFE_CHECKS), set(ros2.SEQUENTIAL_CHECKS)
+    assert not safe & alone
+    assert scripts == safe | alone, (
+        f"unclassified: {sorted(scripts - safe - alone)}, unknown: {sorted((safe | alone) - scripts)}. "
+        f"Read the new check's code and add it to PARALLEL_SAFE_CHECKS or SEQUENTIAL_CHECKS")
+    assert ros2.BACKEND.parallel_safe_checks == ros2.PARALLEL_SAFE_CHECKS
+    assert ros2.BACKEND.sequential_checks == ros2.SEQUENTIAL_CHECKS
+    core = {p.stem for p in (PREFLIGHT / "checks").glob("*.sh")}
+    assert not scripts & core, f"the ROS 2 package shadows core checks {sorted(scripts & core)}"
+    assert len(core) == 8 and len(scripts) == 13, "the counts that the README and the paper state"
+
+
+@pytest.mark.parametrize("adapter", ADAPTER_NAMES)
 def test_every_adapter_check_is_classified_exactly_once_by_its_adapter(adapter):
-    module = adapters.module(adapter)
-    scripts = {p.stem for p in (adapters.ADAPTERS_DIR / adapter / "checks").glob("*.sh")}
+    import importlib
+    module = importlib.import_module(f"robofacts_ros2.adapters.{adapter}")
+    scripts = {p.stem for p in (ROS_PACKAGE / "adapters" / adapter / "checks").glob("*.sh")}
     safe, alone = set(module.PARALLEL_SAFE_CHECKS), set(module.SEQUENTIAL_CHECKS)
     assert not safe & alone
     assert scripts == safe | alone, (
         f"{adapter}: unclassified {sorted(scripts - safe - alone)}, unknown {sorted((safe | alone) - scripts)}")
-    core = {p.stem for p in (PREFLIGHT / "checks").glob("*.sh")}
-    assert not scripts & core, f"{adapter} shadows core checks {sorted(scripts & core)}"
+    packaged = {p.stem for d in (PREFLIGHT / "checks", ROS_PACKAGE / "checks") for p in d.glob("*.sh")}
+    assert not scripts & packaged, f"{adapter} shadows packaged checks {sorted(scripts & packaged)}"
+
+
+def test_the_adapters_are_found_through_the_backend():
+    assert list(adapters.AVAILABLE) == ADAPTER_NAMES == ["crazyflie", "px4", "spot"]
+    assert adapters.ADAPTERS_DIR == ROS_PACKAGE / "adapters"
 
 
 @pytest.mark.parametrize("check", sorted(rp.SEQUENTIAL_CHECKS))

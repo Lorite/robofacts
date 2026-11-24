@@ -4,10 +4,10 @@ __pycache__/
 build/
 dist/
 # What the example project records
-example_project/experiments/*/bags/*/
-example_project/experiments/*/bags_slim/
-example_project/experiments/*/bags_scratch/
-example_project/experiments/*/runs/
-example_project/experiments/*/results/
+robofacts_ros2/example_project/experiments/*/bags/*/
+robofacts_ros2/example_project/experiments/*/bags_slim/
+robofacts_ros2/example_project/experiments/*/bags_scratch/
+robofacts_ros2/example_project/experiments/*/runs/
+robofacts_ros2/example_project/experiments/*/results/
 *.mcap
 *.db3

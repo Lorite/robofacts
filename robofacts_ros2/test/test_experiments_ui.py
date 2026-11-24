@@ -1233,7 +1233,7 @@ def test_the_explore_run_page_drives_actions_records_and_notes(client, root, mon
         time.sleep(0.02)
     page = client.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
     # Foxglove by itself (a checkbox remembered per browser), the layout beside it, the buttons.
-    assert 'id="autoopen"' in page and "robofacts_ros2.explore.autoOpenFoxglove" in page
+    assert 'id="autoopen"' in page and "robofacts.explore.autoOpenFoxglove" in page
     assert "foxglove_demo.json" in page and 'data-name="take_off"' in page
     assert "● Record" in page and "Mark this moment" in page
     ctl = f"/run/{run_id}/explore/"

@@ -15,8 +15,36 @@ permissions:
   contents: read
 
 jobs:
+  core-no-ros:
+    name: the general package alone, on a plain Python image (no ROS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: python:3.10-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: pip install robofacts only
+        run: |
+          python -m pip install --upgrade pip
+          pip install "./robofacts[test]"
+          trials --version && trials --help
+          python -c "import importlib.util as u; assert u.find_spec('robofacts_ros2') is None and u.find_spec('rclpy') is None"
+      - name: The core's tests, with the test that keeps the core free of ROS
+        run: cd robofacts && python -m pytest -q -p no:cacheprovider test
+      - name: A generated project runs a campaign from plan to coverage index, without ROS
+        run: |
+          cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
+          trials lint
+          trials plan experiments/my_experiment/campaigns/baseline.yaml
+          trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1
+          trials validate experiments/my_experiment
+          trials run experiments/my_experiment/campaigns/baseline.yaml --execute --no-pause
+          trials plan experiments/my_experiment/campaigns/baseline.yaml
+          trials index --experiment my_experiment --summary
+          trials new my_variant --from my_experiment && trials validate experiments/my_variant
+
   colcon-humble:
-    name: colcon build, tests and the example campaign on ROS 2 Humble
+    name: colcon build of both packages, tests and the example campaign on ROS 2 Humble
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
@@ -35,12 +63,12 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          cd ws && colcon build --packages-select robofacts
-      - name: Test suite
+          cd ws && colcon build --packages-select robofacts robofacts_ros2
+      - name: Test suites of both packages
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash && source ws/install/setup.bash
-          cd ws/src/robofacts && python3 -m pytest -q -p no:cacheprovider test
+          cd ws/src/robofacts && python3 -m pytest -q -p no:cacheprovider robofacts_ros2/test robofacts/test
       - name: The example campaign, end to end
         shell: bash
         env:
@@ -51,44 +79,19 @@ jobs:
             '<CycloneDDS xmlns="https://cdds.io/config"><Domain id="any"><General><AllowMulticast>default</AllowMulticast></General></Domain></CycloneDDS>' > /tmp/cyclonedds.xml
           export CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
           cd ws/src/robofacts
-          ros2 run robofacts trials --version
+          ros2 run robofacts_ros2 trials --version
+          trials --version
           ./quickstart.sh
-      - name: A generated experiment passes lint, plan and a dry run, and so does a copy of it
+      - name: A generated ROS 2 experiment passes lint, plan and a dry run, and so does a copy of it
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash && source ws/install/setup.bash
-          trials() { ros2 run robofacts trials "$@"; }
-          cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
+          cd "$(mktemp -d)" && trials init myproject --backend ros2 --experiment my_experiment && cd myproject
           trials lint
           trials plan experiments/my_experiment/campaigns/baseline.yaml
           trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1
           trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1 --execute --no-pause
           trials index --experiment my_experiment --summary
-          trials new my_variant --from my_experiment && trials validate experiments/my_variant
-
-  pip-no-ros:
-    name: pip install and the robot-free tests (no ROS)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - name: pip install
-        run: |
-          python -m pip install --upgrade pip
-          pip install ".[test]"
-          trials --version && trials --help
-      - name: Robot-free tests
-        run: python -m pytest -q -p no:cacheprovider test
-      - name: A generated experiment passes lint and plan
-        run: |
-          cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
-          trials lint
-          trials plan experiments/my_experiment/campaigns/baseline.yaml
-          trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1
-          trials validate experiments/my_experiment
           trials new my_variant --from my_experiment && trials validate experiments/my_variant
 
   docker-image:

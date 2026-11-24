@@ -1,5 +1,5 @@
 .git
 **/__pycache__
-example_project/experiments/*/bags/*/
-example_project/experiments/*/runs
-example_project/experiments/*/results
+robofacts_ros2/example_project/experiments/*/bags/*/
+robofacts_ros2/example_project/experiments/*/runs
+robofacts_ros2/example_project/experiments/*/results

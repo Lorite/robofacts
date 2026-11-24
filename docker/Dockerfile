@@ -32,11 +32,11 @@ RUN printf '%s\n' \
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
     CYCLONEDDS_URI=file:///etc/cyclonedds.xml
 
-# Stage 2: the package installed with pip, and the quickstart as the default command.
+# Stage 2: the two packages installed with pip, and the quickstart as the default command.
 FROM deps AS quickstart
 WORKDIR /opt/robofacts
 COPY . .
-RUN pip install --no-cache-dir . && trials --version
+RUN pip install --no-cache-dir ./robofacts ./robofacts_ros2 && trials --version
 
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.bash && exec \"$@\"", "--"]
 CMD ["./quickstart.sh"]

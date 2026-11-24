@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # The whole loop on the example project, in five steps: linter, planner, dry run, the
 # campaign (gate, trial, recording, verify steps, metadata) and the coverage index.
-# Needs ROS 2 Humble sourced and the package installed (pip or colcon). Runs inside
+# Needs ROS 2 Humble sourced and the two packages installed (pip or colcon). Runs inside
 # the quickstart image too: docker build -t trials-quickstart -f docker/Dockerfile . && docker run --rm trials-quickstart
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/example_project"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO/robofacts_ros2/example_project"
 
 CAMPAIGN=experiments/demo_talker_listener/campaigns/rates.yaml
 
-# The command: `trials` on the PATH (a pip install), else through ros2 run (a colcon
-# install puts it in lib/robofacts, not on the PATH), else from source.
+# The command: `trials` on the PATH (a pip install, or a sourced colcon workspace), else
+# through ros2 run (the ROS 2 package installs it there too), else from source.
 if command -v trials >/dev/null 2>&1; then
     trials() { command trials "$@"; }
-elif ros2 pkg prefix robofacts >/dev/null 2>&1; then
-    trials() { ros2 run robofacts trials "$@"; }
+elif ros2 pkg prefix robofacts_ros2 >/dev/null 2>&1; then
+    trials() { ros2 run robofacts_ros2 trials "$@"; }
 else
-    trials() { PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/..:${PYTHONPATH:-}" python3 -m robofacts.cli "$@"; }
+    trials() { PYTHONPATH="$REPO/robofacts:$REPO/robofacts_ros2:${PYTHONPATH:-}" python3 -m robofacts.cli "$@"; }
 fi
 
 echo "== 0. Where the roots resolve to (trials.yaml in this directory)"
