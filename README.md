@@ -1,10 +1,15 @@
 # RoboFACTS
 
-**RoboFACTS** stands for Factors, A Contract, and checked Trials in Simulation and on hardware, for robot teams. The ROS 2 package and the Python module are `robofacts`. Until 2026-10-16 the package was called `declarative_robot_trials`: same code, same command.
+**RoboFACTS** stands for Factors, A Contract, and checked Trials in Simulation and on hardware, for robot teams. This repository holds two packages. `robofacts` is the general one: Python only, no ROS. `robofacts_ros2` is its ROS 2 backend and depends on it. Until 2026-10-16 the package was called `declarative_robot_trials`, and until 2026-11-24 the two packages were one ROS 2 package: same command.
 
-Declarative experiment design for ROS 2 trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists the cells still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the bag and verifies it, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
+Declarative experiment design for robot trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists the cells still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the trial and verifies the recording, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
 
-The package is a plain `ament_python` ROS 2 package (Humble) that also installs with `pip`.
+| Package | Holds | Needs |
+|---|---|---|
+| `robofacts/` | the declarations (factors, contract, campaigns), the planner, the linter, the coverage index, the trial loop of the runner, the gate protocol with 8 general checks, the launcher and recorder interfaces, and a built-in backend without any middleware | Python 3.10 and PyYAML. Installs with `pip` |
+| `robofacts_ros2/` | the ROS 2 backend: `ros2 launch`, `ros2 bag record`, the bag readers and the slim copy, 13 ROS 2 gate checks, the robot adapters, Explore and the web interface | `robofacts` and ROS 2 Humble. An `ament_python` package, built with colcon |
+
+The dependency goes one way. `robofacts/test/test_core_is_free_of_ros.py` fails the build when the general package imports a ROS module or names ROS in any file.
 
 ## Quickstart: the whole loop in one command
 
@@ -23,19 +28,22 @@ Into a colcon workspace:
 
 ```bash
 cd ~/ros2_ws/src && git clone <this repository> robofacts
-cd ~/ros2_ws && rosdep install --from-paths src --ignore-src -y
-colcon build --packages-select robofacts && source install/setup.bash
-ros2 run robofacts trials --help
+cd ~/ros2_ws && colcon build --packages-select robofacts robofacts_ros2 && source install/setup.bash
+trials --help                          # or: ros2 run robofacts_ros2 trials --help
 ```
 
-Or with pip, into any Python 3.10+ environment that can see your ROS 2 installation:
+colcon builds `robofacts` as a plain Python package (it has no `package.xml`) and orders it before `robofacts_ros2`. After sourcing the workspace, `trials` is on the PATH, and `ros2 run robofacts_ros2 trials` starts the same command.
+
+Without ROS, the general package alone, into any Python 3.10+ environment:
 
 ```bash
-pip install git+<this repository>      # or: pip install . from a clone
+pip install ./robofacts                # from a clone
 trials --help
 ```
 
-A colcon install puts the command in `lib/robofacts/`, so it is `ros2 run robofacts trials …` there (or an alias: `alias trials='ros2 run robofacts trials'`). A pip install puts `trials` on the PATH. The runner, the gate's topic checks and the bag tools need a sourced ROS 2 Humble (`ros2`, `rosbag2`). The linter, the planner, the coverage index and the scaffolding work without ROS.
+With pip and ROS 2 (an environment that can see your ROS 2 installation): `pip install ./robofacts ./robofacts_ros2`.
+
+A project names its backend in `trials.yaml` (`backend: ros2`). Everything works without ROS on the built-in `process` backend. The ROS 2 launcher, the ROS 2 checks and the bag tools need a sourced ROS 2 Humble (`ros2`, `rosbag2`).
 
 ## Your own project in five steps
 
@@ -48,7 +56,7 @@ trials run  experiments/my_experiment/campaigns/baseline.yaml --limit 1    # dry
 trials run  experiments/my_experiment/campaigns/baseline.yaml --execute    # the trials
 ```
 
-`trials new <name>` writes a commented experiment that works as generated (it listens to `demo_nodes_cpp talker`). Edit, in this order: `config/factors.yaml` (the axes and how the runner realizes each level), `config/trial_metadata_schema.yaml` (the fields every trial records, with the coverage axes), `config/preflight_checklist.json` (the gate), `config/runner.yaml` (the stack, one trial, the verify steps, the computers) and `campaigns/baseline.yaml` (the sweep, the fixed levels, the repetitions). The linter and the planner then check the declarations before any trial runs.
+`trials init` takes `--backend ros2` for a ROS 2 project (the default is the built-in `process` backend). `trials new <name>` writes a commented experiment that works as generated: on the ROS 2 backend it listens to `demo_nodes_cpp talker`, on the `process` backend a small script stands in for the system and writes a log file. Edit, in this order: `config/factors.yaml` (the axes and how the runner realizes each level), `config/trial_metadata_schema.yaml` (the fields every trial records, with the coverage axes), `config/preflight_checklist.json` (the gate), `config/runner.yaml` (the stack, one trial, the verify steps, the computers) and `campaigns/baseline.yaml` (the sweep, the fixed levels, the repetitions). The linter and the planner then check the declarations before any trial runs.
 
 **When a similar experiment exists, start from it instead.** `trials new <name> --from <existing> [--campaign <c>[:<new_name>]]` copies that experiment's declarations (`config/`, the campaigns, `scripts/`, the runbook and the other text files) with its name replaced, and leaves out its bags, runs, results, notebooks, tests and large files. The README becomes a short stub that names the source. Change only what differs, then ask one question:
 
@@ -72,11 +80,11 @@ Besides the two roots, `trials.yaml` may hold the names a project gives to what 
 The planner, the linter, the gate protocol, the trial loop and the coverage index do not depend on the middleware of the system under test. Two things do: starting the stack and recording the trial. A backend supplies both as two interfaces that return command lines, a launcher and a recorder (`robofacts/backend.py`), and the runner keeps all process handling. `trials.yaml` names the backend:
 
 ```yaml
-backend: ros2       # ros2 launch or ros2 run, ros2 bag record, a recording is a bag
-backend: process    # a shell command, and a recorder that stores what the system appends to its log files
+backend: process    # built in: a shell command, and a recorder that stores what the system appends to its log files
+backend: ros2       # the package robofacts_ros2: ros2 launch or ros2 run, ros2 bag record, a recording is a bag
 ```
 
-A project that names none runs on `ros2`. `$TRIALS_BACKEND` overrides the file for one session. On the `process` backend, `runner.yaml` declares `launch: {command: "..."}` (templated like the action, optional) and `record_sources:` (the files to follow), and a recording is a directory with `data/` and a `recording.json` written last. A command may name the trial's recording directory as `{recording}` or, as before, `{bag}`. The folders keep their names on every backend: `bags/`, `bags_issues/`, `bags_slim/`, `bags_scratch/`.
+A project that names none runs on `process`, and a name loads the package `robofacts_<name>`. `$TRIALS_BACKEND` overrides the file for one session. A `runner.yaml` with `launch.package` and `launch.file` is refused on the `process` backend with the line to add, so a ROS 2 project that forgot the key cannot run a trial without its stack. A backend also ships the gate checks of its middleware, their spoken sentences, its robot adapters, its lint rules, its experiment template and its extra commands (for ROS 2: `trials explore`, `trials slim`, `trials ui`). On the `process` backend, `runner.yaml` declares `launch: {command: "..."}` (templated like the action, optional) and `record_sources:` (the files to follow), and a recording is a directory with `data/` and a `recording.json` written last. A command may name the trial's recording directory as `{recording}` or, as before, `{bag}`. The folders keep their names on every backend: `bags/`, `bags_issues/`, `bags_slim/`, `bags_scratch/`.
 
 ## Where a trial runs
 
@@ -86,7 +94,7 @@ The stop tools use the same registry. A robot in `common/config/robots.yaml` nam
 
 ## Robot adapters
 
-The core of the package names no robot. What only makes sense for one robot family is a robot adapter under `robofacts/adapters/`, and a project enables the ones it uses in `trials.yaml`:
+Neither package names a robot outside the adapters. What only makes sense for one robot family is a robot adapter of the ROS 2 package, under `robofacts_ros2/robofacts_ros2/adapters/`, and a project enables the ones it uses in `trials.yaml`:
 
 ```yaml
 adapters: [crazyflie, spot, px4]
@@ -98,13 +106,13 @@ adapters: [crazyflie, spot, px4]
 | `spot` | `graph_nav_localized` | `spot_name: spot` | the lease table of an action that echoes `<robot>/status/leases` in the web interface |
 | `px4` | `px4_preflight_pass` | | |
 
-An adapter's checks are found after the project's own checks and before the core ones, its names fill record-profile placeholders under the project's own, and its helpers are modules such as `robofacts.adapters.crazyflie.verify_flight_happened`. Nothing of a disabled adapter is in force. A project's own checks go in `experiments/common/preflight/checks/`, and the ones that are read-only probes may share a gate batch when `trials.yaml` lists them in `parallel_safe_checks:`.
+An adapter's checks are found after the project's own checks and before the backend's and the core ones, its names fill record-profile placeholders under the project's own, and its helpers are modules such as `robofacts_ros2.adapters.crazyflie.verify_flight_happened`. Nothing of a disabled adapter is in force. A project's own checks go in `experiments/common/preflight/checks/`, and the ones that are read-only probes may share a gate batch when `trials.yaml` lists them in `parallel_safe_checks:`.
 
 The stop sweeps match the processes of the project's workspace. What only the project knows goes in `trials.yaml` under `stop_patterns:`: `recorder_scripts` (wrappers that exec `ros2 bag record`), `owned_containers` (composable containers its launches start, matched by node name so an orphan is found), and `kinds` (extra named patterns, regex templates with `{workspace}`).
 
 A slim copy of a bag drops the image, depth and point-cloud topics (`trials slim`, and the runner after each trial). The core's rules cover the common names (`image_raw`, `compressed`, `compressedDepth`, `depth_registered`, `points`, ...) and keep every `camera_info`. A project adds its own in `trials.yaml`: `slim_topics: {heavy_patterns: [/my_lidar/points_raw], light_suffixes: [/debug/overlay/compressed]}`, where a heavy pattern is a substring of the topic name and a light suffix keeps a topic that a heavy pattern would drop.
 
-The core names no robot and no lab. `test/test_core_names_no_robot.py` fails the build when a core file names a robot family or a lab (a short allowlist covers facts about third-party tools), so robot code goes into an adapter and a lab's names into its project.
+No package names a robot or a lab outside the adapters. `robofacts_ros2/test/test_packages_name_no_robot_and_no_lab.py` fails the build when a file of either package names a robot family or a lab (a short allowlist covers facts about third-party tools), so robot code goes into an adapter and a lab's names into its project.
 
 ## Record profiles
 
@@ -186,16 +194,17 @@ Who decided comes from `--by`, else `$TRIALS_BY`, else the login name. A slim co
 
 ## A project's own gate checks
 
-A check is a bash script that prints one `PASS:`, `FAIL:` or `SKIP:` line and exits 0, 1 or 3 (see `robofacts/preflight/README.md`). The package ships the general ones (topic rates, node presence, disk, memory, DDS buffers, the stop latch, the bag directory, hosts, GPU memory, and several robot-specific ones). A project adds its own under `<experiments root>/common/preflight/checks/<name>.sh`; a project check with the same name as a packaged one wins. The helper the packaged checks source is passed as `$PF_LIB`.
+A check is a bash script that prints one `PASS:`, `FAIL:` or `SKIP:` line and exits 0, 1 or 3 (see `robofacts/robofacts/preflight/README.md`). The general package ships 8 checks that need no middleware (disk, memory, GPU memory, a file, a host, a network interface, the stop latch, the recording directory). The ROS 2 package ships 13 more (topic rates and values, nodes, parameters, services, DDS buffers, the clean slate, motion capture, the simulator's world, see `robofacts_ros2/robofacts_ros2/checks/README.md`), and each robot adapter its own. A project adds its own under `<experiments root>/common/preflight/checks/<name>.sh`; a project check with the same name as a packaged one wins. The helper the packaged checks source is passed as `$PF_LIB`.
 
 ## Development
 
 ```bash
-python3 -m pytest -q test           # from this directory; ROS-dependent tests skip without ROS
-./quickstart.sh                     # with ROS 2 Humble sourced and the package installed
+cd robofacts && python3 -m pytest -q test                      # the general package alone: needs no ROS
+python3 -m pytest -q robofacts_ros2/test robofacts/test        # both packages, with both on the Python path
+./quickstart.sh                                                # with ROS 2 Humble sourced and both packages installed
 ```
 
-The tests run against `example_project/`. `.github/workflows/ci.yaml` builds the package with colcon on `ros:humble`, runs the tests and the example campaign, installs with pip without ROS, generates a project with `trials init` and checks it, and builds the Docker image.
+`robofacts/test` runs with the general package alone. Its tests that exercise the core together with the ROS 2 backend are marked `ros2` and are skipped where `robofacts_ros2` is not installed. `robofacts_ros2/test` runs against `robofacts_ros2/example_project/`. `.github/workflows/ci.yaml` has three jobs: `core-no-ros` installs only `robofacts` on a plain Python image, runs its tests and runs a generated project from plan to coverage index. `colcon-humble` builds both packages on `ros:humble`, runs both test suites and the example campaign. `docker-image` builds the quickstart image.
 
 ## License
 
