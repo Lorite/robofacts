@@ -170,7 +170,7 @@ def test_a_copy_validates_ready(project):
     assert "READY: demo_copy" in text
     assert "wanted 4" in text  # nothing recorded was copied, so the plan starts from zero
     assert "1 trial(s) planned, every command resolved" in text
-    assert "1 script(s) run untested: listen_for.py" in text
+    assert "2 script(s) run untested: listen_for.py, verify_chatter.py" in text
     assert "TRIALS_VOICE" not in os.environ  # the dry run's --no-voice does not leak
 
 

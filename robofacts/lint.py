@@ -31,9 +31,15 @@ L5  a campaign's pre-flight operator_steps must not start ROS processes: a
     script), so anything the operator starts beforehand is killed by the trial
     it was started for. Such things belong in aux_launches, or in
     operator_live_steps.
-L6  an experiment that flies must declare verify_steps — an action's exit code
-    describes a process, only the bag describes the experiment. (A latched
-    e-stop produced a "successful" trial with the drone on the ground.)
+L6  every experiment must declare verify_steps in runner.yaml, or say why it has
+    none with `no_verify_steps: <reason>`. An action's exit code describes a
+    process, only the recording describes the trial. (A latched e-stop produced
+    a "successful" trial with the robot stationary on the ground.) Until
+    2026-11-24 the rule read flight words in the action and in the factor
+    levels, so it bound only experiments that fly. A ground robot, an arm or a
+    vehicle moved by hand can fail to move in the same way, and the lint cannot
+    know from a declaration what moves, so the rule now binds every experiment
+    and the exception is a written reason.
 L7  a command may not reference a script that does not exist.
     L4 and L7 also cover the commands only Explore runs: `explore.viewers`
     (2026-10-17) and `explore.actions` (the run page's buttons).
@@ -337,33 +343,45 @@ def test_pre_flight_operator_steps_do_not_start_ros_processes(experiment):
                 f"runs)")
 
 
+#: runner.yaml's way to say that an experiment has no verify step on purpose (L6).
+NO_VERIFY_KEY = "no_verify_steps"
+
+
+def verify_step_problem(raw: dict) -> str | None:
+    """L6 on one runner.yaml (its parsed content): the problem, or None when it is fine.
+
+    Fine means: at least one verify step, or no verify step and a written reason under
+    ``no_verify_steps``. Both together contradict each other, and a reason that is not
+    text (``true``, an empty string) is no reason.
+    """
+    steps = raw.get("verify_steps") or []
+    declared = NO_VERIFY_KEY in raw
+    reason = raw.get(NO_VERIFY_KEY)
+    if steps and declared:
+        return (f"declares verify_steps and {NO_VERIFY_KEY} together. Remove {NO_VERIFY_KEY}: "
+                f"the experiment has verify steps")
+    if steps:
+        return None
+    if declared:
+        if isinstance(reason, str) and reason.strip():
+            return None
+        return (f"{NO_VERIFY_KEY} must be a sentence that says why no check of the recording "
+                f"is possible or needed, got {reason!r}")
+    return (f"declares no verify_steps. An action can exit 0 without the trial having happened "
+            f"(a latched e-stop once produced a 'successful' trial with the robot stationary on "
+            f"the ground for 48 s), so only a check of the recording shows that it did. Add a "
+            f"verify step to runner.yaml (a command that reads {{bag}} and exits non-zero when "
+            f"the trial did not happen), or say why there is none with "
+            f"`{NO_VERIFY_KEY}: <reason>`")
+
+
 @pytest.mark.parametrize("experiment", experiments_with_runner())
-def test_flight_experiments_declare_a_verify_step(experiment):
-    """L6 — an exit code describes a process; only the bag describes the trial."""
-    config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    # The original heuristic read the action string for "trajector"/"flight". That misses
-    # an experiment whose action DISPATCHES on a factor — an observer rig flies only
-    # when drone_state=flying, and its action names neither word, so the rule silently
-    # skipped exactly the experiment it should police. Also ask the factor space: any level
-    # that says something flies makes this a flight experiment.
-    flies = "trajector" in config.action or "flight" in config.action
-    if not flies:
-        try:
-            factors = cs.load_factors(experiment)
-        except Exception:
-            factors = {}
-        for name, factor in (factors or {}).items():
-            levels = [str(v) for v in (getattr(factor, "levels", None) or [])]
-            if any(l in ("flying", "flight", "fly") for l in levels):
-                flies = True
-                break
-    if not flies:
-        pytest.skip("not a flight experiment")
-    assert config.verify_steps, (
-        f"{experiment} flies but declares no verify_steps. A latched e-stop once produced a "
-        f"'successful' trial with the drone stationary on the ground for 48 s, because the "
-        f"action exited 0. Add a check against the recorded bag "
-        f"(experiments/common/scripts/verify_flight_happened.py)")
+def test_every_experiment_declares_a_verify_step(experiment):
+    """L6: an exit code describes a process, only the recording describes the trial."""
+    path = EXPERIMENTS_ROOT / experiment / "config" / tr.RUNNER_CONFIG_NAME
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    problem = verify_step_problem(raw)
+    assert problem is None, f"{experiment}: runner.yaml {problem}"
 
 
 @pytest.mark.parametrize("experiment", experiments_with_runner())

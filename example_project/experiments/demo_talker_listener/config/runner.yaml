@@ -17,6 +17,14 @@ stop_grace_s: 3
 # No named record profile applies here, so list the topics outright.
 record_topics: ["/chatter", "/rosout"]
 
+# A check of the RECORDED BAG after the recorder stopped ({bag} is the bag directory). The
+# action exits 0 even when the talker never started, so only the bag shows that the trial
+# happened. A non-zero exit marks the trial aborted, and it does not count as coverage.
+# Every experiment declares at least one verify step, or `no_verify_steps: <reason>` (lint L6).
+verify_steps:
+  - name: chatter_was_recorded
+    command: "python3 experiments/demo_talker_listener/scripts/verify_chatter.py {bag} --min-messages 3"
+
 hosts:
   # The level of the execution_host factor that runs the trial on this machine.
   laptop:

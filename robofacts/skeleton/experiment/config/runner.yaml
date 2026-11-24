@@ -47,6 +47,8 @@ stop_grace_s: 3
 # Checks against the RECORDED BAG, once the recorder has stopped ({bag} is the
 # bag directory). A non-zero exit marks the trial failed: an action can exit 0
 # without the trial having happened, and only the bag describes the experiment.
+# Every experiment declares at least one (lint L6). An experiment where no check of the
+# recording is possible says so instead: `no_verify_steps: "<the reason>"`.
 verify_steps:
   - name: chatter_was_recorded
     command: "python3 experiments/{{name}}/scripts/verify_chatter.py {bag} --min-messages 3"
