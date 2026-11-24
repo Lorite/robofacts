@@ -22,7 +22,7 @@
 #   aliases      : older spellings of a level, so historical trials still match
 #   maps_to      : how the runner realizes the level. kind is one of
 #                    host           - selects the execution machine (runner.yaml `hosts:`)
-#                    launch_arg     - passed as name:=value to ros2 launch
+#                    launch_arg     - an argument of the stack's launcher
 #                    record_profile - selects a named record topic set
 #                    internal       - affects orchestration only, not the launch
 #                    gate           - selects the T-0 gate mode (simulation only)

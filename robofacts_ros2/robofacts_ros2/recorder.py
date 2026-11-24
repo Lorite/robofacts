@@ -67,6 +67,10 @@ def export_rosout(bag_dir: Path, target, hooks, project_root: Path) -> None:
 
 class Ros2Recorder:
     noun = "bag"
+    #: What the data files of a bag are called in a message.
+    data_name = ".mcap or .db3"
+    #: What the recorder leaves beside the metadata of a finished trial.
+    sidecar_note = " and `rosout.txt`"
 
     def command(self, directory: Path, sources: List[str],
                 options: Optional[Dict[str, Any]] = None) -> List[str]:

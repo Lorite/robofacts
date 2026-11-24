@@ -641,7 +641,21 @@ def discover_campaigns(experiments_root: Path) -> Dict[str, List[Path]]:
 
 #: The layouts convention lives in the package now (``trial_records``), so
 #: ``trials records`` and the UI name the same files. Kept under the old name.
-foxglove_layouts = trec.foxglove_layouts
+# --------------------------------------------------------------------------- #
+# Layouts
+# --------------------------------------------------------------------------- #
+def foxglove_layouts(experiments_root: Path) -> Dict[str, List[Path]]:
+    """The Foxglove layouts each experiment ships: ``experiments/<exp>/config/foxglove*.json``.
+
+    A convention, not a schema: any JSON exported from Foxglove (Layouts -> Export)
+    whose name starts with ``foxglove`` (case does not matter) belongs to the bags
+    of its experiment.
+    """
+    out: Dict[str, List[Path]] = {}
+    for f in sorted(Path(experiments_root).glob("*/config/*.json")):
+        if f.name.lower().startswith("foxglove"):
+            out.setdefault(f.parents[1].name, []).append(f)
+    return out
 
 
 def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
@@ -729,7 +743,7 @@ class ExperimentData:
                 self.campaign_errors[path.stem] = str(exc)
         self.records = trec.load_records(root, experiment, campaigns=self.campaigns)
         self.trials = ti.load_trials(root, experiment)
-        self.layouts = [f.name for f in trec.foxglove_layouts(root).get(experiment, [])]
+        self.layouts = [f.name for f in foxglove_layouts(root).get(experiment, [])]
         self.explore = explore_settings(root, experiment)
         # Factor defaults, so a cell can mark its non-default values like the grid does.
         self.defaults: Dict[str, str] = {}
@@ -1303,7 +1317,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @requires_auth
     def layout_file(experiment: str, name: str):
         """A per-experiment Foxglove layout, as a download for Layouts -> Import."""
-        for f in trec.foxglove_layouts(root()).get(experiment, []):
+        for f in foxglove_layouts(root()).get(experiment, []):
             if f.name == name:
                 return send_file(f, mimetype="application/json", as_attachment=True, download_name=f.name)
         return {"error": f"no Foxglove layout named {name!r} in {experiment}"}, 404

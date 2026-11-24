@@ -217,12 +217,10 @@ DEFAULT_CONCURRENCY = "concurrent"
 CONCURRENCY_ENV = "TRIALS_PREFLIGHT_CONCURRENCY"
 TIMING_LOG_ENV = "TRIALS_PREFLIGHT_TIMING_LOG"
 #: Upper bound on checks running at once in one batch (each may start a
-#: `ros2 topic echo`, which costs a Python interpreter and a DDS participant).
+#: command line client, which costs an interpreter and a network participant).
 DEFAULT_JOBS = 8
 
-#: Read-only probes: they read files, /proc, sysctl, ping, `gz topic -l`, the
-#: ros2 daemon's graph, or subscribe to a topic for a window (a subscription
-#: does not change what another subscriber receives). None starts, stops or
+#: Read-only probes: they read files, /proc, sysctl or ping. None starts, stops or
 #: signals a process, and none shares state with a sibling check.
 #: bag_dir_writable writes and removes a probe file whose name carries its own
 #: PID, so two instances cannot collide.
@@ -438,7 +436,7 @@ def run_check(entry: Dict[str, Any], variables: Dict[str, str], timeout_s: float
     script = find_check(entry["check"])
     if script is None:
         return RC_USAGE, f"unknown check {entry['check']!r}{_unknown_check_hint(entry['check'])}"
-    # Through bash on purpose: a package installed by pip or colcon may not keep
+    # Through bash on purpose: an installed package may not keep
     # the executable bit, and the script's own shebang is bash anyway.
     argv = ["bash", str(script)] + [f"{k}={substitute(v, variables)}" for k, v in entry["args"].items()]
     try:
@@ -523,8 +521,8 @@ def append_timing_log(path: Path, record: Dict[str, Any]) -> None:
 
 def prepare_gate() -> None:
     """What runs once before the machine checks: the backend of the project in the working
-    directory decides (backend.Backend.gate_prepare). The ROS 2 backend restarts the ros2
-    daemon, a backend without such a daemon does nothing."""
+    directory decides (backend.Backend.gate_prepare). A backend with a middleware daemon
+    restarts it here, the others do nothing."""
     backend = _backend()
     if backend is not None:
         backend.gate_prepare()
@@ -557,8 +555,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                              "always says which gates it was held to.")
     parser.add_argument("--list", action="store_true", help="show the plan without running anything")
     parser.add_argument("--validate", action="store_true",
-                        help="only verify the checklist is coherent (no ROS needed); exit 2 on problems")
-    parser.add_argument("--no-daemon-bounce", action="store_true", help="skip the ros2 daemon restart")
+                        help="only verify the checklist is coherent (runs nothing); exit 2 on problems")
+    parser.add_argument("--no-daemon-bounce", action="store_true", help="skip the backend's step before the checks (a middleware daemon restart)")
     parser.add_argument("--timeout", type=float, default=60.0, help="per-check timeout in seconds (default: 60)")
     parser.add_argument("--concurrency", choices=CONCURRENCY_MODES, default=None,
                         help="run the machine checks one after another, or the parallel-safe "

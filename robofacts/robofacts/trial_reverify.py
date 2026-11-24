@@ -29,7 +29,7 @@ decision (``trials exclude``).
 
 Run it where the trial's record lives, the host that recorded it (the Orin's
 container for the rig trials), inside the dev container (the steps read bags
-with rosbag2_py). The archive and the laptop's staging copy mirror that host
+with the backend's reader). The archive and the laptop's staging copy mirror that host
 with ``rsync --delete``, so a ``reverification.json`` written into a copy is
 deleted by the next sync. The bag read is the full bag when it holds a storage
 file, else its slim copy.
@@ -78,7 +78,7 @@ def storage_dir(dirs: td.TrialDirs) -> Path:
     for d in (dirs.full, dirs.slim):
         if d is not None and recording_holds_data(d):
             return d
-    raise td.DecisionError(f"{dirs.name}: neither the bag nor its slim copy holds a .mcap or .db3 "
+    raise td.DecisionError(f"{dirs.name}: neither the bag nor its slim copy holds recorded data "
                            f"here. Run it on the host that recorded the trial.")
 
 

@@ -1,8 +1,7 @@
 """Robot adapters: what the framework knows about one kind of robot, enabled per project.
 
 The core of the package names no robot. What only makes sense for one robot family lives
-in an adapter, a folder that the project's backend ships (for the ROS 2 backend,
-``robofacts_ros2/adapters/<name>/``):
+in an adapter, a folder that the project's backend ships (``<backend package>/adapters/<name>/``):
 
 - ``checks/``: gate checks (``<name>.sh``), found after the project's own checks and before
   the core ones,
@@ -14,7 +13,7 @@ in an adapter, a folder that the project's backend ships (for the ROS 2 backend,
 
 A project enables adapters in ``trials.yaml``::
 
-    adapters: [crazyflie, spot]
+    adapters: [my_drone, my_arm]
 
 Nothing of a disabled adapter is in force: its checks are unknown (the error names the
 adapter to enable), and its names and sentences do not apply.
@@ -83,7 +82,7 @@ def enabled() -> List[str]:
     unknown = [a for a in raw if a not in shipped]
     if unknown:
         hint = "" if shipped else (" The project's backend ships no adapters: the robot adapters "
-                                   "come with a backend, for example `backend: ros2` in trials.yaml.")
+                                   "come with a backend, named by `backend:` in trials.yaml.")
         raise AdapterError(f"trials.yaml: unknown adapters {unknown}; the package ships "
                            f"{list(shipped)}.{hint}")
     return list(dict.fromkeys(raw))

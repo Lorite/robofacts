@@ -184,14 +184,14 @@ def test_an_unknown_backend_is_refused_with_the_names_that_were_tried():
         backend.load("no_such_backend_anywhere")
 
 
-def test_ros_launch_keys_are_refused_on_the_process_backend(project):
-    """A project that forgot `backend: ros2` must not run a trial without its stack."""
+def test_launch_keys_of_another_backend_are_refused_on_the_process_backend(project):
+    """A project that forgot to name its backend must not run a trial without its stack."""
     runner = project / "plant" / "config" / "runner.yaml"
     text = runner.read_text(encoding="utf-8")
     start = text.index("launch:")
     runner.write_text(text[:start] + "launch: {package: demo_nodes_cpp, file: talker}\n"
                       + text[text.index("action:"):], encoding="utf-8")
-    with pytest.raises(tr.RunnerError, match="backend: ros2"):
+    with pytest.raises(tr.RunnerError, match="belong to another backend.*`backend: <name>`"):
         tr.RunnerConfig.load("plant", project)
 
 

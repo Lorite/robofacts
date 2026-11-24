@@ -5,7 +5,7 @@
 # Replaces having to remember, correctly, under pressure:
 #
 #   ssh <rig-host> \
-#     'docker exec ros2_jetson_dev zsh -lc "ros2 service call /all/emergency std_srvs/srv/Empty"'
+#     'docker exec <container> zsh -lc "<the robot's stop command>"'
 #
 # Robots and their stop commands live in experiments/common/config/robots.yaml,
 # so adding one is a config edit, and the future web UI drives the same file -
@@ -26,8 +26,8 @@
 # THE DEFAULT IS THE EMERGENCY. Typing one word must stop everything, because
 # that is the moment you have. Inspection is what needs a flag, not the stop.
 #
-# THIS IS NOT THE PRIMARY KILL. It travels laptop -> ssh -> container -> DDS,
-# and every hop can fail: on 2026-07-22 the e-stop terminal had no DDS discovery
+# THIS IS NOT THE PRIMARY KILL. It travels laptop -> ssh -> container -> the robot's link,
+# and every hop can fail: on 2026-07-22 the e-stop terminal had no discovery of the robot's network
 # while everything else looked healthy. The physical kill switch stays primary,
 # and the estop_reachable check must pass before every flight.
 # =============================================================================
@@ -170,11 +170,11 @@ build_command() {
     #   1. Already INSIDE THE TARGET'S container (/.dockerenv exists and the
     #      hostname is the target's container_hostname, or the target names no
     #      container_hostname): run the command directly. There is no docker
-    #      CLI in here; the DDS environment is exactly the one the rig uses.
+    #      CLI in here; the network environment is exactly the one the rig uses.
     #      Before 2026-11-17 ANY container counted, so a stop typed in the
-    #      laptop's container (hostname ros2-dev), or the web interface's stop
+    #      laptop's container, or the web interface's stop
     #      button served from it, ran the Orin's stop on the laptop and relied on
-    #      Wi-Fi DDS, which the Orin's unicast-only config does not offer. Inside
+    #      Wi-Fi discovery, which the robot computer's unicast-only config does not offer. Inside
     #      another container the ssh path below is taken (the container has the
     #      host's ssh config, the runner uses the same path).
     #   2. On a host where THIS ROBOT'S container is running (docker inspect
@@ -190,14 +190,14 @@ build_command() {
         return
     fi
     if [ -n "$container" ]; then
-        # `zsh -lc` is required, not bash: CYCLONEDDS_URI is defaulted only in
-        # /etc/zsh/zshenv, and a bash login shell silently loses DDS discovery,
+        # `zsh -lc` is required, not bash: a container may default its middleware's
+        # configuration only in /etc/zsh/zshenv, and a bash login shell then silently loses discovery,
         # so the call would reach nothing while appearing to succeed.
         #
         # The inner `timeout` bounds the command inside the container. The outer
         # `timeout` only kills the local docker or ssh client, and the process
         # that `docker exec` started keeps running in the container after its
-        # client dies, so a hung stop would hold DDS state until the container
+        # client dies, so a hung stop would hold middleware state until the container
         # restarts. The inner limit ends 2 s before the outer one, so a hung stop
         # still exits with 124 and the FAIL line keeps its explanation. `-k 2`
         # sends SIGKILL to a command that ignores SIGTERM.

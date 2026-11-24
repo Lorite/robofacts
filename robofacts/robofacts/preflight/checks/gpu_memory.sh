@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Enough free VRAM for the GPU nodes about to start.
 #
-# Nvblox / Isaac ROS DNN nodes fail late and opaquely when VRAM is already
+# GPU inference nodes fail late and opaquely when VRAM is already
 # taken (a leftover node from the previous run is the usual culprit - see
 # scripts/kill_ros.sh). Checking first turns that into a clear no-go.
 #

@@ -88,7 +88,7 @@ def _pytest(paths: Sequence[str], experiments_root: Path, extra_env: Optional[di
     package_parent = str(Path(__file__).resolve().parents[1])
     env["PYTHONPATH"] = package_parent + os.pathsep + env.get("PYTHONPATH", "")
     env[roots.ENV_EXPERIMENTS_ROOT] = str(experiments_root)
-    # ROS installs pytest plugins that cost seconds to load and that no lint needs.
+    # A middleware installation may add pytest plugins that cost seconds to load and that no lint needs.
     env.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     env.update(extra_env or {})
     proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *paths],

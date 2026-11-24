@@ -146,13 +146,13 @@ wrapped="$COMMAND"
 DOCKERENV="${TRIALS_DOCKERENV:-/.dockerenv}"
 if [ -n "$CONTAINER" ] && [ -f "$DOCKERENV" ] \
     && { [ "${CHOST:--}" = "-" ] || [ "$(hostname)" = "$CHOST" ]; }; then
-    # Still a login zsh: CYCLONEDDS_URI is defaulted only in /etc/zsh/zshenv.
+    # Still a login zsh: a container may default its middleware configuration only in /etc/zsh/zshenv.
     wrapped="timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
     CONTAINER=""
     HOST="local"
 fi
 if [ -n "$CONTAINER" ]; then
-    # zsh -lc, never bash: CYCLONEDDS_URI lives in /etc/zsh/zshenv (the
+    # zsh -lc, never bash: the middleware configuration may live in /etc/zsh/zshenv (the
     # documented false-dead trap).
     # The inner `timeout` bounds the command inside the container, because the
     # outer one only kills the local docker or ssh client (see estop.sh).

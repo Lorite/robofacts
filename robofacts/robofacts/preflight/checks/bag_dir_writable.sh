@@ -3,7 +3,7 @@
 #
 # Exists because of the failure this misses everything else about: on the Lab PC
 # the host user is uid 1001 while the container user is uid 1000, so the mounted
-# workspace was read-only to the container. `ros2 bag record` started, printed
+# workspace was read-only to the container. The recorder started, printed
 # "Failed to create database directory", exited, and the trial finished looking
 # entirely normal -- a stack that came up, an action that ran, a recorder that
 # stopped. The only evidence was an empty directory.
@@ -26,7 +26,7 @@ MIN_FREE_MB="$(pf_arg min_free_mb 0)"
 
 # A MISSING directory is not a NO-GO when it can be created (2026-10-13, the
 # adoption test of the SAC 2027 framework paper): the recorder creates the bag
-# directory and its parents (rosbag2 does, checked in the dev container), and
+# directory and its parents (checked for the recorder in the dev container), and
 # the T-0 gate runs before it, so a bare "does not exist" refused the first
 # trial of every new experiment. What matters is whether the recorder will be
 # able to write there, so a missing directory is judged by its nearest

@@ -4,9 +4,9 @@
 # Covers "laptop is on the same network as the MOCAP host" and "WiFi/ethernet
 # link to the robot is stable" - both of which otherwise fail deep inside a driver.
 #
-# NOTE a passing ping does NOT mean DDS discovery works: some WiFi networks drop every
+# NOTE a passing ping does NOT mean the middleware's discovery works: some WiFi networks drop every
 # IP-fragmented UDP datagram while small ICMP passes fine. Use this to
-# catch a dead link, not to certify the ROS transport.
+# catch a dead link, not to certify the middleware's transport.
 #
 #   host_reachable.sh host=192.168.50.3 [max_rtt_ms=0] [count=3]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"

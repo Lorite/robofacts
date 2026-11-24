@@ -1,0 +1,37 @@
+# The project's record profiles: named topic sets that a trial records.
+#
+# A trial picks a profile with a factor whose maps_to has `kind: record_profile`
+# (common/config/factors.yaml), or the project names one in trials.yaml as
+# `default_record_profile`. An experiment whose topics are its own lists them in its
+# runner.yaml as `record_topics` instead (the `custom` level).
+#
+# Every profile here must also be a level of `record_profile` in trial_metadata_core.yaml,
+# or every trial recorded on it fails the metadata contract (lint rule L9), and every
+# profile must record /rosout (lint rule L11).
+#
+# A topic may hold {name} placeholders, filled from `record_profiles:` in trials.yaml
+# (the project's own names, such as a robot, a camera namespace or a node, plus the defaults of
+# an enabled adapter). A profile lists blocks, and its topic list keeps their order and
+# drops repeats. Check a profile with `trials profiles <name> --topics-only`.
+#
+# Example:
+#
+# blocks:
+#   robot_state:
+#     - /{cf_name}/pose
+#     - /{cf_name}/battery
+#     - /tf
+#     - /tf_static
+#     - /rosout
+#   camera_debug:
+#     - "{camera}/color/camera_info"
+# profiles:
+#   flight:
+#     blocks: [robot_state]
+#     size: "~5 MB/min"
+#   flight_with_camera:
+#     blocks: [robot_state, camera_debug]
+#     topics: [/joy]
+
+blocks: {}
+profiles: {}

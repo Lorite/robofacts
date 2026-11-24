@@ -1,4 +1,4 @@
-"""Declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, a
+"""Declarative experiment design for robot trials: campaigns, a T-0 gate, a
 runner, a coverage index, a linter and named analyses, driven by five declaration
 files per experiment."""
 

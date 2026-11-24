@@ -10,7 +10,7 @@ sequence, the run log), so a backend never starts or stops a process itself.
 A project names its backend in ``trials.yaml``::
 
     backend: process       # the built-in one: a shell command and a file recorder
-    backend: ros2          # the package robofacts_ros2 (a name loads robofacts_<name>)
+    backend: <name>        # another backend: the package robofacts_<name>
     backend: my_pkg.trials # any importable module with a BACKEND object
 
 ``$TRIALS_BACKEND`` overrides the file for one session.
@@ -69,7 +69,7 @@ class Launcher(Protocol):
 class Recorder(Protocol):
     """Records one trial into one directory."""
 
-    #: The word for one recording in printed messages ("bag" for ROS 2).
+    #: The word for one recording in printed messages (a backend may call it a bag, a log).
     noun: str
 
     def command(self, directory: Path, sources: List[str],

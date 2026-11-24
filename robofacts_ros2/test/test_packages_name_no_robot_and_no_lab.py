@@ -1,5 +1,5 @@
-"""The core of the package names no robot and no lab. Robot-specific code lives in
-robofacts/adapters/, a lab's names live in its own project.
+"""The two packages name no robot and no lab outside the robot adapters. Robot-specific code
+lives in robofacts_ros2/adapters/, a lab's names live in its own project.
 
 The extraction of 2026-10-14 moved the lab's names out of the code, but nothing stopped new
 robot code from coming back into the core: within four weeks the package carried 18 topic
@@ -15,9 +15,11 @@ from pathlib import Path
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parents[1]
-CORE = PACKAGE / "robofacts"
-ADAPTERS = CORE / "adapters"
+REPO = Path(__file__).resolve().parents[2]
+#: The general package and the ROS 2 package. A robot belongs in neither, outside the adapters.
+CORE = REPO / "robofacts" / "robofacts"
+ROS2 = REPO / "robofacts_ros2" / "robofacts_ros2"
+ADAPTERS = ROS2 / "adapters"
 SUFFIXES = (".py", ".sh", ".md", ".html", ".js", ".yaml", ".json")
 
 #: Names of one lab, its people, its robots and its issue tracker: nowhere in the package.
@@ -32,48 +34,56 @@ ROBOT = re.compile(r"\bspot\b|spot_|crazyflie|crazyswarm|\bcf1\b|px4|livox|graph
 ROBOT_ALLOWED = {
     # Vendor binaries that live outside /opt/ros and the workspaces: the clean slate must
     # kill them on any machine, and a pattern that matches nothing costs nothing.
-    "tools/kill_ros.sh",
+    "robofacts_ros2/tools/kill_ros.sh",
     # The lesson behind the check is a fact about PX4's own simulation start script.
-    "preflight/checks/gz_world_matches.sh",
+    "robofacts_ros2/checks/gz_world_matches.sh",
     # The check table names the adapters' checks, tagged with their adapter.
-    "preflight/README.md",
+    "robofacts_ros2/checks/README.md",
     # The commented template of trials.yaml shows how to enable an adapter.
-    "skeleton/project/trials.yaml",
+    "robofacts_ros2/skeleton/project/trials.yaml",
 }
 
 
 def _core_files():
-    for path in sorted(CORE.rglob("*")):
-        if path.suffix in SUFFIXES and "__pycache__" not in path.parts and ADAPTERS not in path.parents:
-            yield path
+    """Every file of the two packages outside the robot adapters."""
+    for root in (CORE, ROS2):
+        for path in sorted(root.rglob("*")):
+            if path.suffix in SUFFIXES and "__pycache__" not in path.parts and ADAPTERS not in path.parents:
+                yield path
+
+
+def _key(path: Path) -> str:
+    """``robofacts/<file>`` or ``robofacts_ros2/<file>``, the allowlist's spelling."""
+    root = CORE if CORE in path.parents else ROS2
+    return f"{root.name}/{path.relative_to(root)}"
 
 
 def _hits(path: Path, pattern: re.Pattern):
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if pattern.search(line):
-            yield f"{path.relative_to(PACKAGE)}:{number}: {line.strip()[:100]}"
+            yield f"{path.relative_to(REPO)}:{number}: {line.strip()[:100]}"
 
 
 def test_no_lab_name_anywhere_in_the_package():
     files = [*_core_files(), *sorted(ADAPTERS.rglob("*.py")), *sorted(ADAPTERS.rglob("*.sh")),
-             PACKAGE.parent / "README.md", PACKAGE.parent / "CHANGELOG.md",
-             *sorted((PACKAGE.parent / "robofacts_ros2" / "example_project").rglob("*.yaml")),
-             *sorted((PACKAGE.parent / "robofacts_ros2" / "example_project").rglob("*.json"))]
+             REPO / "README.md", REPO / "CHANGELOG.md",
+             *sorted((REPO / "robofacts_ros2" / "example_project").rglob("*.yaml")),
+             *sorted((REPO / "robofacts_ros2" / "example_project").rglob("*.json"))]
     hits = [h for path in files if path.is_file() for h in _hits(path, LAB)]
     assert not hits, "lab names or internal issue numbers in the package:\n" + "\n".join(hits)
 
 
 def test_the_core_names_no_robot():
     hits = [h for path in _core_files()
-            if str(path.relative_to(CORE)) not in ROBOT_ALLOWED
+            if _key(path) not in ROBOT_ALLOWED
             for h in _hits(path, ROBOT)]
-    assert not hits, ("robot names in the core (move the code into robofacts/adapters/ or "
+    assert not hits, ("robot names outside the adapters (move the code into robofacts_ros2/adapters/ or "
                       "the project):\n" + "\n".join(hits))
 
 
 @pytest.mark.parametrize("allowed", sorted(ROBOT_ALLOWED))
 def test_every_allowlisted_file_still_needs_it(allowed):
     """An allowlist entry whose file no longer names a robot is stale: remove it."""
-    path = CORE / allowed
+    path = REPO / allowed.split("/", 1)[0] / allowed
     assert path.is_file(), f"{allowed} does not exist any more"
     assert any(True for _ in _hits(path, ROBOT)), f"{allowed} names no robot now: drop it"

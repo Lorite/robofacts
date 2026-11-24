@@ -17,7 +17,7 @@ Two files, deliberately separate:
 Why the split: the axes change rarely and are shared; campaigns are cheap and
 disposable. It is the same shape as Hydra's config groups plus experiment
 configs, and the same reason — but without the dependency, because a trial here
-is ``ros2 launch`` on a possibly-remote host with hardware in the loop, not a
+is the stack's launch on a possibly-remote host with hardware in the loop, not a
 Python entry point Hydra can own.
 
 The cross-check that earns its keep
@@ -536,7 +536,7 @@ def substitute_known(template: str, values: Dict[str, Any]) -> str:
     """Fill only ``{known_factor}`` placeholders, leaving other braces alone.
 
     str.format cannot be used: an operator command legitimately contains
-    braces of its own — ``ros2 service call ... "{data: true}"`` — and would
+    braces of its own — a service call with ``"{data: true}"`` — and would
     raise KeyError on them.
     """
     out = template
@@ -582,7 +582,7 @@ class TrialSpec:
     def launch_args(self, factors: Dict[str, Factor]) -> Dict[str, Any]:
         # A level may drive SEVERAL launch arguments (`names:`), because some
         # identities are spelled more than once in a launch file — the drone's
-        # name is both its ROS namespace and its mocap rigid body, and letting
+        # name is both its namespace and its mocap rigid body, and letting
         # those drift apart is how a trial records one drone while tracking
         # another.
         args: Dict[str, Any] = {}

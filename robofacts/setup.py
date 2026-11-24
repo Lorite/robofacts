@@ -16,34 +16,29 @@ def files_under(subdir: str) -> list:
             out.append(os.path.relpath(os.path.join(folder, name), package_name))
     return sorted(out)
 
+
 setup(
     name=package_name,
     version="0.1.0",
     packages=find_packages(exclude=["test", "test.*"]),
-    # Everything the package needs at run time that is not a .py file: the gate's
-    # check scripts and their bash helper, the web UI's templates, the stop and
-    # clean-slate tools, the experiment template and the shared config defaults.
+    # Everything the package needs at run time that is not a .py file: the gate's general
+    # check scripts and their bash helper, the stop tools and the templates.
     package_data={
         package_name: [
-            "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md",
-            "adapters/*/checks/*.sh", "adapters/*/*.yaml",
-            "ui/templates/*.html", "ui/static/*", "tools/*.sh",
+            "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md", "tools/*.sh",
             *files_under("skeleton"),
         ],
     },
     include_package_data=True,
-    data_files=[
-        ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
-        (f"share/{package_name}", ["package.xml"]),
-    ],
-    install_requires=["setuptools", "pyyaml", "numpy"],
-    extras_require={"ui": ["flask"], "test": ["pytest", "flask"]},
+    install_requires=["pyyaml"],
+    extras_require={"test": ["pytest"]},
     python_requires=">=3.10",
     zip_safe=False,
     maintainer="Alejandro Lorite Mora",
     maintainer_email="a.lorite.mora@gmail.com",
-    description="RoboFACTS, declarative experiment design for ROS 2 trials: campaigns, a T-0 gate, "
-                "a runner, a coverage index, a linter and named analyses.",
+    description="RoboFACTS, declarative experiment design for robot trials: campaigns, a T-0 gate, "
+                "a runner, a coverage index, a linter and named analyses. Python only: a backend "
+                "package supplies how a stack starts and how a trial is recorded.",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [

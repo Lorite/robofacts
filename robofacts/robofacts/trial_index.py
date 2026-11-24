@@ -83,7 +83,7 @@ NON_FACTOR_FIELDS = {
 #: An archive view (a copy of the trial records without the heavy recordings,
 #: such as the home server's) puts this file in a bag directory to say that the
 #: recording exists on a trial host: which host, which files, how many bytes.
-#: The trial then has bag data although no .mcap is in this copy.
+#: The trial then has recorded data although no data file is in this copy.
 RECORDINGS_ELSEWHERE = "recordings_elsewhere.json"
 
 

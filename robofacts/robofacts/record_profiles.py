@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Named ``ros2 bag record`` topic profiles, declared as data by the project.
+"""Named record profiles (lists of topics or other sources), declared as data by the project.
 
 A record profile is a named topic list. A trial picks one with a factor whose ``maps_to`` has
 ``kind: record_profile`` (or ``default_record_profile`` in ``trials.yaml``), and the runner
@@ -17,7 +17,7 @@ The format::
 
     blocks:                      # reusable topic groups
       drone_telemetry:
-        topics: ["/{cf_name}/pose", "/{cf_name}/battery", /tf, /rosout]
+        topics: ["/{cf_name}/pose", "/{cf_name}/battery", /tf, /log]
     profiles:
       flight:
         blocks: [drone_telemetry]
@@ -27,7 +27,7 @@ The format::
 A topic may hold ``{name}`` placeholders. They are filled from the names in force: the
 package's neutral ``DEFAULT_NAMES`` under the project's ``record_profiles:`` mapping in
 ``trials.yaml``. A profile's topic list keeps the order of its blocks and drops repeats.
-``ros2 bag record`` does not subscribe a topic that nobody publishes, so a profile may list
+A recorder skips a source that does not exist, so a profile may list
 optional topics.
 
 Use::

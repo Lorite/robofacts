@@ -3,7 +3,7 @@ small recorder stores what the system writes to its log files during the trial.
 
 It exists for two reasons. A system that is a set of processes and log files can use it as
 it is. And it is the second implementation of the two interfaces of
-:mod:`robofacts.backend`, so the trial loop is exercised without ROS.
+:mod:`robofacts.backend`, so the trial loop is exercised without any middleware.
 
 ``runner.yaml`` of an experiment on this backend::
 
@@ -39,8 +39,9 @@ class ProcessLauncher:
             raise BackendError(f"{path}: launch must be a mapping with a command")
         if launch.get("package") or launch.get("file"):
             raise BackendError(
-                f"{path}: launch.package and launch.file belong to the ROS 2 backend, and this "
-                f"project runs on the process backend. Add `backend: ros2` to trials.yaml, or "
+                f"{path}: launch.package and launch.file belong to another backend, and this "
+                f"project runs on the process backend. Name that backend in trials.yaml "
+                f"(`backend: <name>`, the package robofacts_<name>), or "
                 f"declare `launch: {{command: ...}}`")
         command = str(launch.get("command") or "").strip()
         if not command:

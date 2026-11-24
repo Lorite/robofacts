@@ -81,8 +81,8 @@ L15 a campaign's spoken cues (`voice_cues`, `voice_announce`, 2026-10-13) are
     or after runner.yaml's `action_timeout_s`: the runner stops the timeline
     when the action ends, so such a cue would never be spoken, and the
     operator who waits for it would wait in vain.
-The rules L2, L5, L11 and L16 are facts about ROS 2. They are in the ROS 2 package
-(robofacts_ros2/lint_ros2.py), and `trials lint` runs them for a project on that backend.
+The rules L2, L5, L11 and L16 are facts about one middleware. They ship with its backend
+(backend.Backend.lint_files), and `trials lint` runs them for a project on that backend.
 """
 from __future__ import annotations
 
@@ -116,6 +116,14 @@ RECORDING_PLACEHOLDERS = ("bag", "recording")
 # `trials lint --experiment <name>` (and `trials validate`) set this to lint ONE experiment.
 # The rules that read shared files (the record profiles, the core factors) still run.
 ENV_ONLY_EXPERIMENT = "TRIALS_LINT_EXPERIMENT"
+
+
+def not_paths(template: str) -> set:
+    """Tokens of a command that look like script paths but that the backend's launcher
+    resolves by itself (its optional method ``resolved_files``)."""
+    from . import backend
+    resolve = getattr(backend.active(EXPERIMENTS_ROOT).launcher, "resolved_files", None)
+    return set(resolve(template)) if resolve is not None else set()
 
 
 def experiments_with_runner() -> list[str]:
@@ -334,9 +342,9 @@ def test_commands_reference_scripts_that_exist(experiment):
                                                 or {}).get("setup_steps") or [])
                       if isinstance(step, dict)]
     for where, template in command_templates(config) + explore_templates(config) + campaign_setup:
-        # `ros2 launch <pkg> <file>.launch.py` names a launch file INSIDE a
-        # package, resolved by ament at run time — not a path in this repo.
-        launch_files = set(re.findall(r"ros2\s+launch\s+\S+\s+(\S+)", template))
+        # A launcher may resolve a file by itself (a launch file inside a package): such a
+        # token is not a path in this repository.
+        launch_files = set(not_paths(template))
         for token in re.findall(r"[\w./-]+\.(?:py|sh)", template):
             if token.startswith("/") or token in launch_files:
                 continue  # absolute container paths / package-resolved launch files

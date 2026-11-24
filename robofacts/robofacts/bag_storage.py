@@ -22,7 +22,7 @@ and the operator would find out at the end of a lab day. Hence:
   (``offload_bags --allow-same-filesystem`` to override, for a deliberate
   same-disk reorganisation)
 
-Nothing here imports ROS. It runs inside the dev container and equally on the
+Nothing here imports a middleware. It runs inside the dev container and equally on the
 bare rig host over ssh, which is what lets an offload happen without touching
 the running containers.
 """
@@ -57,7 +57,7 @@ RECORD_DIR_NAMES = ("bags", "bags_issues")
 #: self-describing exactly like ``slim_provenance.json`` is for a slim bag.
 MANIFEST_NAME = "offload_manifest.json"
 
-#: A bag directory being written by rosbag2, or a partial rsync, is never a
+#: A recording that is still being written, or a partial rsync, is never a
 #: candidate for offloading.
 UNSETTLED_SUFFIXES = (".active", ".tmp", ".partial")
 
@@ -222,7 +222,7 @@ def same_filesystem(a: Path, b: Path) -> bool:
 def bag_is_settled(bag_dir: Path, min_age_s: float = 60.0) -> Tuple[bool, str]:
     """Is this bag finished, or still being written?
 
-    A bag is settled when it has a ``metadata.yaml`` (rosbag2 writes it last),
+    A bag is settled when its recorder says it is finalized (Recorder.unsettled_reason),
     carries no ``*.active`` / ``*.tmp`` / ``*.partial`` file, and nothing in it
     has been touched for ``min_age_s``. Offloading a bag mid-recording would
     copy a truncated file and then, in move mode, delete the real one.
@@ -230,7 +230,7 @@ def bag_is_settled(bag_dir: Path, min_age_s: float = 60.0) -> Tuple[bool, str]:
     bag_dir = Path(bag_dir)
     if not bag_dir.is_dir():
         return False, "not a directory"
-    # The recorder says when a recording is finalized (for ROS 2: metadata.yaml exists).
+    # The recorder says when a recording is finalized.
     from . import backend
     unsettled = backend.active(bag_dir).recorder.unsettled_reason(bag_dir)
     if unsettled:
@@ -335,7 +335,7 @@ def read_manifest(dst: Path) -> Optional[Dict[str, Any]]:
 
 def human(n: float) -> str:
     """Size for humans. Same formatting as slim_bag.human, duplicated in three
-    lines rather than importing it, so this module stays ROS-free and importable
+    lines rather than importing it, so this module stays free of middleware and importable
     on a bare rig host."""
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if abs(n) < 1024.0:

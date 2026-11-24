@@ -471,7 +471,7 @@ class PreflightGate:
     def _remote_pythonpath(self) -> str:
         """This package's directory on the target, when it lives inside this checkout.
 
-        Run from a source tree (or a colcon install inside the checkout), the
+        Run from a source tree (or an install inside the checkout), the
         same relative path under target.workspace holds the target's copy, so
         the target runs the gate code of its own checkout. An installed package
         outside the checkout is found by the target's sourced workspace instead.

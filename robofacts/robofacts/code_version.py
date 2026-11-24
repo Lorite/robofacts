@@ -31,10 +31,10 @@ wrong, so the same ``docker exec`` path the bag verification uses asks the rig.
 ``captured_on`` records which host answered.
 
 **The build, not only the checkout (2026-10-14).** The container executes
-``install/``, not the source tree, so a commit made after the last ``colcon
-build`` is in the hash but not in the binaries. For every colcon workspace of
-the project (the ``colcon_workspaces`` setting of ``trials.yaml``, else ``.``
-and ``ros2_ws`` when they hold ``src/`` and ``install/``), the probe also
+``install/``, not the source tree, so a commit made after the last build is in
+the hash but not in the binaries. For every build workspace of the project (the
+``build_workspaces`` setting of ``trials.yaml``, else the backend's defaults,
+when they hold ``src/`` and ``install/``), the probe also
 records the HEAD of each source repository under ``src/`` that is its own git
 repository, and the time of the newest entry in ``install/``. A repository whose
 HEAD commit is newer than that build is listed in ``possibly_unbuilt``. The
@@ -121,7 +121,7 @@ def _script(workspace: str, workspaces: Sequence[str] = ()) -> str:
 
 
 def _workspace_script(workspaces: Sequence[str]) -> str:
-    """Lines ``ws=``, ``install=`` and ``src=`` for each colcon workspace (see the docstring).
+    """Lines ``ws=``, ``install=`` and ``src=`` for each build workspace (see the docstring).
 
     A directory under ``src/`` counts only when it is the top level of its own repository,
     so a package that lives in the project's own repository is covered by ``commit``.
@@ -146,9 +146,9 @@ def _workspace_script(workspaces: Sequence[str]) -> str:
 
 
 def workspaces_to_probe() -> List[str]:
-    """The colcon workspaces to describe, relative to the checkout.
+    """The build workspaces to describe, relative to the checkout.
 
-    ``colcon_workspaces`` in ``trials.yaml`` wins. Without it, ``.`` and ``ros2_ws`` are
+    ``build_workspaces`` in ``trials.yaml`` wins. Without it, the backend's defaults are
     tried, and the probe itself skips a candidate without ``src/`` and ``install/``.
     """
     from . import backend
@@ -299,7 +299,7 @@ def probe(target=None, workspace: Optional[Path] = None,
 
     ``target`` is a ``remote_exec_utils.RemoteTarget`` (the rig) or None for a
     local run. ``workspace`` defaults to the target's workspace remotely and to
-    this repo locally. ``builds=False`` skips the colcon workspaces.
+    this repo locally. ``builds=False`` skips the build workspaces.
     """
     if target is None:
         where = "local"

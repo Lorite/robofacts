@@ -1,4 +1,4 @@
-"""Run experiment ROS 2 commands on a remote NVIDIA Jetson via ssh + docker exec.
+"""Run experiment commands on a remote computer via ssh + docker exec.
 
 Pass `target=None` for local execution (behavior identical to plain subprocess).
 Pass a `RemoteTarget` to wrap each command as
@@ -45,32 +45,22 @@ class RemoteTarget:
         '-x',
     ))
     #: Further files to source after ros_setup and ws_setup, such as an overlay
-    #: workspace that is not part of ros2_ws (OpenVINS in ~/ov_ws, 2026-10-14).
+    #: workspace beside the project's own (an estimator in ~/ov_ws, 2026-10-14).
     env_setup: tuple[str, ...] = ()
 
 
-# pkill patterns for workspace-anchored ros2 processes, scoped by *kind* so a
+# pkill patterns for workspace-anchored processes, scoped by *kind* so a
 # recorder stop does not accidentally kill the main launch on the same host.
 #
-# ros2 launch/bag record/run have the workspace path in their *arguments*
-# (a config file or the bag directory under the workspace), so the command token
-# comes first: "ros2 launch.*{workspace}".
-#
-# What only a project knows comes from trials.yaml ``stop_patterns:``:
+# The backend's launcher supplies the patterns of its kinds (backend.Launcher.stop_patterns).
+# What only a project knows comes from trials.yaml ``stop_patterns:``, whose ``kinds`` are
+# extra kinds, regex templates with {workspace}:
 #
 #   stop_patterns:
-#     recorder_scripts: [record_my_bag]       # bash wrappers that exec ros2 bag record.
-#                                             # They carry the workspace in their path.
-#     owned_containers: [my_container]        # composable containers the project's launches
-#                                             # start. Their argv holds neither the workspace
-#                                             # nor "ros2 launch", so an orphan survives an
-#                                             # unclean shutdown and its detectors stack with
-#                                             # the next launch's. Matched by node name.
-#     kinds:                                  # extra kinds, regex templates with {workspace}
-#       my_subsystem: "ros2 launch.*my_subsystem"
+#     kinds:
+#       my_subsystem: "my_daemon.*{workspace}"
 #
-# The ROS 2 daemon (/usr/bin/python3 -c "from ros2cli.daemon…") is intentionally
-# NOT matched by any of these — never kill the daemon.
+# A backend may read further keys of that block (wrapper scripts, containers it owns).
 
 
 def _stop_settings() -> dict:
@@ -89,7 +79,7 @@ def _alternation(names: Iterable[str]) -> str:
 
 
 def _pkill_pattern_templates() -> dict[str, str]:
-    """The kinds in force: the backend launcher's (for ROS 2: all, recorder, launch) plus
+    """The kinds in force: the backend launcher's (all, recorder, launch) plus
     the project's ``stop_patterns.kinds``."""
     from . import backend
     settings = _stop_settings()
@@ -149,7 +139,7 @@ def start_background(
     The stack, the aux launches and the recorder used to inherit stdout
     directly, which put their output on the terminal of whoever started the
     runner and NOWHERE else — so the web UI showed a handful of runner prints
-    while the interesting half (ROS launch errors, node warnings) was visible
+    while the interesting half (launch errors, node warnings) was visible
     only to a terminal nobody was watching.
 
     Piping means someone MUST drain the pipe or the child blocks once the OS
@@ -252,7 +242,7 @@ def run_foreground(
 
 def remote_sh(target: RemoteTarget, script: str,
               timeout: float | None = None) -> subprocess.CompletedProcess:
-    """Run a plain /bin/sh snippet in the target container — no ROS sourcing.
+    """Run a plain /bin/sh snippet in the target container — no setup file sourced.
 
     Separate from `wrap_command` on purpose: these are small filesystem
     questions ("is there a bag here?", "what is checked out here?"), and
@@ -347,7 +337,7 @@ def _pkill_remote(target: RemoteTarget, pattern: str, sig: str) -> None:
 def _launch_file_pattern(proc: subprocess.Popen) -> str | None:
     """The launch-file token from ``proc.args``, pkill-ready, or None.
 
-    Package-form launches (``ros2 launch <pkg> <file>.launch.py``) carry no
+    Package-form launches (a launch file named inside a package) carry no
     workspace path in their remote argv, so the workspace-anchored templates
     alone cannot match them — a teardown that relies only on those templates
     leaves the whole remote stack running. The launch file name is the one
@@ -369,15 +359,15 @@ def pkill_workspace_launches(
     kind: str = 'all',
     extra: str | None = None,
 ) -> None:
-    """Kill workspace-anchored ros2 processes matching ``kind``.
+    """Kill workspace-anchored processes matching ``kind``.
 
     ``kind`` selects which processes get killed:
-      - ``'all'`` (default): every ros2 launch/run/bag record under workspace.
-      - ``'recorder'``: only ros2 bag record + the record_*_bag.sh wrappers.
-      - ``'launch'``: only ros2 launch / ros2 run (no bag recorders).
+      - ``'all'`` (default): every launch, run and recorder process under workspace.
+      - ``'recorder'``: only the recorder and the project's recorder wrappers.
+      - ``'launch'``: only the launch and run processes (no recorders).
       - any kind the project adds in trials.yaml ``stop_patterns.kinds``, for
         example nodes matched by executable name so reparented orphans of a dead
-        ``ros2 launch`` are reaped too.
+        launch are reaped too.
 
     Safe to call even when no Popen handle is available (e.g. after a kernel
     restart that lost ACTIVE_PROCESSES). The pkill pattern is anchored to
@@ -486,7 +476,7 @@ def stop_remote_process(
     """SIGINT -> SIGTERM -> SIGKILL on local PGID.
 
     When a remote target is set the local proc is just an SSH tunnel — the
-    actual ROS 2 process lives in the remote container and must be signalled
+    actual process lives in the remote container and must be signalled
     via pkill at each escalation level before (or instead of) touching the
     tunnel, otherwise only the tunnel dies and the remote process keeps running.
 
@@ -499,7 +489,7 @@ def stop_remote_process(
     an explicit ``workspace`` is passed: the process-group kill already covers
     the local tree, and a guessed anchor (the old ``Path(proc.args[0]).parent``
     fallback could resolve to ``'.'``) turns the pkill regex into a match-anything
-    pattern that kills every ros2 process on the machine.
+    pattern that kills every matching process on the machine.
     """
     t_int, t_term, t_kill = timeouts
     _t0 = time.monotonic()   # 2026-09-11: report how long each stop took (post-flight profiling)

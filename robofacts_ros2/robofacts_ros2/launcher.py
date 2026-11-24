@@ -59,6 +59,12 @@ class Ros2Launcher:
             cmd.append(f"{name}:={value}")
         return cmd
 
+    def resolved_files(self, template: str) -> set:
+        """The launch files that a command names as ``ros2 launch <pkg> <file>``: ament
+        resolves them inside a package at run time, so they are not paths of the project
+        (the lint's rule L7 asks)."""
+        return set(re.findall(r"ros2\s+launch\s+\S+\s+(\S+)", template))
+
     def stop_patterns(self) -> Dict[str, str]:
         """The three kinds of ROS 2 processes under a workspace, with what the project
         adds in trials.yaml ``stop_patterns:`` (``recorder_scripts``, wrappers that exec

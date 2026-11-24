@@ -21,7 +21,7 @@
 #   "altitude": "1.0",
 #   "_backfilled": {"altitude": {"value": "1.0", "recovered_at": "...",
 #                                "by": "...backfill_trial_metadata.py",
-#                                "source": "bag:/rosout",
+#                                "source": "bag:/log",
 #                                "evidence": ["[DroneAPI] ... altitude=1.00 m ...", ...],
 #                                "from_bag": "..."}}
 #
@@ -83,7 +83,7 @@ fields:
                a modified tree claims a reproducibility that does not exist. Absent
                means the trial predates the stamp; `dirty: null` means the probe could
                not answer, which is not the same claim as `dirty: false`. Since
-               2026-10-14 also `builds`: for each colcon workspace, the HEAD of every
+               2026-10-14 also `builds`: for each build workspace, the HEAD of every
                source repository under src/ and the newest install/ time, with
                `possibly_unbuilt` naming the repositories committed after that build.
                Since 2026-10-15 a probe that could not answer (`commit: null`) also

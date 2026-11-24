@@ -82,7 +82,7 @@ MAX_COPY_BYTES = 1_000_000
 #: under config/ that none names is copied but listed for review, because a launch file of a
 #: package outside the experiment may load it. An experiment also holds files that belong to
 #: its own history (an AGENTS.md, a design note such as GATE_LOG_TODO.md, the scripts and
-#: predictions of one study, a CycloneDDS file for one host), and a copy that keeps them
+#: predictions of one study, a network configuration file for one host), and a copy that keeps them
 #: describes the source.
 DECLARATIONS = ("config/factors.yaml", "config/trial_metadata_schema.yaml",
                 "config/preflight_checklist.json", "config/runner.yaml",
@@ -427,8 +427,8 @@ def main_init(argv: Optional[List[str]] = None) -> int:
                     help="the project root (default: the current directory)")
     ap.add_argument("--experiment", metavar="NAME", help="also create a first experiment")
     ap.add_argument("--backend", metavar="NAME", default=None,
-                    help="the backend the project runs on: process (built in), ros2 (the package "
-                         "robofacts_ros2), or a module (default: $TRIALS_BACKEND, else the one of "
+                    help="the backend the project runs on: process (built in), a name (the package "
+                         "robofacts_<name>), or a module (default: $TRIALS_BACKEND, else the one of "
                          "the project above this directory, else process)")
     args = ap.parse_args(argv)
     directory = args.directory.expanduser().resolve()

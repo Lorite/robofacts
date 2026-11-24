@@ -103,8 +103,8 @@ class RunnerConfig:
     experiment: str
     launch_package: str
     launch_file: str
-    #: "launch" -> `ros2 launch pkg file`, "run" -> `ros2 run pkg executable`.
-    #: Demos and single-node stacks are `ros2 run`; real experiments are launch
+    #: The three launch_* fields are the stack declaration of a backend that starts a
+    #: package's launch file or executable. Demos and single-node stacks run an executable; real experiments are launch
     #: files. Making it explicit beats guessing from the file extension.
     launch_mode: str = "launch"
     #: Explicit topic list, when the experiment does not use a named record
@@ -142,8 +142,10 @@ class RunnerConfig:
     metadata_probes: List[Dict[str, Any]] = field(default_factory=list)
     settle_s: float = 3.0
     stop_grace_s: float = 2.0
-    record_storage: str = "mcap"
-    #: Optional live-view side launch (e.g. foxglove_bridge), off by default —
+    #: The recorder's storage format (runner.yaml ``record_storage``). Empty means the
+    #: recorder's own default.
+    record_storage: str = ""
+    #: Optional live-view side launch (a viewer bridge), off by default —
     #: started only when the trial's steps enable it.
     livestream: str = ""
     #: The drone the record profiles name their topics after. None means the
@@ -191,7 +193,7 @@ class RunnerConfig:
     #: a dead swarm server kept the trial, and the recorder, open forever.
     action_timeout_s: Optional[float] = None
     #: The EXPLORE block (2026-10-16, explore.py): which parameters the explore
-    #: bridge may change from Foxglove, and where it listens. Empty means the
+    #: bridge may change from a viewer, and where it listens. Empty means the
     #: defaults, which explore.settings() decides from `simulation`: open in
     #: simulation, refused on hardware until this block is declared.
     explore: Dict[str, Any] = field(default_factory=dict)
@@ -281,7 +283,7 @@ class RunnerConfig:
         A runner inside the rig's container (``container_hostname``) or on a
         ``local: true`` host runs every command directly, so the host's setup
         files were never sourced: the runner's own environment applied, which
-        held ROS and ros2_ws but not an overlay such as OpenVINS in ~/ov_ws
+        held the base setup and the workspace but not an overlay such as an estimator in ~/ov_ws
         (2026-10-14). The files a host spec NAMES (``ros_setup``, ``ws_setup``,
         ``env_setup``) are now sourced locally too. Defaults are not: the
         runner's environment already holds them, and a host spec that names no
@@ -348,7 +350,7 @@ class RunnerConfig:
             metadata_probes=_metadata_probes(raw.get("metadata_probes"), path),
             settle_s=float(raw.get("settle_s", 3.0)),
             stop_grace_s=float(raw.get("stop_grace_s", 2.0)),
-            record_storage=str(raw.get("record_storage", "mcap")),
+            record_storage=str(raw.get("record_storage", "")),
             livestream=str(((raw.get("livestream") or {}).get("command", "")
                             if isinstance(raw.get("livestream"), dict)
                             else raw.get("livestream") or "")).strip(),
@@ -708,7 +710,7 @@ def action_command(trial: cs.TrialSpec, config: RunnerConfig,
     ``commanded_waypoints.json``, next to the bag it belongs to) and the
     resolved ``{arg_<name>}`` launch arguments. Added 2026-08-13 so the
     commanded reference of a goTo flight is recorded by the flight itself,
-    not only by the swarm server's /rosout log.
+    not only by the swarm server's log.
     """
     if not config.action:
         return []
@@ -721,7 +723,7 @@ def action_command(trial: cs.TrialSpec, config: RunnerConfig,
 
 #: Longest trial id we will emit. ext4 allows 255 BYTES per path component, and
 #: the id is a DIRECTORY whose contents are named after it - the recorder writes
-#: ``<id>_0.mcap`` inside, and the slim tier appends ``_slim`` - so the id itself
+#: ``<id>_0.<suffix>`` inside, and the slim tier appends ``_slim`` - so the id itself
 #: must leave room. 200 is that, with headroom.
 #:
 #: This is not hypothetical tidiness. On 2026-08-19 three new factors
@@ -888,7 +890,7 @@ def voice_target_line() -> str:
 # --------------------------------------------------------------------------- #
 @dataclass
 class ProcessHooks:
-    """The three process primitives, injectable so tests need no ROS.
+    """The three process primitives, injectable so tests need no real stack.
 
     Defaults come from remote_exec_utils, which already encodes the hard-won
     behaviour: process groups via os.setsid, SIGINT -> SIGTERM -> SIGKILL
@@ -941,7 +943,7 @@ class TrialResult:
 
 
 #: Trial phases an operator may toggle per run. All on by default except the
-#: livestream (foxglove_bridge costs bandwidth on the lab Wi-Fi). Turning a
+#: livestream (a viewer bridge costs bandwidth on the lab Wi-Fi). Turning a
 #: phase off changes what the trial MEANS — a record-off trial can never count
 #: as coverage — so the toggles are explicit here, not hidden in the config.
 DEFAULT_STEPS = {"setup": True, "launch": True, "record": True,
@@ -1061,7 +1063,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
       gate -> launch (background) -> settle -> record (background)
            -> action (foreground) -> STOP RECORDER FIRST -> stop stack -> slim
 
-    Stopping the recorder before the stack is not cosmetic: rosbag2 needs to
+    Stopping the recorder before the stack is not cosmetic: the recorder needs to
     finalize, and tearing the stack down first has produced truncated bags.
     Teardown lives in a ``finally`` so a crashing action still closes the bag
     rather than leaving an orphaned recorder holding the file.
@@ -1111,7 +1113,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     if local_env is not None:
         hooks = hooks.with_local_setup(*local_env)
     steps = {**DEFAULT_STEPS, **(steps or {})}
-    #: The backend's word for one recording in what the runner prints ("bag" for ROS 2).
+    #: The backend's word for one recording in what the runner prints.
     noun = config.backend().recorder.noun
 
     # SCRATCH FLIGHT (2026-08-12): scratch_label is not None means this is an
@@ -1326,7 +1328,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                        values=trial.values)
     if dry_run:
         # A dry run previews commands; there is no stack to check and the gate
-        # bounces the ros2 daemon, so running it here would be a side effect.
+        # may restart a middleware daemon, so running it here would be a side effect.
         # The voice plan is printed, never sent.
         if operator_steps:
             print(f"[dry-run] operator steps of this {'repeat' if repeat else 'first'} trial "
@@ -1615,7 +1617,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                                            "nothing was recorded or flown", commands)
 
         if record_cmd and external_record:
-            # rosbag2 creates its own output directory but not the parents of
+            # A recorder creates its own output directory but not the parents of
             # one. On external storage the parents are <root>/<experiment>/bags,
             # which on a freshly mounted disk do not exist yet, and the recorder
             # would print one line and produce nothing.
@@ -1751,7 +1753,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # as it always has: bag_has_data, the verify steps, trial_metadata.json, the
     # slim copy (which must stay in the repo, since fetch_slim_bags.sh pulls
     # experiments/*/bags_slim/) and trial_index's coverage glob. The link is
-    # created AFTER recording because rosbag2 refuses an output path that
+    # created AFTER recording because a recorder may refuse an output path that
     # already exists.
     if external_record:
         link = bags_dir / bag_dir.name
@@ -1906,9 +1908,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     _ctx["metadata"] = {"aborted": metadata.get("aborted"),
                         "abort_reason": metadata.get("abort_reason")}
 
-    # What the recorder does with a finished recording (for ROS 2: rosout.txt beside the
-    # bag, then a slim, transferable copy and the trial's stills). Never fatal: the trial
-    # has happened.
+    # What the recorder does with a finished recording (a text export, a reduced copy).
+    # Never fatal: the trial has happened.
     try:
         config.backend().recorder.after_trial(bag_dir, target, hooks, cwd, reduced=slim)
     except Exception as exc:  # noqa: BLE001
@@ -2006,7 +2007,12 @@ def failure_report(record: Dict[str, Any]) -> Optional[str]:
               f"- Run log: `runs/{label}.log`",
               f"- Ledger line: `runs/{ATTEMPT_LEDGER_NAME}`, ts_start {record.get('ts_start')}"]
     if bag:
-        lines += [f"- Bag: `{bag}`, with `trial_metadata.json` and `rosout.txt` beside it "
+        try:
+            recorder = backends.active().recorder
+            noun, extra = recorder.noun.capitalize(), getattr(recorder, "sidecar_note", "")
+        except backends.BackendError:
+            noun, extra = "Recording", ""
+        lines += [f"- {noun}: `{bag}`, with `trial_metadata.json`{extra} beside it "
                   f"(on the host that recorded it)"]
     elif status == "blocked":
         lines += [f"- Gate log: `runs/preflight_gate.jsonl`, and `bags/{label}/gate_refusal.json` "

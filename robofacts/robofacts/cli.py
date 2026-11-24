@@ -2,7 +2,6 @@
 
     trials plan    experiments/<exp>/campaigns/<c>.yaml   what the campaign still needs
     trials run     experiments/<exp>/campaigns/<c>.yaml   dry run; --execute runs the trials
-    trials explore experiments/<exp>/campaigns/<c>.yaml   one condition's stack, live in Foxglove, never coverage
     trials index   --experiment <exp> --summary            the coverage index
     trials records <exp> [--campaign <c>] [--status <s>]   every trial with its bag, gate, analyses, video
     trials exclude <exp> <trial> --reason ... --category c  move a trial out of coverage, with its reason
@@ -17,7 +16,7 @@
     trials ui                                              the web interface
 
 Every subcommand takes ``--experiments-root`` (see ``trials roots``). The same
-commands work as ``ros2 run robofacts trials <subcommand>``.
+commands work wherever the package is installed. A backend may add commands of its own.
 """
 from __future__ import annotations
 

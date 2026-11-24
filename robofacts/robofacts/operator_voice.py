@@ -5,7 +5,7 @@ The laptop speaks, the trial runner does not: the runner lives in a dev
 container without audio (on the laptop or on the Orin), so a cue travels as one
 UDP datagram to ``scripts/operator_voice_daemon.py`` on the laptop host, which
 speaks it with ``spd-say``. This module is the sending half, stdlib only and
-ROS-free, importable by every framework script.
+Free of middleware, importable by every framework script.
 
 Two promises the trial depends on:
 

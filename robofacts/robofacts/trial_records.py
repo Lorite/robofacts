@@ -12,7 +12,6 @@ about this trial", and the answer is spread over six places on disk:
 * the run log with the verify steps' lines (``runs/<bag>.log``),
 * the analyses that included it (``results/*/analysis_metadata.json``, whose
   ``bags`` list names the exact bag set) and the videos inside those folders,
-* the experiment's Foxglove layout (``config/foxglove*.json``).
 
 This module joins them once. ``trials records <exp>`` prints the result, and the
 web UI renders the same records, so the UI never computes an answer the command
@@ -69,7 +68,7 @@ STATUS_MEANING = {
     "aborted": "excluded: the trial did not finish (aborted: true)",
     "quarantined": "excluded by a person: in bags_issues, with the reason in its exclusion.json "
                    "(trials exclude)",
-    "no-data": "excluded: the directory holds no .mcap or .db3",
+    "no-data": "excluded: the directory holds no recorded data",
     "scratch": "excluded: a scratch recording (--scratch), a diagnostic, replayable, never coverage",
     "blocked": "an attempt the gate refused (NO-GO): no trial, nothing recorded",
     "failed": "an attempt that failed before a trial_metadata.json was written: no trial",
@@ -460,23 +459,6 @@ def _associate_results(folders: List[Dict[str, Any]], names: Iterable[str]
 
 
 # --------------------------------------------------------------------------- #
-# Layouts
-# --------------------------------------------------------------------------- #
-def foxglove_layouts(experiments_root: Path) -> Dict[str, List[Path]]:
-    """The Foxglove layouts each experiment ships: ``experiments/<exp>/config/foxglove*.json``.
-
-    A convention, not a schema: any JSON exported from Foxglove (Layouts -> Export)
-    whose name starts with ``foxglove`` (case does not matter) belongs to the bags
-    of its experiment.
-    """
-    out: Dict[str, List[Path]] = {}
-    for f in sorted(Path(experiments_root).glob("*/config/*.json")):
-        if f.name.lower().startswith("foxglove"):
-            out.setdefault(f.parents[1].name, []).append(f)
-    return out
-
-
-# --------------------------------------------------------------------------- #
 # The join
 # --------------------------------------------------------------------------- #
 def _started(name: str, ledger_row: Optional[Dict[str, Any]]) -> str:
@@ -492,9 +474,17 @@ def _started(name: str, ledger_row: Optional[Dict[str, Any]]) -> str:
 def _slim_for(exp_dir: Path, name: str, roots_: Iterable[str]) -> Optional[Path]:
     for root_name in roots_:
         candidate = exp_dir / root_name / f"{name}_slim"
-        if candidate.is_dir() and any(candidate.glob("*.mcap")):
+        if candidate.is_dir() and ti.recording_holds_data(candidate):
             return candidate
     return None
+
+
+def _data_name(directory: Path) -> str:
+    """What the project's recorder calls its data files, for a message."""
+    try:
+        return str(getattr(ti._recorder_at(str(Path(directory).parents[2])), "data_name", "recorded data"))
+    except Exception:  # noqa: BLE001 - a message never breaks a listing
+        return "recorded data"
 
 
 def _status_of(trial: ti.Trial) -> Tuple[str, str]:
@@ -515,7 +505,7 @@ def _status_of(trial: ti.Trial) -> Tuple[str, str]:
         return "quarantined", ("in bags_issues without an exclusion.json: moved by hand, no reason "
                                "recorded (`trials exclude` adds one in place)")
     if not trial.has_bag_data:
-        return "no-data", "no .mcap or .db3 in the bag directory: nothing to analyse"
+        return "no-data", f"no {_data_name(trial.bag_dir)} in the bag directory: nothing to analyse"
     return "scratch", "carries scratch: true, so it never counts"
 
 
@@ -658,9 +648,9 @@ def _scratch_records(root: Path, experiment: str, factors: List[str],
             if not d.is_dir():
                 continue
             if d.name.endswith("_slim"):
-                if any(d.glob("*.mcap")):
+                if ti.recording_holds_data(d):
                     names.setdefault(d.name[:-len("_slim")], {})["slim"] = d
-            elif ((d / "trial_metadata.json").is_file() or any(d.glob("*.mcap"))
+            elif ((d / "trial_metadata.json").is_file() or ti.recording_holds_data(d)
                   or (d / ti.RECORDINGS_ELSEWHERE).is_file()):
                 names.setdefault(d.name, {})["full"] = d
     out = []
@@ -917,7 +907,7 @@ def main(argv=None) -> int:
     ap.add_argument("--stills", action="store_true",
                     help="also make the stills and the camera video of the camera that "
                          "config/trial_media.yaml declares, for the records listed whose bag "
-                         "records it (needs ROS and cv2, cached under runs/camera/)")
+                         "records it (needs the backend's reader and cv2, cached under runs/camera/)")
     ap.add_argument("--force", action="store_true",
                     help="with --stills: make them again even when the cache is current")
     args = ap.parse_args(argv)
