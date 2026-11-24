@@ -1,0 +1,21 @@
+# The factors of the demo: the axes a campaign may vary.
+version: 1
+
+factors:
+  rate:
+    describe: >-
+      How fast the system writes to its log. The stack is started with this level, so it is
+      a property of the system under test.
+    levels: [slow, fast]
+    default: slow
+    metadata_key: rate
+    maps_to: {kind: internal}
+
+  duration:
+    describe: >-
+      How long one trial lets the system run. The action is started with this level, so it
+      is a property of the procedure.
+    levels: [short, long]
+    default: short
+    metadata_key: duration
+    maps_to: {kind: internal}

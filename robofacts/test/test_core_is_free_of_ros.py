@@ -11,6 +11,7 @@ another backend is named.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -117,7 +118,11 @@ def test_every_module_of_the_core_imports_in_a_process_without_ros():
         "    importlib.import_module(name)\n"
         "loaded = sorted(m for m in sys.modules if pattern.match(m.split('.')[0]))\n"
         "print('LOADED:' + ','.join(loaded))\n")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    # The lint module resolves an experiments root when it is imported: the example's.
+    env = {**os.environ, "TRIALS_EXPERIMENTS_ROOT": str(PROJECT / "example_project" / "experiments"),
+           "TRIALS_PROJECT_ROOT": str(PROJECT / "example_project")}
+    env.pop("PYTHONPATH", None)
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr[-2000:]
     loaded = out.stdout.strip().rsplit("LOADED:", 1)[-1]
     assert loaded == "", f"importing the core loaded ROS modules: {loaded}"

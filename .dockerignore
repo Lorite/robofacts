@@ -3,3 +3,6 @@
 robofacts_ros2/example_project/experiments/*/bags/*/
 robofacts_ros2/example_project/experiments/*/runs
 robofacts_ros2/example_project/experiments/*/results
+robofacts/example_project/experiments/*/bags/*/
+robofacts/example_project/experiments/*/runs
+robofacts/example_project/experiments/*/results

@@ -16,6 +16,8 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 
+#: The example project of this package: the project in force for these tests.
+EXAMPLE_PROJECT = PACKAGE_ROOT / "example_project"
 #: The ROS 2 package's example project, for the tests marked ``ros2``.
 ROS2_EXAMPLE = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 
@@ -28,8 +30,11 @@ def _project_environment(request, monkeypatch):
     declare a ROS 2 stack or hold bags). It runs with that backend and the ROS 2 example
     project in force, and it is skipped where the package robofacts_ros2 is not installed,
     which is the case in the job that tests the core alone."""
-    for name in ("TRIALS_EXPERIMENTS_ROOT", "TRIALS_PROJECT_ROOT", "TRIALS_BACKEND"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("TRIALS_BACKEND", raising=False)
+    # The project in force is this package's example, never one that happens to lie above
+    # the working directory. A test with its own project sets the two variables itself.
+    monkeypatch.setenv("TRIALS_EXPERIMENTS_ROOT", str(EXAMPLE_PROJECT / "experiments"))
+    monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(EXAMPLE_PROJECT))
     if request.node.get_closest_marker("ros2") is None:
         return
     pytest.importorskip("robofacts_ros2")

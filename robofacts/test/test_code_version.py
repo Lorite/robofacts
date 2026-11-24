@@ -27,6 +27,9 @@ def _clean_cache():
     yield
     cv.reset_cache()
 
+#: These tests build small git repositories: without git they cannot run.
+pytestmark = pytest.mark.skipif(__import__("shutil").which("git") is None, reason="needs git")
+
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:

@@ -13,7 +13,16 @@ The dependency goes one way. `robofacts/test/test_core_is_free_of_ros.py` fails 
 
 ## Quickstart: the whole loop in one command
 
-With Docker, from this directory:
+Without ROS, with Python 3.10 or newer:
+
+```bash
+pip install ./robofacts
+./robofacts/quickstart.sh
+```
+
+`robofacts/quickstart.sh` runs, on the example project `robofacts/example_project`, the linter, the planner, a dry run, the four trials of a campaign that sweeps two factors (gate, trial, recording, verify step, metadata) and the coverage index, which then lists the four cells with one usable trial each. The example's "system under test" is a script that appends lines to a log file, the recorder stores what it writes during a trial, and nothing needs a robot or a middleware.
+
+With ROS 2 and Docker, from this directory:
 
 ```bash
 docker build -t trials-quickstart -f docker/Dockerfile .
@@ -204,7 +213,7 @@ python3 -m pytest -q robofacts_ros2/test robofacts/test        # both packages, 
 ./quickstart.sh                                                # with ROS 2 Humble sourced and both packages installed
 ```
 
-`robofacts/test` runs with the general package alone. Its tests that exercise the core together with the ROS 2 backend are marked `ros2` and are skipped where `robofacts_ros2` is not installed. `robofacts_ros2/test` runs against `robofacts_ros2/example_project/`. `.github/workflows/ci.yaml` has three jobs: `core-no-ros` installs only `robofacts` on a plain Python image, runs its tests and runs a generated project from plan to coverage index. `colcon-humble` builds both packages on `ros:humble`, runs both test suites and the example campaign. `docker-image` builds the quickstart image.
+`robofacts/test` runs with the general package alone. Its tests that exercise the core together with the ROS 2 backend are marked `ros2` and are skipped where `robofacts_ros2` is not installed. `robofacts/test` runs against `robofacts/example_project/`, and `robofacts_ros2/test` against `robofacts_ros2/example_project/`. `.github/workflows/ci.yaml` has three jobs: `core-no-ros` installs only `robofacts` on a plain Python image (`python:3.10-slim`, where the tests that need git are skipped), runs its tests, runs the example with `robofacts/quickstart.sh` from plan to coverage index, and does the same with a generated project. `colcon-humble` builds both packages on `ros:humble`, runs both test suites and the example campaign. `docker-image` builds the quickstart image.
 
 ## License
 

@@ -1,0 +1,32 @@
+# How to run one trial of the demo, on the process backend.
+#
+# No robot and no middleware: its trials count in the `simulation` domain of the coverage
+# view, which means "no hardware involved".
+simulation: true
+
+# The stack: one command that runs until the runner stops it. It stands in for the system
+# under test and writes its log to runs/system.log.
+launch:
+  command: "python3 experiments/demo_log_recorder/scripts/system.py --rate {rate} --log experiments/demo_log_recorder/runs/system.log"
+
+# What to record: the files whose new lines the recorder stores during the trial.
+record_sources: [experiments/demo_log_recorder/runs/system.log]
+
+# The one foreground command that IS the trial.
+action:
+  command: "python3 experiments/demo_log_recorder/scripts/run_trial.py --duration {duration}"
+
+settle_s: 0.5
+stop_grace_s: 0.5
+
+# A check of the RECORDING after the recorder stopped ({recording} is its directory). The
+# action exits 0 even when the system never wrote a line, so only the recording shows that
+# the trial happened. A non-zero exit marks the trial aborted, and it does not count.
+verify_steps:
+  - name: log_was_recorded
+    command: "python3 experiments/demo_log_recorder/scripts/verify_log.py {recording} --rate {rate} --min-lines 3"
+
+hosts:
+  # The level of the execution_host factor that runs the trial on this machine.
+  laptop:
+    local: true

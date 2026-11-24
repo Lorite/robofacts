@@ -14,43 +14,62 @@ from pathlib import Path
 import pytest
 import yaml
 
-from robofacts import lint, scaffold
+from robofacts import scaffold
 
 PACKAGE = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module")
+def lint():
+    """The lint module. It resolves an experiments root when it is imported (pytest builds
+    its cases then), so it is imported here with the example project as the root, not at
+    the top of this file, where no project may be in sight."""
+    saved = {name: os.environ.get(name) for name in ("TRIALS_EXPERIMENTS_ROOT", "TRIALS_PROJECT_ROOT")}
+    os.environ["TRIALS_EXPERIMENTS_ROOT"] = str(PACKAGE / "example_project" / "experiments")
+    os.environ["TRIALS_PROJECT_ROOT"] = str(PACKAGE / "example_project")
+    try:
+        from robofacts import lint as module
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return module
 STEP = [{"name": "moved", "command": "python3 check.py {bag}"}]
 
 
-def test_a_verify_step_satisfies_the_rule():
+def test_a_verify_step_satisfies_the_rule(lint):
     assert lint.verify_step_problem({"verify_steps": STEP}) is None
 
 
-def test_no_verify_step_and_no_reason_is_a_problem_whatever_the_action_says():
+def test_no_verify_step_and_no_reason_is_a_problem_whatever_the_action_says(lint):
     for action in ("python3 fly_trajectory.py", "python3 drive_route.py", "python3 listen.py", ""):
         raw = {"action": {"command": action}} if action else {}
         problem = lint.verify_step_problem(raw)
         assert problem and "declares no verify_steps" in problem and lint.NO_VERIFY_KEY in problem
 
 
-def test_an_empty_list_is_no_verify_step():
+def test_an_empty_list_is_no_verify_step(lint):
     assert lint.verify_step_problem({"verify_steps": []})
 
 
-def test_a_written_reason_satisfies_the_rule():
+def test_a_written_reason_satisfies_the_rule(lint):
     assert lint.verify_step_problem({lint.NO_VERIFY_KEY: "a bench recording, nothing moves"}) is None
 
 
 @pytest.mark.parametrize("reason", [True, "", "   ", None, 0, ["because"]])
-def test_a_reason_must_be_a_sentence(reason):
+def test_a_reason_must_be_a_sentence(lint, reason):
     problem = lint.verify_step_problem({lint.NO_VERIFY_KEY: reason})
     assert problem and "must be a sentence" in problem
 
 
-def test_verify_steps_and_a_reason_together_contradict():
+def test_verify_steps_and_a_reason_together_contradict(lint):
     problem = lint.verify_step_problem({"verify_steps": STEP, lint.NO_VERIFY_KEY: "not needed"})
     assert problem and "together" in problem
 
 
-def test_the_rule_names_no_kind_of_robot():
+def test_the_rule_names_no_kind_of_robot(lint):
     """The rule must not depend on what the robot is: no flight word decides it."""
     source = Path(lint.__file__).read_text(encoding="utf-8")
     body = source[source.index("def verify_step_problem"):source.index("def test_commands_reference_scripts_that_exist")]
@@ -66,7 +85,7 @@ def _lint(project: Path, experiment: str) -> subprocess.CompletedProcess:
         env={**os.environ, "PYTHONPATH": str(PACKAGE)})
 
 
-def test_the_lint_fails_a_generated_experiment_that_loses_its_verify_steps(tmp_path):
+def test_the_lint_fails_a_generated_experiment_that_loses_its_verify_steps(lint, tmp_path):
     """End to end on a generated project: pass as generated, fail without verify steps,
     pass again with a written reason."""
     project = tmp_path / "proj"

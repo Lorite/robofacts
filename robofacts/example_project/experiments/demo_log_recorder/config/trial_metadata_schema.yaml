@@ -1,0 +1,23 @@
+# The metadata contract of the demo, on top of the project's core contract. A field with
+# `factor: true` is a coverage axis: the index groups the trials by it.
+version: 1
+
+fields:
+  rate:
+    required: true
+    type: str
+    factor: true
+    enum: [slow, fast]
+    describe: "The level of the rate factor this trial ran at."
+  duration:
+    required: true
+    type: str
+    factor: true
+    enum: [short, long]
+    describe: "The level of the duration factor this trial ran at."
+  record_profile:
+    required: false
+    type: str
+    factor: true
+    enum: [custom]
+    describe: "The demo lists what it records in runner.yaml (record_sources)."

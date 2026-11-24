@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "The T-0 gate of the demo: two general checks and one operator confirmation.",
+    "A check is a script that prints PASS, FAIL or SKIP and exits 0, 1 or 3."
+  ],
+  "variables": {},
+  "checklist": [
+    {
+      "text": "Enough disk for the recording.",
+      "check": "disk_space",
+      "args": {
+        "path": ".",
+        "min_gb": "0.1"
+      }
+    },
+    {
+      "text": "[HARD] The recording directory is writable on the machine that records.",
+      "check": "bag_dir_writable",
+      "args": {
+        "path": "experiments/demo_log_recorder/bags",
+        "label": "recordings"
+      }
+    },
+    "Operator: the system and the recording are the ones this trial declares."
+  ]
+}

@@ -1,0 +1,9 @@
+# The project file of the robofacts framework. `trials` commands run
+# from anywhere below this directory find the experiments through it.
+experiments_root: experiments
+project_root: .
+
+# How the stack starts and how a trial is recorded. `process` is the built-in backend: a
+# shell command starts the stack, and a recorder stores what the system appends to its log
+# files. Another name loads the package robofacts_<name>.
+backend: process

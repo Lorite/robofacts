@@ -1,0 +1,10 @@
+name: grid
+experiment: demo_log_recorder
+describe: >-
+  Sweep two factors, so the coverage index shows a grid of four cells that fills in as the
+  trials run. Nothing moves: this is the worked example and the smoke test of the general
+  package.
+repetitions: 1
+sweep:
+  rate: [slow, fast]
+  duration: [short, long]

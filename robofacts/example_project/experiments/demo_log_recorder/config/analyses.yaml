@@ -1,0 +1,8 @@
+# The named analyses of the demo: repeatable computations over a cohort of usable trials.
+analyses:
+  line_count:
+    describe: "How many lines each recording holds, as a JSON file per recording."
+    per: bag
+    command: >-
+      python3 experiments/demo_log_recorder/scripts/verify_log.py {recording}
+      --min-lines 0 --json {results}/line_count.json

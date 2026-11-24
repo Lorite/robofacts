@@ -11,7 +11,8 @@ import pytest
 HERE = Path(__file__).resolve().parent
 
 from robofacts import trial_metadata_schema as tms
-EXPERIMENTS_ROOT = HERE.parents[1]
+#: The experiments of this package's example project (the "shipped" declarations).
+EXPERIMENTS_ROOT = HERE.parent / "example_project" / "experiments"
 
 GOOD = {"trial_id": "t1", "execution_host": "orin", "aborted": False}
 

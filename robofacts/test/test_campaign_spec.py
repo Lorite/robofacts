@@ -10,7 +10,8 @@ import pytest
 HERE = Path(__file__).resolve().parent
 
 from robofacts import campaign_spec as cs
-EXPERIMENTS_ROOT = HERE.parents[1]
+#: The experiments of this package's example project (the "shipped" declarations).
+EXPERIMENTS_ROOT = HERE.parent / "example_project" / "experiments"
 
 CORE = """
 version: 1

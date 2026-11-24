@@ -60,6 +60,22 @@ sys.exit(0 if len(lines) >= minimum else 1)
 '''
 
 
+def leftover_processes(pattern: str) -> str:
+    """Command lines of the processes that match ``pattern`` (read from /proc, so the test
+    needs no pgrep, which a plain Python image does not have)."""
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        except OSError:
+            continue
+        if command and re.search(pattern, command) and "pytest" not in command:
+            found.append(command)
+    return "\n".join(found)
+
+
 def write_project(root: Path, *, min_lines: int = 3, with_stack: bool = True) -> Path:
     """A project on the process backend with one experiment, ``plant``. Returns the
     experiments root."""
@@ -290,8 +306,7 @@ def test_a_campaign_runs_from_plan_to_coverage_index_without_ros(project, capsys
     plan = cp.build_plan(campaign, trials, False)
     assert not list(cp.execution_order(plan)), "the campaign is covered"
     # The stack was stopped: no plant process of this project is left.
-    left = subprocess.run(["pgrep", "-f", str(project.parent) + ".*plant.py"], capture_output=True, text=True)
-    assert left.stdout.strip() == "", left.stdout
+    assert leftover_processes(str(project.parent) + ".*plant.py") == ""
 
 
 @pytest.mark.real_sleep

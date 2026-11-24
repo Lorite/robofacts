@@ -31,7 +31,12 @@ jobs:
           python -c "import importlib.util as u; assert u.find_spec('robofacts_ros2') is None and u.find_spec('rclpy') is None"
       - name: The core's tests, with the test that keeps the core free of ROS
         run: cd robofacts && python -m pytest -q -p no:cacheprovider test
-      - name: A generated project runs a campaign from plan to coverage index, without ROS
+      - name: The example runs from plan to coverage index (linter, planner, gate, four trials, verify step, index)
+        run: |
+          ./robofacts/quickstart.sh | tee /tmp/quickstart.txt
+          grep -q "wanted 4 · covered 4 · STILL MISSING 0" /tmp/quickstart.txt
+          grep -q "demo_log_recorder  (4 trials, 4 usable)" /tmp/quickstart.txt
+      - name: A generated project does the same
         run: |
           cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
           trials lint
