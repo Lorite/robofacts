@@ -258,9 +258,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if name not in table:
         print(f"trials: unknown command {name!r}\n\n{_usage()}", file=sys.stderr)
         return 2
+    from . import backend
     try:
         return int(table[name][0](rest) or 0)
-    except roots.RootNotFound as exc:
+    except (roots.RootNotFound, backend.BackendError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

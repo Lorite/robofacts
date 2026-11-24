@@ -340,3 +340,19 @@ def test_the_recording_directory_has_two_placeholder_names():
     assert tr.recording_placeholders("/r/t1") == {"bag": "/r/t1", "recording": "/r/t1"}
     # A project's own factor called `recording` keeps its placeholder.
     assert tr.recording_placeholders("/r/t1", {"recording": "x"}) == {"bag": "/r/t1"}
+
+
+def test_the_index_and_the_planner_refuse_a_project_on_the_wrong_backend(project, capsys):
+    """Without this, a project that forgot its `backend:` line would read as a project
+    without trials: the recorder of the wrong backend finds no data in any recording."""
+    from robofacts import cli
+    runner = project / "plant" / "config" / "runner.yaml"
+    text = runner.read_text(encoding="utf-8")
+    runner.write_text(text[:text.index("launch:")] + "launch: {package: some_pkg, file: stack.launch.py}\n"
+                      + text[text.index("action:"):], encoding="utf-8")
+    with pytest.raises(backend.BackendError, match="belong to another backend"):
+        ti.load_trials(project, "plant")
+    for argv in (["index", "--experiments-root", str(project), "--summary"],
+                 ["plan", str(project / "plant" / "campaigns" / "rates.yaml"), "--experiments-root", str(project)]):
+        assert cli.main(argv) == 2
+        assert "belong to another backend" in capsys.readouterr().err

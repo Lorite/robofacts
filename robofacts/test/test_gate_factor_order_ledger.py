@@ -298,6 +298,7 @@ def test_a_dry_run_writes_no_ledger_line(root):
     assert not (root / "expE" / "runs" / "attempts.jsonl").exists()
 
 
+@pytest.mark.ros2
 def test_the_ledger_is_never_read_by_coverage(root):
     """Coverage stays faithful: the index reads bags, not the ledger."""
     from robofacts import trial_index as ti

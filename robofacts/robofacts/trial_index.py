@@ -192,6 +192,34 @@ class Trial:
 # --------------------------------------------------------------------------- #
 # Loading
 # --------------------------------------------------------------------------- #
+def refuse_another_backends_stack(experiments_root: Optional[Path] = None,
+                                  experiment: Optional[str] = None) -> None:
+    """Raise backend.BackendError when an experiment declares the stack of another backend
+    than the one in force.
+
+    The recorder of the backend says what recorded data is. Under the wrong backend every
+    recording would read as empty, and the index and the planner would report a project
+    without trials instead of an error. The usual cause is a ``trials.yaml`` without its
+    ``backend:`` line, so the launcher's own refusal, which names that line, is raised here."""
+    import yaml
+
+    from . import backend
+    root = roots.experiments_root(experiments_root)
+    names = [experiment] if experiment else sorted(p.parent.parent.name
+                                                   for p in root.glob("*/config/runner.yaml"))
+    launcher = backend.active(root).launcher
+    for name in names:
+        path = root / name / "config" / "runner.yaml"
+        if not path.is_file():
+            continue
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue   # a broken file is reported by the commands that read it
+        if isinstance(raw, dict):
+            launcher.parse(raw, path)
+
+
 def load_trials(experiments_root: Optional[Path] = None,
                 experiment: Optional[str] = None,
                 validate: bool = True) -> List[Trial]:
@@ -210,6 +238,7 @@ def load_trials(experiments_root: Optional[Path] = None,
     # from the laptop UI could never appear in the laptop's own coverage view
     # (2026-07-29, first runner flight).
     experiments = [experiment] if experiment else None
+    refuse_another_backends_stack(experiments_root, experiment)
     trials: List[Trial] = []
     meta_paths = []
     # An ALLOW-LIST, deliberately, not a bags* glob: the runner's --scratch

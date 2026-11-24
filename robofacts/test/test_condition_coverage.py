@@ -131,6 +131,7 @@ def test_the_runner_knows_whether_simulation_was_declared(root):
 # --------------------------------------------------------------------------- #
 # Older trials: a derived domain, or unknown
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_recorded_then_derived_then_unknown(root):
     _bag(root, "simexp", "a", {"lighting": "dark", "domain": "simulation"})
     _bag(root, "hwexp", "b", {"lighting": "lights_on", "backend": "sim"})
