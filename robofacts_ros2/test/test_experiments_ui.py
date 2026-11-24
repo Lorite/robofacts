@@ -20,7 +20,8 @@ UI_DIR = HERE.parent / "ui"
 
 pytest.importorskip("flask", reason="the UI needs Flask (present in the dev container)")
 
-from robofacts_ros2.ui import app as ui  # noqa: E402
+from robofacts.ui import app as ui  # noqa: E402
+from robofacts_ros2 import ui_extension as ui_ext  # noqa: E402
 
 PASSWORD = "hunter2"
 
@@ -539,7 +540,7 @@ def test_the_stop_endpoint_cannot_run_arbitrary_commands(client, monkeypatch):
 # Deep links and defaults
 # --------------------------------------------------------------------------- #
 def test_foxglove_link_is_a_remote_file_deep_link():
-    link = ui.foxglove_link("http://localhost:8080", "expA", "trial1_slim")
+    link = ui_ext.foxglove_link("http://localhost:8080", "expA", "trial1_slim")
     assert link.startswith("foxglove://open?ds=remote-file&ds.url=")
     assert link.endswith(".mcap"), "Foxglove needs the extension to pick a reader"
 
@@ -652,7 +653,7 @@ def test_the_default_bind_is_localhost():
     # Checks the parsed default, not the source text: the parser moved to its own
     # module so that `trials ui --help` needs no Flask, and a source grep of
     # ui.main stopped seeing it.
-    from robofacts_ros2.ui.arguments import build_parser
+    from robofacts.ui.arguments import build_parser
 
     assert build_parser().parse_args([]).host == "127.0.0.1", "must not default to 0.0.0.0"
 
@@ -836,7 +837,7 @@ def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
     import sys
     from pathlib import Path
     pytest.importorskip("flask")
-    from robofacts_ros2.ui import app as ui
+    from robofacts.ui import app as ui
     from robofacts import trial_runner as tr
     seen = {}
 

@@ -29,7 +29,6 @@ Deliberate design constraints
 * **Stops are a narrow allowlist**, read from ``robots.yaml`` — the same file
   ``scripts/estop.sh`` uses — never a general "run any command" endpoint.
 
-    ros2 launch <your_package> foxglove_bridge.launch.py   # optional, live view
     trials ui                       # this UI
     ssh -N -L 8080:localhost:8080 -L 8765:localhost:8765 <host> # from the laptop
 """
@@ -49,10 +48,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, Response, redirect, render_template, request, send_file, url_for
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 
 from robofacts import analysis_runner as ar
@@ -60,7 +61,7 @@ from robofacts import campaign_live_steps as cls_mod
 from robofacts import code_version as cv
 from robofacts import campaign_plan as cp
 from robofacts import campaign_spec as cs
-from robofacts_ros2 import explore as ex
+from robofacts import backend as backends
 from robofacts import trial_decisions as td
 from robofacts import trial_index as ti
 from robofacts import trial_records as trec
@@ -151,7 +152,7 @@ class ActiveRun:
     #: stack, never coverage). An exploration has its own page and its Stop
     #: takes the stack down at once, because nothing is recorded or flown.
     kind: str = "campaign"
-    #: For an exploration: the condition, how to connect Foxglove, and at the
+    #: For an exploration: the condition, how to connect the live view, and at the
     #: end the parameters that changed and where the file is.
     explore: Dict[str, Any] = field(default_factory=dict)
     #: For an exploration: explore.ExploreControls, what the run page may
@@ -401,7 +402,8 @@ class RunManager:
         """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + secrets.token_hex(3)
         spec = next(campaign.combinations())
-        s = ex.settings(config)
+        engine = explore_engine(root)
+        s = engine.settings(config)
         run = ActiveRun(run_id=run_id, experiment=experiment, campaign=label,
                         campaign_file=campaign_file, wanted=0, executed=True, kind="explore",
                         operator_steps=list(operator_steps or []),
@@ -414,7 +416,7 @@ class RunManager:
                                  # condition" on the run page.
                                  "picker": list(picker or []),
                                  "after": after.run_id if after is not None else ""},
-                        controls=ex.ExploreControls())
+                        controls=engine.ExploreControls())
         with self._lock:
             self._runs[run_id] = run
             self._current = run_id
@@ -457,7 +459,7 @@ class RunManager:
                         time.sleep(0.5)
                     run.append_log(f"[explore] exploration {after.run_id} is {after.state}: starting")
                 with contextlib.redirect_stdout(_Tee(sys.stdout, run)):
-                    result = ex.run_explore(campaign, config, root, dry_run=False,
+                    result = engine.run_explore(campaign, config, root, dry_run=False,
                                             stop=run._stop, label=campaign_file,
                                             confirm_steps=confirm_steps, on_ready=on_ready,
                                             controls=run.controls)
@@ -481,12 +483,15 @@ class RunManager:
         return run
 
 
-def explore_settings(root: Path, experiment: str) -> ex.ExploreSettings:
+def explore_settings(root: Path, experiment: str):
     """Whether this experiment can be explored, and how, for the pages' buttons."""
+    engine = explore_engine(root)
+    if engine is None:
+        return ExploreUnavailable()
     try:
-        return ex.settings(tr.RunnerConfig.load(experiment, root))
+        return engine.settings(tr.RunnerConfig.load(experiment, root))
     except tr.RunnerError as exc:
-        return ex.ExploreSettings(False, f"its runner.yaml does not load ({exc})", [], [], 0, "")
+        return engine.ExploreSettings(False, f"its runner.yaml does not load ({exc})", [], [], 0, "")
 
 
 def summarize_gate_failure(output: str) -> str:
@@ -528,7 +533,7 @@ class ShellPreflightGate:
         #: Campaign-specific checklist (relative to the experiment dir), or "".
         self.checklist = checklist
         #: In a continuous session the stack is already up and healthy; bouncing
-        #: the ros2 daemon between trials would disturb the very thing being
+        #: a middleware daemon between trials would disturb the very thing being
         #: kept alive. The checks still run — only the bounce is skipped.
         self.light = light
 
@@ -639,41 +644,6 @@ def discover_campaigns(experiments_root: Path) -> Dict[str, List[Path]]:
     return out
 
 
-#: The layouts convention lives in the package now (``trial_records``), so
-#: ``trials records`` and the UI name the same files. Kept under the old name.
-# --------------------------------------------------------------------------- #
-# Layouts
-# --------------------------------------------------------------------------- #
-def foxglove_layouts(experiments_root: Path) -> Dict[str, List[Path]]:
-    """The Foxglove layouts each experiment ships: ``experiments/<exp>/config/foxglove*.json``.
-
-    A convention, not a schema: any JSON exported from Foxglove (Layouts -> Export)
-    whose name starts with ``foxglove`` (case does not matter) belongs to the bags
-    of its experiment.
-    """
-    out: Dict[str, List[Path]] = {}
-    for f in sorted(Path(experiments_root).glob("*/config/*.json")):
-        if f.name.lower().startswith("foxglove"):
-            out.setdefault(f.parents[1].name, []).append(f)
-    return out
-
-
-def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
-    """Deep link that opens the laptop's Foxglove on a bag served by this UI.
-
-    Clicked in the operator's browser, so it reaches the laptop's Foxglove even
-    though the UI is served from the rig. The URL must end in .mcap.
-    """
-    return (f"foxglove://open?ds=remote-file&ds.url="
-            f"{base_url}/bag/{experiment}/{bag_name}.mcap")
-
-
-def foxglove_web_link(base_url: str, experiment: str, bag_name: str) -> str:
-    """The same bag in Foxglove's web app (app.foxglove.dev, the default org)."""
-    return (f"https://app.foxglove.dev/~/view?ds=remote-file&ds.url="
-            f"{base_url}/bag/{experiment}/{bag_name}.mcap")
-
-
 def code_cell(version: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """{short, dirty, title} for a trial's code version (stamped since 2026-08-04)."""
     if not version or not version.get("commit"):
@@ -718,7 +688,48 @@ def where_string(where: Dict[str, Any]) -> str:
 #: themselves go through the public /bag route (slim only), never through here.
 FILE_ROOTS = ("results", "runs", "config", "campaigns", "bags", "bags_slim", "bags_issues",
               "bags_issues_slim", "bags_scratch", "bags_scratch_slim")
-RECORDING_SUFFIXES = (".mcap", ".db3", ".zstd")
+def recording_suffixes(root: Optional[Path] = None) -> Tuple[str, ...]:
+    """The suffixes of the recorder's data files, which the files route does not serve to an
+    operating interface (the recorder's optional ``data_suffixes``)."""
+    try:
+        return tuple(getattr(backends.active(root).recorder, "data_suffixes", ()))
+    except backends.BackendError:
+        return ()
+
+
+def ui_extension(root: Optional[Path] = None):
+    """The module with which the project's backend extends this interface (its feature
+    ``ui``), or None. An extension may offer ``TEMPLATES`` (a folder searched before this
+    package's: the pages it adds, and its own ``_viewers.html``, which replaces this
+    package's), ``template_globals()``, ``layouts(root, experiment)`` and ``register(ui)``,
+    which adds its routes."""
+    try:
+        return backends.active(root).feature("ui")
+    except backends.BackendError:
+        return None
+
+
+def explore_engine(root: Optional[Path] = None):
+    """The Explore engine of the project's backend (its feature ``explore``), or None."""
+    try:
+        return backends.active(root).feature("explore")
+    except backends.BackendError:
+        return None
+
+
+@dataclass
+class ExploreUnavailable:
+    """What the pages are given where the backend offers no Explore (they show no control)."""
+    allowed: bool = False
+    reason: str = "the project's backend offers no Explore"
+    simulation: bool = False
+    writable: bool = False
+    viewers: List[Dict[str, Any]] = field(default_factory=list)
+    actions: List[Dict[str, Any]] = field(default_factory=list)
+    jog: Dict[str, Any] = field(default_factory=dict)
+
+    def describe(self) -> str:
+        return f"Explore is not available: {self.reason}"
 
 
 class ExperimentData:
@@ -743,7 +754,8 @@ class ExperimentData:
                 self.campaign_errors[path.stem] = str(exc)
         self.records = trec.load_records(root, experiment, campaigns=self.campaigns)
         self.trials = ti.load_trials(root, experiment)
-        self.layouts = [f.name for f in foxglove_layouts(root).get(experiment, [])]
+        ext = ui_extension(root)
+        self.layouts = list(ext.layouts(root, experiment)) if hasattr(ext, "layouts") else []
         self.explore = explore_settings(root, experiment)
         # Factor defaults, so a cell can mark its non-default values like the grid does.
         self.defaults: Dict[str, str] = {}
@@ -895,13 +907,17 @@ def create_app(experiments_root: Optional[Path] = None,
                view_only: bool = False,
                cache_dir: Optional[Path] = None) -> Flask:
     """The UI app. ``view_only`` registers none of the routes that act (runs,
-    stops, robot actions, kill ROS, exclude, restore), for an archive viewer such as
+    stops, robot actions, the backend's own actions, exclude, restore), for an archive viewer such as
     the home server's: those URLs answer 404 and the pages show no button for
     them. ``cache_dir`` is where poster frames go when the experiments tree
     itself is read-only (default: ``runs/posters/`` inside the tree)."""
     experiments_root = roots.experiments_root(experiments_root)
     repo_root = roots.project_root(repo_root, experiments=experiments_root)
     app = Flask(__name__)
+    extension = ui_extension(experiments_root)
+    if getattr(extension, "TEMPLATES", None):
+        # The backend's pages and its _viewers.html come first.
+        app.jinja_loader = ChoiceLoader([FileSystemLoader(str(extension.TEMPLATES)), app.jinja_loader])
     app.config["EXPERIMENTS_ROOT"] = Path(experiments_root)
     app.config["REPO_ROOT"] = Path(repo_root)
     app.config["PASSWORD"] = password
@@ -976,7 +992,8 @@ def create_app(experiments_root: Optional[Path] = None,
             "active_run": current if current is not None and current.state in
             ("running", "aborting") else None,
             "status_meaning": trec.STATUS_MEANING, "class_of": trec.CLASS_OF,
-            "fox_link": foxglove_link, "fox_web_link": foxglove_web_link,
+            **(extension.template_globals() if hasattr(extension, "template_globals") else {}),
+            "explore_offered": explore_engine(root()) is not None,
             "base_url": base_url(), "code_cell": code_cell,
             "where_string": where_string,
             "poster_of": lambda record: record.poster(root()),
@@ -1248,7 +1265,7 @@ def create_app(experiments_root: Optional[Path] = None,
             listing = [{"name": p.name + ("/" if p.is_dir() else ""),
                         "rel": str(p.relative_to(base)) + ("/" if p.is_dir() else ""),
                         "size": (p.stat().st_size if p.is_file() else None),
-                        "recording": (p.suffix in RECORDING_SUFFIXES
+                        "recording": (p.suffix in recording_suffixes(root())
                                       and not app.config["VIEW_ONLY"])}
                        for p in entries]
             if not inside.parts:
@@ -1276,10 +1293,10 @@ def create_app(experiments_root: Optional[Path] = None,
             return resp
         if not target.is_file():
             return error(f"no file {rel!r} in {experiment}", 404, crumbs)
-        if target.suffix in RECORDING_SUFFIXES:
+        if target.suffix in recording_suffixes(root()):
             if not app.config["VIEW_ONLY"]:
-                return error("recordings are not served here: open the slim copy in Foxglove "
-                             "from the trial's page", 403, crumbs)
+                return error("recordings are not served here: open the recording from the "
+                             "trial's page", 403, crumbs)
             return send_file(target, mimetype="application/octet-stream", as_attachment=True,
                              download_name=target.name, conditional=True)
         text_types = {".log": "text/plain", ".txt": "text/plain", ".md": "text/plain",
@@ -1292,36 +1309,6 @@ def create_app(experiments_root: Optional[Path] = None,
         return resp
 
     # -------------------------------------------------------------- viewing --
-    @app.route("/viewers")
-    @requires_auth
-    def viewers():
-        """How to open the live and recorded views ON THE LAPTOP.
-
-        A page served by the rig cannot spawn RViz on the operator's machine, so
-        this hands over a foxglove:// deep link (which the laptop's browser
-        resolves to the laptop's Foxglove) and a copy-paste command for RViz.
-        Every replayable trial is listed, grouped by experiment with its layout
-        beside it: the cap of five per folder hid 20 of 24 trials (2026-10-15).
-        """
-        groups = []
-        for name in experiment_names(root()):
-            data = cache.get(name)
-            replayable = [r for r in data.records if r.slim_dir is not None]
-            groups.append({"experiment": name, "records": replayable, "layouts": data.layouts,
-                           "total": len(data.records),
-                           "last": replayable[0].started if replayable else ""})
-        groups.sort(key=lambda g: g["last"], reverse=True)
-        return render_template("viewers.html", groups=groups, crumbs=[("viewing", None)])
-
-    @app.route("/layout/<experiment>/<path:name>")
-    @requires_auth
-    def layout_file(experiment: str, name: str):
-        """A per-experiment Foxglove layout, as a download for Layouts -> Import."""
-        for f in foxglove_layouts(root()).get(experiment, []):
-            if f.name == name:
-                return send_file(f, mimetype="application/json", as_attachment=True, download_name=f.name)
-        return {"error": f"no Foxglove layout named {name!r} in {experiment}"}, 404
-
     @app.route("/journal")
     @requires_auth
     def journal_view():
@@ -1455,7 +1442,10 @@ def create_app(experiments_root: Optional[Path] = None,
             config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
             return error(str(exc), 400, crumbs)
-        settings = ex.settings(config)
+        engine = explore_engine(root())
+        if engine is None:
+            return error(f"The project's backend offers no Explore.", 404, crumbs)
+        settings = engine.settings(config)
         if not settings.allowed:
             return error(f"Explore is refused for {experiment}: {settings.reason}.", 400, crumbs)
         if not config.simulation and not armed:
@@ -1477,7 +1467,7 @@ def create_app(experiments_root: Optional[Path] = None,
     @action("/explore")
     @requires_auth
     def explore():
-        """Bring up one campaign condition with a Foxglove view that may change parameters.
+        """Bring up one campaign condition with a live view that may change parameters.
 
         A client of explore.run_explore, like /run is of the runner: the picked
         cell goes through the same `--set` path. No gate, no trial action. On
@@ -1587,7 +1577,7 @@ def create_app(experiments_root: Optional[Path] = None,
         crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), ("gate", None)]
         if runs.busy():
             return error(
-                "A campaign is running — the gate bounces the ros2 daemon and "
+                "A campaign is running — the gate may restart a middleware daemon and "
                 "must not run mid-trial. Wait or abort first.", 409, crumbs)
         script = root() / experiment / "scripts" / "preflight.sh"
         if not script.is_file():
@@ -1781,52 +1771,6 @@ def create_app(experiments_root: Optional[Path] = None,
                                lease_owners=lease_owners(completed.stdout or ""),
                                crumbs=[("robot action", None)])
 
-    @action("/kill_ros")
-    @requires_auth
-    def kill_ros():
-        """Clean slate on the rig hosts — recovery BETWEEN trials.
-
-        Deliberately NOT a way to stop a flying drone: killing the stack takes
-        away the commander and the position feed, which leaves the aircraft to
-        its firmware failsafe rather than landing it. The e-stop is the tool
-        for that, so this refuses while a run is executing unless the operator
-        overrides, and the page says which one to reach for.
-        """
-        if runs.busy() and request.form.get("force") != "yes":
-            return error(
-                "A trial is running. Killing ROS now would remove the drone's commander "
-                "and position feed mid-flight — that is not a stop, it is an abandonment. "
-                "Use E-STOP to stop the aircraft, or Abort to end the campaign after this "
-                "trial; then clean the slate.", 409)
-        results = []
-        for spec in robot_hosts(app):
-            workspace = app.config["REPO_ROOT"]
-            argv = ["bash", "-lc", f"cd {shlex.quote(str(workspace))} && {tools.remote_invocation('kill_ros.sh')}"]
-            if spec["host"]:
-                from robofacts.remote_exec_utils import RemoteTarget, wrap_command
-                from robofacts import backend
-                host_workspace = Path(spec.get("workspace") or workspace)
-                ros_setup, ws_setup = backend.active(root()).host_setup(
-                    {k: spec[k] for k in ("ros_setup", "ws_setup") if spec.get(k)}, host_workspace)
-                target = RemoteTarget(host=spec["host"], container=spec["container"],
-                                      workspace=host_workspace,
-                                      ros_setup=ros_setup, ws_setup=ws_setup,
-                                      shell=spec["shell"])
-                argv = wrap_command(argv, target)
-            try:
-                proc = subprocess.run(argv, capture_output=True, text=True, timeout=90)
-                results.append((spec["host"] or "local", proc.returncode == 0,
-                                (proc.stdout + proc.stderr).strip()[-600:]))
-            except subprocess.TimeoutExpired:
-                results.append((spec["host"] or "local", False, "timed out after 90 s"))
-        ok = all(r[1] for r in results) and bool(results)
-        journal.add("kill-ros", f"clean slate on {len(results)} host(s): "
-                                f"{'OK' if ok else 'SOME FAILED'}")
-        output = "\n\n".join(f"=== {host} ===\n{text}" for host, _, text in results) \
-            or "no hosts in robots.yaml"
-        return render_template("stop.html", action="kill ROS", robot="all rig hosts",
-                               ok=ok, output=output, crumbs=[("kill ROS", None)])
-
     @action("/exclude/<experiment>/<name>")
     @requires_auth
     def exclude_trial(experiment: str, name: str):
@@ -1896,46 +1840,16 @@ def create_app(experiments_root: Optional[Path] = None,
                                    where=parse_where_args(request.args.getlist("where")))
         return {"experiment": experiment, "records": [r.to_dict(root()) for r in rows]}
 
-    @app.route("/bag/<experiment>/<name>.mcap")
-    def serve_bag(experiment: str, name: str):
-        """Serve a SLIM bag so the laptop's Foxglove can stream it over the tunnel.
-
-        Only slim bags are served, and only by resolving the name against
-        the ones that actually exist — never by joining user input onto a path,
-        which is how a `..` traversal would get out of the tree. Slim bags are a
-        few MB, so streaming beats copying; the heavy originals stay put.
-
-        Deliberately NOT behind requires_auth, with CORS and Range enabled:
-        Foxglove (desktop or app.foxglove.dev) fetches this URL itself and
-        cannot present the Basic credentials, so an authed route can never be
-        opened from the viewer. Read-only data on a localhost/tunnel service;
-        every state-changing route stays authed.
-        """
-        for slim_root in (root() / experiment / "bags_slim",
-                          root() / experiment / "bags_issues_slim",
-                          root() / experiment / "bags_scratch",
-                          root() / experiment / "bags_scratch_slim"):
-            if not slim_root.is_dir():
-                continue
-            for candidate in slim_root.iterdir():
-                if candidate.name != name or not candidate.is_dir():
-                    continue
-                # Only slim copies are served from bags_scratch: a fat scratch bag is
-                # hundreds of MB, and a viewer streaming it through the UI is a mistake.
-                if slim_root.name.startswith("bags_scratch") and not name.endswith("_slim"):
-                    continue
-                splits = sorted(candidate.glob("*.mcap"))
-                if splits:
-                    resp = send_file(splits[0], mimetype="application/octet-stream",
-                                     download_name=f"{name}.mcap", conditional=True)
-                    resp.headers["Access-Control-Allow-Origin"] = "*"
-                    return resp
-        return {"error": f"no slim bag named {name!r} in {experiment}"}, 404
-
     @app.route("/healthz")
     def healthz():
         return {"ok": True}
 
+    if hasattr(extension, "register"):
+        # The backend's routes, with what they share with this app.
+        extension.register(SimpleNamespace(
+            app=app, requires_auth=requires_auth, action=action, root=root, base_url=base_url,
+            known_experiment=known_experiment, error=error, cache=cache, runs=runs,
+            journal=journal))
     return app
 
 
@@ -2029,7 +1943,7 @@ def load_robot_actions(app) -> Dict[str, List[Dict[str, str]]]:
 
 # --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
-    from robofacts_ros2.ui.arguments import build_parser  # the parser lives apart, so the help needs no Flask
+    from robofacts.ui.arguments import build_parser  # the parser lives apart, so the help needs no Flask
     args = build_parser().parse_args(argv)
     roots.resolve_root_arguments(args)
 

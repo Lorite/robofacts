@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_viewers.html" import trial_replay with context %}
 {% from "_macros.html" import status_badge, gate_badge, replay, cell_chips with context %}
 {% set section = 'experiments' %}
 {% block title %}{{ r.name }} · Trials{% endblock %}
@@ -29,23 +30,7 @@
 <div class="cols">
   <div class="panel">
     <h3>Replay</h3>
-    {% if r.slim_name %}
-      <p class="cmdline" style="flex-wrap:wrap;align-items:center">
-        <a class="button btn-primary" href="{{ fox_link(base_url, experiment, r.slim_name) }}" title="opens the Foxglove app installed on this laptop">▶ Open in Foxglove</a>
-        <a class="button" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener" title="app.foxglove.dev, your default org">🌐 Foxglove web</a>
-        <a class="button" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇ slim .mcap</a>
-        {% for l in data.layouts %}<a class="button" href="{{ url_for('layout_file', experiment=experiment, name=l) }}" title="{{ l }}">⬇ layout</a>{% endfor %}
-      </p>
-      {% if data.layouts %}
-      <p class="small muted">First time: download the layout, then in Foxglove <i>Layouts → Import from file</i>. A <code>foxglove://</code> link cannot carry a layout, so it is a separate, one-time step.</p>
-      {% endif %}
-      <p class="small muted">▶ streams the slim copy ({{ size_slim if size_slim is not none else '?' }} MB) through this UI over your tunnel. It fails <b>silently</b> if Foxglove is not installed; use ⬇ then.</p>
-    {% elif r.bag_dir %}
-      <div class="empty"><b>No slim copy.</b> Foxglove opens slim copies only (a few MB, streamed through the tunnel). Make one:
-        <div class="cmdline"><code>trials slim --bag {{ r.bag_dir }}</code><button type="button" class="btn-small" data-copy="trials slim --bag {{ r.bag_dir }}">⧉</button></div></div>
-    {% else %}
-      <div class="empty">Nothing to replay: {{ 'the gate refused the attempt, so nothing was recorded' if r.status == 'blocked' else 'no recording of this attempt is on this machine' }}.</div>
-    {% endif %}
+    {{ trial_replay(r, experiment, data, size_slim) }}
     {% if r.videos %}
     <h3>Video</h3>
     {% for v in r.videos %}

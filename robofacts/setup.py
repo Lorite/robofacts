@@ -22,16 +22,19 @@ setup(
     version="0.1.0",
     packages=find_packages(exclude=["test", "test.*"]),
     # Everything the package needs at run time that is not a .py file: the gate's general
-    # check scripts and their bash helper, the stop tools and the templates.
+    # check scripts and their bash helper, the stop tools, the templates of new projects and
+    # the web interface's pages.
     package_data={
         package_name: [
             "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md", "tools/*.sh",
+            "ui/templates/*.html", "ui/static/*",
             *files_under("skeleton"),
         ],
     },
     include_package_data=True,
     install_requires=["pyyaml"],
-    extras_require={"test": ["pytest"]},
+    # The web interface (trials ui) needs Flask. Everything else runs without it.
+    extras_require={"ui": ["flask"], "test": ["pytest", "flask"]},
     python_requires=">=3.10",
     zip_safe=False,
     maintainer="Alejandro Lorite Mora",

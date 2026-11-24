@@ -96,7 +96,7 @@ BACKEND = Backend(
     gate_sentences=GATE_SENTENCES,
     adapters_package="robofacts_ros2.adapters",
     features={"explore": "robofacts_ros2.explore", "trial_media": "robofacts_ros2.trial_media",
-              "slim": "robofacts_ros2.slim_bag_archive", "viewers": "robofacts_ros2.ui.app"},
+              "slim": "robofacts_ros2.slim_bag_archive", "ui": "robofacts_ros2.ui_extension"},
     commands={
         "explore": ("robofacts_ros2.explore:main",
                     "bring up one condition's stack with a Foxglove view that may change "
@@ -104,7 +104,6 @@ BACKEND = Backend(
         "slim": ("robofacts_ros2.slim_bag_archive:main", "archive slim copies of recorded bags"),
         "profiles": ("robofacts_ros2.record_profiles:main",
                      "the record profiles in force (--list), or one profile's topics or record command"),
-        "ui": ("robofacts_ros2.ui.cli:main", "the web interface"),
     },
     lint_files=(_HERE / "lint_ros2.py",),
     skeleton_dir=_HERE / "skeleton",

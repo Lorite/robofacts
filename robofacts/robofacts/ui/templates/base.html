@@ -1,4 +1,4 @@
-<!doctype html>
+{% from "_viewers.html" import nav_links, stop_bar_extra, stop_bar_note with context %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -22,7 +22,7 @@
   <a class="brand" href="{{ url_for('index') }}">Trials</a>
   <nav class="topnav">
     <a href="{{ url_for('index') }}" class="{{ 'active' if section == 'experiments' }}">Experiments</a>
-    <a href="{{ url_for('viewers') }}" class="{{ 'active' if section == 'viewing' }}">Viewing</a>
+    {{ nav_links(section) }}
     <a href="{{ url_for('journal_view') }}" class="{{ 'active' if section == 'journal' }}">Journal</a>
   </nav>
   {% if active_run %}
@@ -55,12 +55,9 @@
     <input type="hidden" name="action" value="soft">
     <button class="btn-soft" type="submit">Soft stop all</button>
   </form>
-  <form method="post" action="{{ url_for('kill_ros') }}"
-        onsubmit="return confirm('Kill every ROS 2 process on the rig hosts?\n\nThis is a CLEAN SLATE between trials. It is NOT a way to stop a flying drone: it removes the commander and the position feed. Use E-STOP for that.');">
-    <button type="submit" title="clean slate between trials, not a flight stop">🧹 Kill ROS</button>
-  </form>
-  <span class="note">Not the primary kill: the physical switch is. This goes laptop → ssh → container → DDS.
-    <b>Kill ROS</b> is for a wedged rig <i>between</i> trials, never to stop an aircraft.</span>
+  {{ stop_bar_extra() }}
+  <span class="note">Not the primary kill: the physical switch is. This goes laptop → ssh → container → the robot's link.
+    {{ stop_bar_note() }}</span>
   <button type="button" class="pintoggle" id="pintoggle" title="pin or unpin this bar"></button>
 </div>
 {% endif %}

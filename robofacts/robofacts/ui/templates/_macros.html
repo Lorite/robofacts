@@ -21,15 +21,9 @@
 {%- else -%}<span class="muted" title="no gate verdict recorded">—</span>{%- endif -%}
 {%- endmacro -%}
 
+{% from "_viewers.html" import replay_links, layout_hint with context %}
 {%- macro replay(r, experiment, layouts, compact=True) -%}
-{%- if r.slim_name -%}
-<a class="iconlink" title="open in Foxglove DESKTOP (installed on this laptop)" href="{{ fox_link(base_url, experiment, r.slim_name) }}">▶ Foxglove</a>
-<a class="iconlink" title="open in Foxglove WEB (app.foxglove.dev, your default org)" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener">🌐</a>
-<a class="iconlink" title="download the slim .mcap" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇</a>
-{%- for l in layouts %}<br><a class="chip" title="this experiment's Foxglove layout: download, then Layouts → Import from file (once)" href="{{ url_for('layout_file', experiment=experiment, name=l) }}">layout ⬇</a>{% endfor -%}
-{%- elif r.bag_dir -%}
-<span class="muted" title="no slim copy yet. Make one: trials slim --bag {{ r.bag_dir }}">no slim copy</span>
-{%- else -%}<span class="muted">—</span>{%- endif -%}
+{{ replay_links(r, experiment, layouts) }}
 {%- endmacro -%}
 
 {%- macro cell_chips(values, factors, defaults) -%}
@@ -243,8 +237,7 @@
 {%- macro table_hint(table, data) -%}
 <p class="small muted">
   {%- if table.shared|length > 6 %}<details style="display:inline"><summary style="display:inline">The rows shown share {{ table.shared|length }} factor values</summary> {% for k, v in table.shared.items() %}<span class="chip">{{ k }}={{ v }}</span>{% endfor %}</details>; the cell column shows what differs. {% elif table.shared %}Every row shown shares {% for k, v in table.shared.items() %}<span class="chip">{{ k }}={{ v }}</span>{% endfor %}; the cell column shows what differs. {% endif -%}
-  {%- if data.layouts %}Replay with this experiment's Foxglove layout: download it once (<b>layout ⬇</b>), import it in Foxglove (<i>Layouts → Import from file</i>), then use <b>▶ Foxglove</b> on any row.
-  {%- else %}This experiment ships no Foxglove layout; export one from Foxglove to <code>config/foxglove_&lt;name&gt;.json</code> and it appears beside every bag.{% endif %}
+  {{ layout_hint(data) }}
   <span class="nd">Orange</span> values are not the factor's default.</p>
 {%- endmacro -%}
 
@@ -268,14 +261,15 @@
 </li>
 {%- endmacro -%}
 
-{# The Explore button (explore.py): a live stack with a Foxglove view that may change
+{# The Explore button (the backend's Explore): a live stack with a live view that may change
    parameters, never coverage. In simulation it posts at once; on hardware it leads to
    the campaign page, where the arm checkbox is. Refused experiments show why. #}
 {% macro explore_button(experiment, campaign, settings) -%}
-{% if not campaign %}<span class="muted" title="no campaign that loads">—</span>
+{% if not explore_offered %}
+{% elif not campaign %}<span class="muted" title="no campaign that loads">—</span>
 {% elif view_only %}<span class="muted small" title="this UI is view-only">—</span>
 {% elif not settings.allowed %}<span class="muted small" title="{{ settings.reason }}">🔭 not available</span>
-{% elif settings.simulation %}<form method="post" action="{{ url_for('explore') }}" style="display:inline" title="bring up {{ campaign }}'s first condition with a live Foxglove view; {{ settings.describe() }}">
+{% elif settings.simulation %}<form method="post" action="{{ url_for('explore') }}" style="display:inline" title="bring up {{ campaign }}'s first condition with a live view; {{ settings.describe() }}">
   <input type="hidden" name="experiment" value="{{ experiment }}"><input type="hidden" name="campaign" value="{{ campaign }}">
   <button type="submit" class="btn-small">🔭 Explore</button></form>
 {% else %}<a class="btn-small" href="{{ url_for('campaign_view', experiment=experiment, name=campaign) }}#explore" title="real robots: arm it on the campaign page">🔭 Explore…</a>

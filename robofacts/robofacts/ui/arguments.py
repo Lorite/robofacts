@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run without a password (only sensible on 127.0.0.1)")
     ap.add_argument("--view-only", action="store_true",
                     help="an archive viewer: register no route that runs a trial, stops a "
-                         "robot, kills ROS or quarantines a bag (also TRIALS_UI_VIEW_ONLY=1)")
+                         "robot, runs a backend action or quarantines a trial (also TRIALS_UI_VIEW_ONLY=1)")
     ap.add_argument("--cache-dir", type=Path, default=None,
                     help="where poster frames go when the experiments tree is read-only "
                          "(default: runs/posters/ inside each experiment)")

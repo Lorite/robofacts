@@ -28,7 +28,7 @@ setup(
         package_name: [
             "checks/*.sh", "checks/README.md", "lib/*.sh", "preflight/lib/*.sh",
             "adapters/*/checks/*.sh", "adapters/*/*.yaml",
-            "ui/templates/*.html", "ui/static/*", "tools/*.sh",
+            "ui/templates/*.html", "tools/*.sh",
             *files_under("skeleton"),
         ],
     },

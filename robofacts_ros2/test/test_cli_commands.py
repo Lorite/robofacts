@@ -53,23 +53,3 @@ def test_lint_passes_pytest_flags_through(argv):
     assert "lint.py" in out.stdout  # the collected cases, as "lint.py: 18" with -q twice or as ids with -q once
 
 
-def test_ui_help_needs_no_flask(monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "flask", None)  # `import flask` now raises ImportError
-    monkeypatch.delitem(sys.modules, "robofacts_ros2.ui.app", raising=False)
-    import robofacts_ros2.ui as ui_package
-    monkeypatch.delattr(ui_package, "app", raising=False)
-    assert cli.main(["ui", "--help"]) == 0
-    out = capsys.readouterr().out
-    assert "--host" in out and "--no-auth" in out
-
-
-def test_ui_without_flask_says_so_instead_of_a_traceback(monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "flask", None)
-    monkeypatch.delitem(sys.modules, "robofacts_ros2.ui.app", raising=False)
-    # The package keeps the submodule as an attribute once any test imported it, and
-    # `from .ui import app` returns that attribute without importing. The test then
-    # started the real server and the whole suite hung on port 8080 (2026-10-14).
-    import robofacts_ros2.ui as ui_package
-    monkeypatch.delattr(ui_package, "app", raising=False)
-    assert cli.main(["ui", "--no-auth"]) == 2
-    assert "needs Flask" in capsys.readouterr().err

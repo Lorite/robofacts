@@ -143,7 +143,7 @@
   <p class="small"><label><input type="checkbox" name="pose_pause" value="1" checked> ⏸ pause before recording</label>
     <span class="muted">after the T-0 gate, wait for a confirm on the run page so you can pose the rig (stand the robot, set the gripper) without racing the dwell</span></p>
   <p class="small"><label><input type="checkbox" name="keep_stack" value="yes"> ⏩ continuous session: keep the stack up between trials</label>
-    <br><i class="muted">launch once, then per trial only record → action → stop recorder. Saves the settle and the camera, mocap and radio re-init each time; the gate still runs before every trial but skips the ros2 daemon bounce. The stack comes down when the batch ends, aborts or fails.</i></p>
+    <br><i class="muted">launch once, then per trial only record → action → stop recorder. Saves the settle and the camera, mocap and radio re-init each time; the gate still runs before every trial but skips the restart of a middleware daemon. The stack comes down when the batch ends, aborts or fails.</i></p>
   {% if not plan.needed %}<div class="callout small">This campaign is complete: no cell is still missing. To run more, raise its <code>repetitions</code>, or make a scratch recording (below).</div>{% endif %}
   <div class="cmdline" style="align-items:center;flex-wrap:wrap">
     <button type="submit" name="go" value="dry" class="btn-primary">🔍 Dry run: show the plan</button>
@@ -160,10 +160,11 @@
     <label class="small"><input type="checkbox" name="skip_gate" value="yes"> ⚠ skip the gate</label>
     <span class="small muted">refuses unless armed; a skipped gate is written into the run's name in the journal</span>
   </div>
+  {% if explore_offered %}
   <div class="panel" id="explore" style="margin-top:.8rem">
     <h3 style="margin-top:0">🔭 Explore the picked condition <small>before running trials</small></h3>
     {% if data.explore.allowed %}
-    <p class="small">Brings up the stack of the cell picked above (or the campaign's first condition) with a live Foxglove view where {{ data.explore.describe() }}. <b>No T-0 gate, no recording, no action</b>: never coverage. It stays up until you press Stop, and then lists every parameter you changed.</p>
+    <p class="small">Brings up the stack of the cell picked above (or the campaign's first condition) with a live view where {{ data.explore.describe() }}. <b>No T-0 gate, no recording, no action</b>: never coverage. It stays up until you press Stop, and then lists every parameter you changed.</p>
     <div class="cmdline" style="align-items:center;flex-wrap:wrap">
       {% if not data.explore.simulation %}<label><input type="checkbox" name="explore_confirm" value="yes"> arm (real robots)</label>{% endif %}
       <button type="submit" formaction="{{ url_for('explore') }}" class="btn-primary">🔭 Explore: launch it live</button>
@@ -175,6 +176,7 @@
     <div class="cmdline small"><span class="muted">From a terminal (Ctrl-C stops it):</span>
       <code>{{ explore_cli }}</code><button type="button" class="btn-small" data-copy="{{ explore_cli }}">⧉</button></div>
   </div>
+  {% endif %}
   {% set scratch_cli = 'trials run experiments/' ~ experiment ~ '/campaigns/' ~ name ~ '.yaml --scratch --label <what> --execute' %}
   <div class="cmdline small" style="margin-top:.8rem"><span class="muted">A scratch recording (a diagnostic, never coverage) is CLI-only:</span>
     <code>{{ scratch_cli }}</code><button type="button" class="btn-small" data-copy="{{ scratch_cli }}">⧉</button></div>

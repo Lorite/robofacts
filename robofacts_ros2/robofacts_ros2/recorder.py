@@ -69,6 +69,9 @@ class Ros2Recorder:
     noun = "bag"
     #: What the data files of a bag are called in a message.
     data_name = ".mcap or .db3"
+    #: The suffixes of those files (and of a file-compressed bag), which an operating web
+    #: interface does not serve as files.
+    data_suffixes = (".mcap", ".db3", ".zstd")
     #: What the recorder leaves beside the metadata of a finished trial.
     sidecar_note = " and `rosout.txt`"
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_viewers.html" import run_replay_js with context %}
 {% from "_macros.html" import step_cell with context %}
 {% set section = 'experiments' %}
 {% block title %}{{ 'Run' if run.executed else 'Dry run' }} · {{ run.campaign }} · Trials{% endblock %}
@@ -173,7 +174,7 @@ async function poll() {
       // A dry run names the bag it WOULD record; only a recorded trial has a page to open.
       const recorded = t.bag && t.status !== 'dry-run' && t.status !== 'blocked';
       const page = recorded ? `<a href="${trialUrl.replace('__NAME__', encodeURIComponent(t.bag))}">open the trial's page</a> (status, replay, video, analyses)` : '';
-      const fox = recorded ? ` · <a href="foxglove://open?ds=remote-file&ds.url=${base}/bag/${encodeURIComponent(d.experiment)}/${encodeURIComponent(t.bag)}_slim.mcap">▶ Foxglove</a>` : '';
+      const fox = recorded ? {{ run_replay_js() }} : '';
       const bagline = !t.bag ? '' : (recorded
         ? `<p class="small">bag <code>${esc(t.bag)}</code>: ${page}${fox}</p>`
         : `<p class="small muted">would record <code>${esc(t.bag)}</code></p>`);

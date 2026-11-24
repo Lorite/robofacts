@@ -241,7 +241,7 @@ def test_every_relative_import_of_the_ui_resolves():
     level up, since the package split of 2026-10-13: every remote path of the web UI (the
     gate on the rig, the stops, the viewers) raised ImportError when it was used."""
     import ast
-    ui_dir = PACKAGE_ROOT / "robofacts_ros2" / "ui"
+    ui_dir = PACKAGE_ROOT.parent / "robofacts" / "robofacts" / "ui"
     package_dir = ui_dir.parent
     missing = []
     for source in ui_dir.glob("*.py"):
@@ -258,7 +258,7 @@ def test_every_relative_import_of_the_ui_resolves():
 @pytest.mark.parametrize("remote", [True, False])
 def test_the_ui_gate_runs_on_the_trial_host_or_with_its_setup(pieces, monkeypatch, remote):
     pytest.importorskip("flask")
-    from robofacts_ros2.ui import app
+    from robofacts.ui import app
 
     _, config = pieces
     if remote:

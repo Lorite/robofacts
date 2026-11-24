@@ -104,6 +104,23 @@ def _version_probe(argv):
     return code_version.main(argv)
 
 
+def _ui(argv):
+    # The parser lives apart from the app, so the help needs no Flask.
+    from .ui.arguments import build_parser
+    if any(a in ("-h", "--help") for a in argv):
+        build_parser().print_help()
+        return 0
+    try:
+        from .ui import app
+    except ImportError as exc:
+        if "flask" in str(exc).lower():
+            print("trials ui: the web interface needs Flask (pip install 'robofacts[ui]'). "
+                  "The other commands do not need it.", file=sys.stderr)
+            return 2
+        raise
+    return app.main(argv)
+
+
 def _validate(argv):
     from . import validate
     return validate.main(argv)
@@ -207,6 +224,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "storage": (_storage, "where this host writes heavy bags"),
     "profiles": (_profiles, "the record profiles in force (--list), or one profile's topics or record command"),
     "version": (_version_probe, "the code version stamped into trials"),
+    "ui": (_ui, "the web interface (needs Flask: pip install 'robofacts[ui]')"),
     "new": (_new, "a new experiment from the template, or --from a similar one"),
     "init": (_init, "a new project: the experiments root with its shared config"),
     "tool": (_tool, "run a packaged shell tool (kill_ros.sh, estop.sh, robot_action.sh)"),

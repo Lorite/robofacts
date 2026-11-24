@@ -1,0 +1,60 @@
+{# The ROS 2 backend's version of the general interface's _viewers.html (it is searched
+   first): replay in Foxglove, the Foxglove layouts, the "Viewing" page and the clean slate
+   of the rig hosts. #}
+
+{%- macro replay_links(r, experiment, layouts) -%}
+{%- if r.slim_name -%}
+<a class="iconlink" title="open in Foxglove DESKTOP (installed on this laptop)" href="{{ fox_link(base_url, experiment, r.slim_name) }}">▶ Foxglove</a>
+<a class="iconlink" title="open in Foxglove WEB (app.foxglove.dev, your default org)" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener">🌐</a>
+<a class="iconlink" title="download the slim .mcap" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇</a>
+{%- for l in layouts %}<br><a class="chip" title="this experiment's Foxglove layout: download, then Layouts → Import from file (once)" href="{{ url_for('layout_file', experiment=experiment, name=l) }}">layout ⬇</a>{% endfor -%}
+{%- elif r.bag_dir -%}
+<span class="muted" title="no slim copy yet. Make one: trials slim --bag {{ r.bag_dir }}">no slim copy</span>
+{%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro -%}
+
+{%- macro layout_hint(data) -%}
+  {%- if data.layouts %}Replay with this experiment's Foxglove layout: download it once (<b>layout ⬇</b>), import it in Foxglove (<i>Layouts → Import from file</i>), then use <b>▶ Foxglove</b> on any row.
+  {%- else %}This experiment ships no Foxglove layout; export one from Foxglove to <code>config/foxglove_&lt;name&gt;.json</code> and it appears beside every bag.{% endif %}
+{%- endmacro -%}
+
+{%- macro trial_replay(r, experiment, data, size_slim) -%}
+    {% if r.slim_name %}
+      <p class="cmdline" style="flex-wrap:wrap;align-items:center">
+        <a class="button btn-primary" href="{{ fox_link(base_url, experiment, r.slim_name) }}" title="opens the Foxglove app installed on this laptop">▶ Open in Foxglove</a>
+        <a class="button" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener" title="app.foxglove.dev, your default org">🌐 Foxglove web</a>
+        <a class="button" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇ slim .mcap</a>
+        {% for l in data.layouts %}<a class="button" href="{{ url_for('layout_file', experiment=experiment, name=l) }}" title="{{ l }}">⬇ layout</a>{% endfor %}
+      </p>
+      {% if data.layouts %}
+      <p class="small muted">First time: download the layout, then in Foxglove <i>Layouts → Import from file</i>. A <code>foxglove://</code> link cannot carry a layout, so it is a separate, one-time step.</p>
+      {% endif %}
+      <p class="small muted">▶ streams the slim copy ({{ size_slim if size_slim is not none else '?' }} MB) through this UI over your tunnel. It fails <b>silently</b> if Foxglove is not installed; use ⬇ then.</p>
+    {% elif r.bag_dir %}
+      <div class="empty"><b>No slim copy.</b> Foxglove opens slim copies only (a few MB, streamed through the tunnel). Make one:
+        <div class="cmdline"><code>trials slim --bag {{ r.bag_dir }}</code><button type="button" class="btn-small" data-copy="trials slim --bag {{ r.bag_dir }}">⧉</button></div></div>
+    {% else %}
+      <div class="empty">Nothing to replay: {{ 'the gate refused the attempt, so nothing was recorded' if r.status == 'blocked' else 'no recording of this attempt is on this machine' }}.</div>
+    {% endif %}
+{%- endmacro -%}
+
+{%- macro nav_links(section) -%}
+    <a href="{{ url_for('viewers') }}" class="{{ 'active' if section == 'viewing' }}">Viewing</a>
+{%- endmacro -%}
+
+{%- macro stop_bar_extra() -%}
+  <form method="post" action="{{ url_for('kill_ros') }}"
+        onsubmit="return confirm('Kill every ROS 2 process on the rig hosts?\n\nThis is a CLEAN SLATE between trials. It is NOT a way to stop a flying drone: it removes the commander and the position feed. Use E-STOP for that.');">
+    <button type="submit" title="clean slate between trials, not a flight stop">🧹 Kill ROS</button>
+  </form>
+{%- endmacro -%}
+
+{%- macro stop_bar_note() -%}<b>Kill ROS</b> is for a wedged rig <i>between</i> trials, never to stop an aircraft.{%- endmacro -%}
+
+{%- macro layout_chips(experiment, layouts) -%}
+{% for l in layouts %}<a class="chip" href="{{ url_for('layout_file', experiment=experiment, name=l) }}" title="Foxglove layout of this experiment: {{ l }}">⬇ layout</a> {% else %}<span class="muted">—</span>{% endfor %}
+{%- endmacro -%}
+
+{%- macro run_replay_js() -%}
+` · <a href="foxglove://open?ds=remote-file&ds.url=${base}/bag/${encodeURIComponent(d.experiment)}/${encodeURIComponent(t.bag)}_slim.mcap">▶ Foxglove</a>`
+{%- endmacro -%}

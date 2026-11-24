@@ -14,7 +14,7 @@
 {% if campaigns %}
 <div class="tablewrap">
 <table class="sortable">
-<thead><tr><th>campaign</th><th data-nosort title="this campaign's first condition, live in Foxglove, parameters changeable: never coverage">explore</th><th class="num">wanted</th><th class="num">covered</th><th class="num">still missing</th>
+<thead><tr><th>campaign</th>{% if explore_offered %}<th data-nosort title="this campaign's first condition, live, parameters changeable: never coverage">explore</th>{% endif %}<th class="num">wanted</th><th class="num">covered</th><th class="num">still missing</th>
   <th class="num" title="attempts the T-0 gate refused (attempt ledger)">blocked</th><th>last run</th><th>what it is</th></tr></thead>
 <tbody>
 {% for c in campaigns %}
@@ -24,7 +24,7 @@
 {% else %}
 <tr class="{{ 'todo' if c.plan.needed }}">
   <td class="nowrap"><a href="{{ url_for('campaign_view', experiment=experiment, name=c.name) }}"><b>{{ c.name }}</b></a></td>
-  <td class="nowrap">{{ explore_button(experiment, c.name, data.explore) }}</td>
+  {% if explore_offered %}<td class="nowrap">{{ explore_button(experiment, c.name, data.explore) }}</td>{% endif %}
   <td class="num">{{ c.plan.wanted }}</td><td class="num">{{ c.plan.covered }}</td>
   <td class="num"><b>{{ c.plan.needed }}</b></td>
   <td class="num">{{ c.blocked or '—' }}</td>
@@ -74,7 +74,7 @@
 {% endfor %}
 </tbody></table></div>
 {{ trial_cards(scratch, experiment, data.layouts, 'scratchlist-cards', show_campaign=False) }}
-<p class="small muted">A scratch recording lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what Foxglove opens.</p>
+<p class="small muted">A scratch recording lands in <code>bags_scratch/</code>, which the coverage index and the planner never read. The slim copy (<code>&lt;name&gt;_slim</code>) is what a viewer opens.</p>
 {% else %}
 <div class="empty">No scratch recording. Make one with the campaign's stack and gate, outside coverage:
   <code>trials run experiments/{{ experiment }}/campaigns/&lt;campaign&gt;.yaml --scratch --label &lt;what&gt; --execute</code> (scratch recordings are CLI-only).</div>

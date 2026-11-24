@@ -1,0 +1,28 @@
+{# What a backend adds to the pages about viewing a recording. A backend's interface
+   extension (its feature `ui`) ships its own _viewers.html, which replaces this one. The
+   general versions show where a recording is and offer no viewer. #}
+
+{%- macro replay_links(r, experiment, layouts) -%}
+{%- if r.bag_dir -%}<span class="muted" title="{{ r.bag_dir }}">recorded</span>
+{%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro -%}
+
+{%- macro layout_hint(data) -%}{%- endmacro -%}
+
+{%- macro layout_chips(experiment, layouts) -%}<span class="muted">—</span>{%- endmacro -%}
+
+{%- macro trial_replay(r, experiment, data, size_slim) -%}
+{%- if r.bag_dir %}
+  <p class="small">The recording is in <code>{{ r.bag_dir|relpath(experiment) }}</code>. The project's backend offers no viewer for it.</p>
+{%- else %}
+  <div class="empty">Nothing to replay: {{ 'the gate refused the attempt, so nothing was recorded' if r.status == 'blocked' else 'no recording of this attempt is on this machine' }}.</div>
+{%- endif %}
+{%- endmacro -%}
+
+{%- macro nav_links(section) -%}{%- endmacro -%}
+
+{%- macro stop_bar_extra() -%}{%- endmacro -%}
+
+{%- macro stop_bar_note() -%}{%- endmacro -%}
+
+{%- macro run_replay_js() -%}''{%- endmacro -%}

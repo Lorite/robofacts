@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status_badge, explore_button with context %}
+{% from "_viewers.html" import layout_chips with context %}
 {% set section = 'experiments' %}
 {% block title %}Experiments · Trials{% endblock %}
 {% block body %}
@@ -11,9 +12,9 @@
 <div class="tablewrap">
 <table class="sortable" id="experiments">
 <thead><tr>
-  <th>experiment</th><th data-nosort title="bring up the first campaign's stack, live in Foxglove, parameters changeable: never coverage">explore</th><th class="num" title="sum over its campaigns of the trials still missing">still missing</th>
+  <th>experiment</th>{% if explore_offered %}<th data-nosort title="bring up the first campaign's stack, live, parameters changeable: never coverage">explore</th>{% endif %}<th class="num" title="sum over its campaigns of the trials still missing">still missing</th>
   <th class="num">campaigns</th><th class="num" title="recorded trials plus attempts the gate refused; scratch recordings apart">trials</th><th title="the paper's classes: only usable trials count; attempts the gate refused left no trial">by class</th>
-  <th class="num" title="trials with a slim copy, ready to open in Foxglove">replayable</th>
+  <th class="num" title="trials with a slim copy, ready to open in a viewer">replayable</th>
   <th class="num" title="scratch recordings: diagnostics, never coverage">scratch</th>
   <th>last trial</th><th>layout</th>
 </tr></thead>
@@ -21,7 +22,7 @@
 {% for e in rows %}
 <tr class="{{ 'todo' if e.missing }}">
   <td><a href="{{ url_for('experiment_view', experiment=e.name) }}"><b>{{ e.name }}</b></a></td>
-  <td class="nowrap">{{ explore_button(e.name, e.explore_campaign, e.explore) }}</td>
+  {% if explore_offered %}<td class="nowrap">{{ explore_button(e.name, e.explore_campaign, e.explore) }}</td>{% endif %}
   <td class="num" data-sort="{{ e.missing }}"><b>{{ e.missing }}</b></td>
   <td class="num nowrap">{{ e.campaigns }}{% if e.broken %} <span class="bad" title="{{ e.broken }} campaign file(s) do not load">({{ e.broken }} broken)</span>{% endif %}</td>
   <td class="num">{{ e.total }}</td>
@@ -29,7 +30,7 @@
   <td class="num">{{ e.replayable or '—' }}</td>
   <td class="num">{{ e.scratch or '—' }}</td>
   <td class="nowrap" data-sort="{{ e.last }}">{{ e.last|when or '—' }}</td>
-  <td class="nowrap">{% for l in e.layouts %}<a class="chip" href="{{ url_for('layout_file', experiment=e.name, name=l) }}" title="Foxglove layout of this experiment: {{ l }}">⬇ layout</a> {% else %}<span class="muted">—</span>{% endfor %}</td>
+  <td class="nowrap">{{ layout_chips(e.name, e.layouts) }}</td>
 </tr>
 {% endfor %}
 </tbody>
