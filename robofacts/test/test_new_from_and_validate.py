@@ -14,7 +14,7 @@ import pytest
 from robofacts import cli, scaffold, validate
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = PACKAGE_ROOT / "example_project"
+EXAMPLE = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 SOURCE = "demo_talker_listener"
 
 

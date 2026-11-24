@@ -56,9 +56,9 @@ def _hits(path: Path, pattern: re.Pattern):
 
 def test_no_lab_name_anywhere_in_the_package():
     files = [*_core_files(), *sorted(ADAPTERS.rglob("*.py")), *sorted(ADAPTERS.rglob("*.sh")),
-             PACKAGE / "README.md", PACKAGE / "CHANGELOG.md",
-             *sorted((PACKAGE / "example_project").rglob("*.yaml")),
-             *sorted((PACKAGE / "example_project").rglob("*.json"))]
+             PACKAGE.parent / "README.md", PACKAGE.parent / "CHANGELOG.md",
+             *sorted((PACKAGE.parent / "robofacts_ros2" / "example_project").rglob("*.yaml")),
+             *sorted((PACKAGE.parent / "robofacts_ros2" / "example_project").rglob("*.json"))]
     hits = [h for path in files if path.is_file() for h in _hits(path, LAB)]
     assert not hits, "lab names or internal issue numbers in the package:\n" + "\n".join(hits)
 

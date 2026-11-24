@@ -23,7 +23,7 @@ from robofacts.preflight import run_preflight as rp
 HERE = Path(__file__).resolve().parent
 PACKAGE_ROOT = HERE.parent
 CHECKS_DIR = PACKAGE_ROOT / "robofacts" / "preflight" / "checks"
-EXPERIMENTS_DIR = PACKAGE_ROOT / "example_project" / "experiments"
+EXPERIMENTS_DIR = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project" / "experiments"
 
 ALL_CHECKLISTS = sorted(EXPERIMENTS_DIR.glob("*/config/preflight_checklist.json"))
 

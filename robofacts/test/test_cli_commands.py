@@ -11,7 +11,7 @@ import pytest
 from robofacts import cli, tools
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = PACKAGE_ROOT / "example_project"
+EXAMPLE = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 
 
 def run_cli(*args):

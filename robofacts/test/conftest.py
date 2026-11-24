@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE_PROJECT = PACKAGE_ROOT / "example_project"
+EXAMPLE_PROJECT = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 #: The roots the caller set before pytest started, which the fixture below keeps.
