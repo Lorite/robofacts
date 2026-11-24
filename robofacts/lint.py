@@ -134,6 +134,13 @@ def launch_dirs(package: str) -> list[Path]:
             REPO_ROOT / package / "launch"]
 
 PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def ros2_project() -> bool:
+    """Is this project on the ROS 2 backend? Some rules are facts about ROS 2 (the launch
+    arguments of a launch file, /rosout in every recording) and bind only there."""
+    from . import backend
+    return backend.configured_name(EXPERIMENTS_ROOT) == "ros2"
 STARTS_ROS_PROCESS = re.compile(r"\bros2\s+(run|launch)\b")
 
 
@@ -165,6 +172,10 @@ def declared_launch_args(launch_file: str, package: str = "") -> set[str] | None
 def command_templates(config) -> list[tuple[str, str]]:
     """(where, template) for every command the runner may issue."""
     out = [("action", config.action)] if config.action else []
+    if (config.stack or {}).get("command"):
+        # A backend whose stack is a templated command (the process backend): a factor it
+        # names is consumed there, like in the action.
+        out.append(("launch", config.stack["command"]))
     for group, steps in (("setup_steps", config.setup_steps),
                          ("aux_launches", config.aux_launches),
                          ("verify_steps", config.verify_steps)):
@@ -510,6 +521,8 @@ def test_every_record_profile_records_rosout():
     """
     from .record_profiles import build_topics, profiles
 
+    if not ros2_project():
+        pytest.skip("a rule of the ROS 2 backend")
     for profile in profiles(EXPERIMENTS_ROOT):
         topics = build_topics(profile, experiments_root=EXPERIMENTS_ROOT)
         assert "/rosout" in topics, (
@@ -526,6 +539,8 @@ def test_explicit_record_topics_record_rosout(experiment):
     """L11 (explicit-list form) - a runner.yaml that bypasses the named
     profiles with its own record_topics list must still record /rosout."""
     config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
+    if not ros2_project():
+        pytest.skip("a rule of the ROS 2 backend")
     if not config.record_topics:
         pytest.skip("uses a named record profile (covered by the profile rule)")
     assert "/rosout" in config.record_topics, (

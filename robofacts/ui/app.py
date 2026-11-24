@@ -1789,10 +1789,13 @@ def create_app(experiments_root: Optional[Path] = None,
             argv = ["bash", "-lc", f"cd {shlex.quote(str(workspace))} && {tools.remote_invocation('kill_ros.sh')}"]
             if spec["host"]:
                 from ..remote_exec_utils import RemoteTarget, wrap_command
+                from .. import backend
+                host_workspace = Path(spec.get("workspace") or workspace)
+                ros_setup, ws_setup = backend.active(root()).host_setup(
+                    {k: spec[k] for k in ("ros_setup", "ws_setup") if spec.get(k)}, host_workspace)
                 target = RemoteTarget(host=spec["host"], container=spec["container"],
-                                      workspace=Path(spec.get("workspace") or workspace),
-                                      ros_setup=spec.get("ros_setup") or "/opt/ros/humble/setup.zsh",
-                                      ws_setup=spec.get("ws_setup") or str(Path(spec.get("workspace") or workspace) / "ros2_ws/install/setup.zsh"),
+                                      workspace=host_workspace,
+                                      ros_setup=ros_setup, ws_setup=ws_setup,
                                       shell=spec["shell"])
                 argv = wrap_command(argv, target)
             try:

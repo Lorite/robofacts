@@ -547,6 +547,18 @@ def bounce_daemon() -> None:
               f"checks will start their own discovery)")
 
 
+def prepare_gate() -> None:
+    """What runs once before the machine checks: the backend of the project in the working
+    directory decides (backend.Backend.gate_prepare). The ROS 2 backend restarts the ros2
+    daemon, a backend without such a daemon does nothing. A copy of this file that runs as
+    a plain script outside the package keeps the restart."""
+    if not __package__:
+        bounce_daemon()
+        return
+    from .. import backend
+    backend.active().gate_prepare()
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -633,7 +645,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return RC_PASS
 
     if not args.no_daemon_bounce:
-        bounce_daemon()
+        prepare_gate()
 
     print("=== T-0 GATE ===")
     if not machine:

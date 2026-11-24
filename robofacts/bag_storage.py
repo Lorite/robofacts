@@ -230,8 +230,11 @@ def bag_is_settled(bag_dir: Path, min_age_s: float = 60.0) -> Tuple[bool, str]:
     bag_dir = Path(bag_dir)
     if not bag_dir.is_dir():
         return False, "not a directory"
-    if not (bag_dir / "metadata.yaml").is_file():
-        return False, "no metadata.yaml (bag never finalized)"
+    # The recorder says when a recording is finalized (for ROS 2: metadata.yaml exists).
+    from . import backend
+    unsettled = backend.active(bag_dir).recorder.unsettled_reason(bag_dir)
+    if unsettled:
+        return False, unsettled
     newest = 0.0
     for path in bag_dir.rglob("*"):
         if path.name.endswith(UNSETTLED_SUFFIXES):

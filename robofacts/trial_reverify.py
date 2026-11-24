@@ -74,8 +74,9 @@ def ledger_entry(exp_dir: Path, name: str) -> Optional[Dict[str, Any]]:
 
 def storage_dir(dirs: td.TrialDirs) -> Path:
     """The full bag when it holds a storage file, else the slim copy, else an error."""
+    from .trial_index import recording_holds_data
     for d in (dirs.full, dirs.slim):
-        if d is not None and any(p.suffix in (".mcap", ".db3") for p in d.iterdir()):
+        if d is not None and recording_holds_data(d):
             return d
     raise td.DecisionError(f"{dirs.name}: neither the bag nor its slim copy holds a .mcap or .db3 "
                            f"here. Run it on the host that recorded the trial.")

@@ -89,23 +89,11 @@ def _alternation(names: Iterable[str]) -> str:
 
 
 def _pkill_pattern_templates() -> dict[str, str]:
-    """The kinds in force: the core's three plus the project's ``stop_patterns.kinds``."""
+    """The kinds in force: the backend launcher's (for ROS 2: all, recorder, launch) plus
+    the project's ``stop_patterns.kinds``."""
+    from . import backend
     settings = _stop_settings()
-    scripts = _alternation(settings.get("recorder_scripts") or [])
-    containers = _alternation(settings.get("owned_containers") or [])
-    script_part = f"|{{workspace}}.*({scripts})" if scripts else ""
-    container_part = f"|component_container.*({containers})" if containers else ""
-    templates = {
-        # Everything spawned by this workspace. Used by the full-stack stop.
-        'all': 'ros2 (launch|bag record|run ).*{workspace}' + script_part + container_part,
-        # Only the bag recorder (ros2 bag record + the bash wrappers that exec it).
-        # Used when stopping a recorder so the long-running main launch
-        # (ros2 launch ...) on the same host keeps running.
-        'recorder': 'ros2 bag record.*{workspace}' + script_part,
-        # Only ros2 launch / ros2 run processes + their composable containers
-        # (no bag recorders).
-        'launch': 'ros2 (launch|run ).*{workspace}' + container_part,
-    }
+    templates = dict(backend.active().launcher.stop_patterns())
     extra = settings.get("kinds") or {}
     if not isinstance(extra, dict):
         raise ValueError(f"trials.yaml: stop_patterns.kinds must be a mapping, got {extra!r}")
@@ -307,45 +295,27 @@ def write_trial_file(target: RemoteTarget | None, path: Path, content: str) -> N
             f'could not write {path} on {target.host}: {result.stderr.strip()}')
 
 
-BAG_DATA_SUFFIXES = ('.mcap', '.db3')
+def recording_has_data(target: RemoteTarget | None, directory: Path) -> tuple[bool, str]:
+    """Did the recorder leave a complete recording in ``directory``, asked on the host that
+    recorded? The backend's recorder answers (backend.Recorder.has_data)."""
+    from . import backend
+    return backend.active().recorder.has_data(target, directory)
 
 
-def bag_has_data(target: RemoteTarget | None, bag_dir: Path) -> tuple[bool, str]:
-    """Did the recorder actually leave data in `bag_dir`?
-
-    `ros2 bag record` can fail *after* the runner has started it and still let
-    the run look orderly: an unwritable mount, a bad path, a recorder that
-    never subscribed. The process exits, the stack comes down, and the trial
-    reports success over an empty directory. Asking the host that did the
-    recording is the only reliable way to tell a finished trial from a hole.
-
-    Returns (ok, reason-if-not).
-    """
-    if target is None:
-        if not (bag_dir / 'metadata.yaml').is_file():
-            return False, 'no metadata.yaml — the recorder never finalized a bag'
-        if not any(p.suffix in BAG_DATA_SUFFIXES for p in bag_dir.iterdir()):
-            return False, 'bag directory holds no .mcap/.db3 data file'
-        return True, ''
-
-    script = (f'd={shlex.quote(str(bag_dir))}; '
-              'if [ -f "$d/metadata.yaml" ]; then echo meta=1; else echo meta=0; fi; '
-              'echo data=$(ls "$d" 2>/dev/null | grep -cE "[.](mcap|db3)$")')
-    result = _remote_sh(target, script)
-    if result.returncode != 0:
-        return False, f'could not inspect the bag on {target.host}: {result.stderr.strip()}'
-    out = result.stdout
-    if 'meta=1' not in out:
-        return False, (f'no metadata.yaml on {target.host} — '
-                       'the recorder never finalized a bag')
-    if 'data=0' in out:
-        return False, f'bag directory on {target.host} holds no .mcap/.db3 data file'
-    return True, ''
+#: The name from before the backends existed.
+bag_has_data = recording_has_data
 
 
-def _resolve_pkill_pattern(kind: str, workspace: Path) -> str:
+#: The kinds every caller may name. A backend whose launcher gives no pattern for one of
+#: them (stopping the process group is enough for it) makes that sweep a no-op.
+STANDARD_STOP_KINDS = ('all', 'recorder', 'launch')
+
+
+def _resolve_pkill_pattern(kind: str, workspace: Path) -> str | None:
     try:
         templates = _pkill_pattern_templates()
+        if kind not in templates and kind in STANDARD_STOP_KINDS:
+            return None
         template = templates[kind]
     except KeyError as exc:
         valid = ', '.join(sorted(templates))
@@ -417,8 +387,10 @@ def pkill_workspace_launches(
     templates alone are not enough for package-form launches).
     """
     pattern = _resolve_pkill_pattern(kind, target.workspace if target is not None else workspace)
+    if pattern is None and not extra:
+        return
     if extra:
-        pattern = f'{pattern}|{extra}'
+        pattern = f'{pattern}|{extra}' if pattern else extra
     if target is None:
         _pkill_local(pattern, sig)
     else:

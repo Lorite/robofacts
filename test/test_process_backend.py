@@ -1,0 +1,316 @@
+"""The two interfaces of robofacts.backend, exercised by the backend that has no ROS.
+
+The process backend starts the stack with a shell command and records the lines that the
+system writes to a log file. These tests run whole trials on it with real processes: the
+gate, the launch, the recorder, the action, the stop order, the verify step, the metadata
+and the coverage index. Nothing here needs ROS.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+
+import pytest
+
+from robofacts import backend, campaign_plan as cp, campaign_spec as cs
+from robofacts import scaffold, trial_index as ti, trial_runner as tr
+from robofacts.backends import process as pb
+from robofacts.backends import process_recorder
+
+PACKAGE = Path(__file__).resolve().parents[1]
+
+PLANT = '''\
+#!/usr/bin/env python3
+"""The system under test: a process that writes one line to its log every 50 ms."""
+import argparse, itertools, time
+from pathlib import Path
+ap = argparse.ArgumentParser(); ap.add_argument("--rate"); ap.add_argument("--log", type=Path)
+args = ap.parse_args()
+args.log.parent.mkdir(parents=True, exist_ok=True)
+with args.log.open("a") as log:
+    for n in itertools.count():
+        log.write(f"tick {n} rate={args.rate}\\n"); log.flush(); time.sleep(0.05)
+'''
+
+OBSERVE = '''\
+#!/usr/bin/env python3
+"""The action: let the plant run for a moment. Exits 0 whatever the plant did."""
+import sys, time
+time.sleep(float(sys.argv[1]))
+'''
+
+VERIFY = '''\
+#!/usr/bin/env python3
+"""A verify step: the recording must hold enough lines of this trial's rate."""
+import sys
+from pathlib import Path
+recording, rate, minimum = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+log = recording / "data" / "plant.log"
+lines = [l for l in (log.read_text().splitlines() if log.is_file() else []) if f"rate={rate}" in l]
+print(f"{'PASS' if len(lines) >= minimum else 'FAIL'}: {len(lines)} lines of rate={rate}")
+sys.exit(0 if len(lines) >= minimum else 1)
+'''
+
+
+def write_project(root: Path, *, min_lines: int = 3, with_stack: bool = True) -> Path:
+    """A project on the process backend with one experiment, ``plant``. Returns the
+    experiments root."""
+    assert scaffold.main_init([str(root)]) == 0
+    (root / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n"
+                                      "backend: process\n", encoding="utf-8")
+    exp = root / "experiments" / "plant"
+    for sub in ("config", "campaigns", "scripts", "runs", "bags"):
+        (exp / sub).mkdir(parents=True)
+    for name, body in (("plant.py", PLANT), ("observe.py", OBSERVE), ("verify_log.py", VERIFY)):
+        (exp / "scripts" / name).write_text(body, encoding="utf-8")
+    (exp / "config" / "factors.yaml").write_text(textwrap.dedent("""\
+        version: 1
+        factors:
+          rate:
+            describe: "How the plant is started. A stand-in for an independent variable."
+            levels: [slow, fast]
+            default: slow
+            metadata_key: rate
+            maps_to: {kind: internal}
+        """), encoding="utf-8")
+    (exp / "config" / "trial_metadata_schema.yaml").write_text(textwrap.dedent("""\
+        version: 1
+        fields:
+          rate: {required: true, type: str, factor: true, enum: [slow, fast], describe: "The rate level."}
+          record_profile: {required: false, type: str, factor: true, enum: [custom], describe: "Listed in runner.yaml."}
+        """), encoding="utf-8")
+    launch = ('launch:\n  command: "python3 experiments/plant/scripts/plant.py --rate {rate} '
+              '--log experiments/plant/runs/plant.log"\n') if with_stack else ""
+    (exp / "config" / "runner.yaml").write_text(
+        "simulation: true\n" + launch + textwrap.dedent(f"""\
+        action:
+          command: "python3 experiments/plant/scripts/observe.py 0.6"
+        record_sources: [experiments/plant/runs/plant.log]
+        settle_s: 0.3
+        stop_grace_s: 0.3
+        verify_steps:
+          - name: plant_log_recorded
+            command: "python3 experiments/plant/scripts/verify_log.py {{bag}} {{rate}} {min_lines}"
+        hosts:
+          laptop: {{local: true}}
+        """), encoding="utf-8")
+    (exp / "config" / "preflight_checklist.json").write_text(json.dumps({"checklist": [
+        {"text": "[HARD] The recording directory is writable.", "check": "bag_dir_writable",
+         "args": {"path": "experiments/plant/bags", "label": "recordings"}},
+        {"text": "Enough disk for the recording.", "check": "disk_space",
+         "args": {"path": ".", "min_gb": "0.01"}},
+    ]}, indent=2), encoding="utf-8")
+    (exp / "campaigns" / "rates.yaml").write_text(textwrap.dedent("""\
+        name: rates
+        experiment: plant
+        describe: Both rates once.
+        repetitions: 1
+        sweep:
+          rate: [slow, fast]
+        """), encoding="utf-8")
+    return root / "experiments"
+
+
+def use_project(root: Path, monkeypatch) -> None:
+    """Make ``root`` the project in force for this test, in this process and its children."""
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TRIALS_EXPERIMENTS_ROOT", str(root / "experiments"))
+    monkeypatch.delenv(backend.ENV_BACKEND, raising=False)
+    # The recorder and the gate start `python3 -m robofacts...`: they must find THIS package.
+    monkeypatch.setenv("PYTHONPATH", str(PACKAGE) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    monkeypatch.setenv("TRIALS_VOICE", "off")
+    ti._recorder_at.cache_clear()
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    yield experiments
+    ti._recorder_at.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# The interfaces
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("name", ["process", "ros2"])
+def test_every_shipped_backend_implements_both_interfaces(name):
+    found = backend.load(name)
+    assert found.name == name
+    assert isinstance(found.launcher, backend.Launcher)
+    assert isinstance(found.recorder, backend.Recorder)
+    assert found.recorder.noun
+
+
+def test_the_project_file_names_the_backend_and_the_environment_overrides_it(project, monkeypatch):
+    assert backend.configured_name(project) == "process"
+    assert backend.active(project).name == "process"
+    monkeypatch.setenv(backend.ENV_BACKEND, "ros2")
+    assert backend.active(project).name == "ros2"
+
+
+def test_an_unknown_backend_is_refused_with_the_known_names():
+    with pytest.raises(backend.BackendError, match="process, ros2"):
+        backend.load("no_such_backend_anywhere")
+
+
+def test_ros_launch_keys_are_refused_on_the_process_backend(project):
+    """A project that forgot `backend: ros2` must not run a trial without its stack."""
+    runner = project / "plant" / "config" / "runner.yaml"
+    text = runner.read_text(encoding="utf-8")
+    start = text.index("launch:")
+    runner.write_text(text[:start] + "launch: {package: demo_nodes_cpp, file: talker}\n"
+                      + text[text.index("action:"):], encoding="utf-8")
+    with pytest.raises(tr.RunnerError, match="backend: ros2"):
+        tr.RunnerConfig.load("plant", project)
+
+
+def test_the_process_launcher_templates_the_command_like_the_action():
+    launcher = pb.ProcessLauncher()
+    stack = launcher.parse({"launch": {"command": "plant --rate {rate} --port {arg_port}"}}, Path("r.yaml"))
+    assert launcher.command(stack, {"port": 7}, {"rate": "fast"}) == ["plant", "--rate", "fast", "--port", "7"]
+    assert launcher.command(launcher.parse({}, Path("r.yaml")), {}, {}) is None
+    with pytest.raises(backend.BackendError, match="unknown factor"):
+        launcher.command(stack, {}, {})
+
+
+def test_a_backend_without_stop_patterns_makes_the_sweep_a_no_op(project, monkeypatch):
+    from robofacts import remote_exec_utils as reu
+    called = []
+    monkeypatch.setattr(reu, "_pkill_local", lambda pattern, sig: called.append(pattern))
+    reu.pkill_workspace_launches(None, project.parent, kind="launch")
+    assert called == []
+    with pytest.raises(ValueError, match="pkill kind"):
+        reu.pkill_workspace_launches(None, project.parent, kind="not_a_kind")
+
+
+# --------------------------------------------------------------------------- #
+# The recorder process
+# --------------------------------------------------------------------------- #
+def test_the_recorder_keeps_only_what_was_written_while_it_ran(tmp_path):
+    log, out = tmp_path / "sys.log", tmp_path / "rec"
+    log.write_text("before the trial\n", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, "-m", "robofacts.backends.process_recorder",
+                             "--out", str(out), str(log), str(tmp_path / "never_written.log")],
+                            env={**os.environ, "PYTHONPATH": str(PACKAGE)},
+                            stdout=subprocess.PIPE, text=True)
+    assert "recording 2 source(s)" in proc.stdout.readline()
+    recorder = pb.ProcessRecorder()
+    assert recorder.unsettled_reason(out) and not recorder.has_data(None, out)[0]
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write("during 1\nduring 2\n")
+    time.sleep(0.5)
+    proc.send_signal(signal.SIGINT)
+    assert proc.wait(timeout=10) == 0
+    assert (out / "data" / "sys.log").read_text(encoding="utf-8") == "during 1\nduring 2\n"
+    manifest = json.loads((out / pb.MANIFEST).read_text(encoding="utf-8"))
+    assert [s["bytes"] for s in manifest["sources"]] == [18, 0]
+    assert recorder.unsettled_reason(out) is None
+    assert recorder.holds_data(out) and recorder.has_data(None, out) == (True, "")
+
+
+def test_a_recording_without_data_is_not_a_recording(tmp_path):
+    out = tmp_path / "rec"
+    assert process_recorder.stored_names(["a/x.log", "b/x.log"]) == {"a/x.log": "x.log", "b/x.log": "2_x.log"}
+    recorder = pb.ProcessRecorder()
+    (out / "data").mkdir(parents=True)
+    (out / pb.MANIFEST).write_text("{}", encoding="utf-8")
+    ok, why = recorder.has_data(None, out)
+    assert not ok and "no data" in why
+
+
+# --------------------------------------------------------------------------- #
+# Whole trials, without ROS
+# --------------------------------------------------------------------------- #
+def _run(project: Path, capsys, *extra: str):
+    rc = tr.main([str(project / "plant" / "campaigns" / "rates.yaml"),
+                  "--experiments-root", str(project), "--no-pause", *extra])
+    return rc, capsys.readouterr().out
+
+
+def test_a_dry_run_shows_the_launcher_and_the_recorder_commands(project, capsys):
+    rc, out = _run(project, capsys, "--limit", "1")
+    assert rc == 0
+    assert re.search(r"\$ python3 experiments/plant/scripts/plant\.py --rate (slow|fast) --log", out), out
+    assert "$ python3 -m robofacts.backends.process_recorder --out" in out
+    assert "ros2" not in out
+    assert not any((project / "plant" / "bags").iterdir())
+
+
+@pytest.mark.real_sleep
+def test_a_campaign_runs_from_plan_to_coverage_index_without_ros(project, capsys):
+    rc, out = _run(project, capsys, "--execute")
+    assert rc == 0, out
+    assert "2 trial(s): 2 OK" in out
+    assert "[verify] plant_log_recorded rc=0" in out
+    assert "ros2" not in out, "the process backend must not touch ROS, the daemon restart included"
+
+    trials = ti.load_trials(project, "plant")
+    assert sorted(t.metadata["rate"] for t in trials) == ["fast", "slow"]
+    assert all(t.status == "usable" and t.has_bag_data for t in trials), [t.status for t in trials]
+    for trial in trials:
+        # Each recording holds its own trial's lines only: the recorder follows the log
+        # from where it stood when the trial started.
+        lines = (trial.bag_dir / "data" / "plant.log").read_text(encoding="utf-8").splitlines()
+        assert lines and all(f"rate={trial.metadata['rate']}" in line for line in lines)
+        assert trial.metadata["preflight"]["verdict"] == "GO"
+        assert not (trial.bag_dir / "rosout.txt").exists()
+
+    campaign = cs.load_campaign(project / "plant" / "campaigns" / "rates.yaml", project, [])
+    plan = cp.build_plan(campaign, trials, False)
+    assert not list(cp.execution_order(plan)), "the campaign is covered"
+    # The stack was stopped: no plant process of this project is left.
+    left = subprocess.run(["pgrep", "-f", str(project.parent) + ".*plant.py"], capture_output=True, text=True)
+    assert left.stdout.strip() == "", left.stdout
+
+
+@pytest.mark.real_sleep
+def test_a_failing_verify_step_aborts_the_trial(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "proj"
+    experiments = write_project(root, min_lines=100000)
+    use_project(root, monkeypatch)
+    rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+    assert rc == 1 and "a verify step rejected the recorded trial" in out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert trial.metadata["aborted"] is True and trial.status != "usable"
+    ti._recorder_at.cache_clear()
+
+
+@pytest.mark.real_sleep
+def test_a_stack_that_writes_nothing_leaves_no_trial(tmp_path, monkeypatch, capsys):
+    """No stack, so nothing writes the log: the recorder finalizes an empty recording and
+    the runner refuses to write metadata for it."""
+    root = tmp_path / "proj"
+    experiments = write_project(root, with_stack=False)
+    use_project(root, monkeypatch)
+    rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+    assert rc == 1 and "holds no data" in out
+    assert ti.load_trials(experiments, "plant") == []
+    ti._recorder_at.cache_clear()
+
+
+def test_the_lint_passes_on_a_project_of_the_process_backend(project):
+    out = subprocess.run([sys.executable, "-m", "robofacts.cli", "lint", "--experiments-root", str(project)],
+                         capture_output=True, text=True, cwd=project.parent)
+    assert out.returncode == 0, out.stdout[-3000:]
+
+
+def test_the_gate_restarts_the_daemon_only_for_the_ros2_backend(project, monkeypatch):
+    """The step before the machine checks is the backend's: the process backend has none."""
+    from robofacts.preflight import run_preflight as rp
+    calls = []
+    monkeypatch.setattr(rp, "bounce_daemon", lambda: calls.append("restart"))
+    rp.prepare_gate()
+    assert calls == []
+    monkeypatch.setenv(backend.ENV_BACKEND, "ros2")
+    rp.prepare_gate()
+    assert calls == ["restart"]

@@ -264,16 +264,18 @@ def test_record_profile_factor_selects_the_topic_set(pieces, monkeypatch):
     factors, config, trial = pieces
     captured = {}
 
-    def fake_build(profile, output, **kwargs):
+    def fake_topics(profile, **kwargs):
         captured["profile"] = profile
-        return ["ros2", "bag", "record", "-o", output]
+        return ["/a_topic"]
 
     monkeypatch.setitem(sys.modules, "robofacts.record_profiles",
-                        type("m", (), {"build_record_command": staticmethod(fake_build),
+                        type("m", (), {"build_topics": staticmethod(fake_topics),
                                        "default_cf_name": staticmethod(lambda: "cf1"),
                                        "default_record_profile": staticmethod(lambda: None)}))
-    tr.record_command(trial, factors, config, Path("/bags/x"))
+    cmd = tr.record_command(trial, factors, config, Path("/bags/x"))
     assert captured["profile"] == "position_only"
+    # The profile's topics are the recorder's sources, after its own output directory.
+    assert cmd[-3:] == ["-o", "/bags/x", "/a_topic"]
 
 
 def test_action_is_templated_from_factor_values(pieces):

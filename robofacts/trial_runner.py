@@ -59,6 +59,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import yaml
 
 
+from . import backend as backends
 from . import bag_storage as bstore
 from . import campaign_plan as cp
 from . import campaign_spec as cs
@@ -197,6 +198,23 @@ class RunnerConfig:
     #: Whether runner.yaml SAYS `explore:` at all. On hardware the declaration
     #: is the opt-in, so an absent block and an empty one are not the same.
     explore_declared: bool = False
+    #: The stack declaration as the backend's launcher parsed it (backend.Launcher.parse).
+    #: Empty for a config built in code, which then uses the three launch_* fields above.
+    stack: Dict[str, Any] = field(default_factory=dict)
+    #: The backend this experiment's project names (trials.yaml ``backend:``). Empty means
+    #: "resolve it from the experiments root, else the working directory".
+    backend_name: str = ""
+
+    def backend(self) -> "backends.Backend":
+        """The backend that starts this experiment's stack and records its trials."""
+        if self.backend_name:
+            return backends.load(self.backend_name)
+        return backends.active(self.experiments_root)
+
+    def stack_spec(self) -> Dict[str, Any]:
+        """What the launcher's ``command`` receives: the parsed stack declaration."""
+        return self.stack or {"package": self.launch_package, "file": self.launch_file,
+                              "mode": self.launch_mode}
 
     def bags_root_for(self, host_level: Optional[Any]) -> Optional[str]:
         """The bags_root that applies to a trial running on ``host_level``."""
@@ -245,12 +263,14 @@ class RunnerConfig:
         if not spec.get("host"):
             raise RunnerError(f"host spec {spec!r} has neither 'local: true' nor 'host'")
         workspace = Path(spec.get("workspace", self.project_root))
+        # The two setup files a host names, else the backend's defaults for a host.
+        ros_setup, ws_setup = self.backend().host_setup(spec, workspace)
         return RemoteTarget(
             host=str(spec["host"]),
             container=str(spec.get("container", "")),
             workspace=workspace,
-            ros_setup=str(spec.get("ros_setup", "/opt/ros/humble/setup.zsh")),
-            ws_setup=str(spec.get("ws_setup", workspace / "ros2_ws/install/setup.zsh")),
+            ros_setup=ros_setup,
+            ws_setup=ws_setup,
             shell=str(spec.get("shell", "zsh")),
             env_setup=tuple(str(f) for f in spec.get("env_setup") or ()),
         )
@@ -291,10 +311,12 @@ class RunnerConfig:
             robot_reset_steps = rr.reset_steps(experiments_root, robots_decl, str(path))
         except rr.RobotResetError as exc:
             raise RunnerError(str(exc)) from exc
-        launch = raw.get("launch") or {}
-        for required in ("package", "file"):
-            if not launch.get(required):
-                raise RunnerError(f"{path}: launch.{required} is required")
+        # The stack declaration belongs to the backend: its launcher says what is required.
+        backend_name = backends.configured_name(experiments_root)
+        try:
+            stack = backends.load(backend_name).launcher.parse(raw, path)
+        except backends.BackendError as exc:
+            raise RunnerError(str(exc)) from exc
         # The experiment's levels, each filled from common/config/hosts.yaml (host_registry.py).
         from . import host_registry
         try:
@@ -308,15 +330,15 @@ class RunnerConfig:
                                           or not all(isinstance(f, str) and f for f in env_setup)):
                 raise RunnerError(f"{path}: hosts.{level}.env_setup must be a list of file paths "
                                   f"to source, got {env_setup!r}")
-        launch_mode = str(raw.get("launch_mode", "launch"))
-        if launch_mode not in ("launch", "run"):
-            raise RunnerError(f"{path}: launch_mode must be 'launch' or 'run', got {launch_mode!r}")
         return cls(
             experiment=experiment,
-            launch_package=str(launch["package"]),
-            launch_file=str(launch["file"]),
-            launch_mode=launch_mode,
-            record_topics=list(raw.get("record_topics") or []),
+            launch_package=str(stack.get("package", "")),
+            launch_file=str(stack.get("file", "")),
+            launch_mode=str(stack.get("mode", "launch")),
+            stack=stack,
+            backend_name=backend_name,
+            # `record_sources` is the same list under the name that fits every backend.
+            record_topics=list(raw.get("record_topics") or raw.get("record_sources") or []),
             action=str((raw.get("action") or {}).get("command", "")).strip(),
             setup_steps=_named_commands(raw.get("setup_steps"), "setup_steps", path),
             robots=robots_decl,
@@ -616,45 +638,26 @@ def templated_command(template: str, trial: cs.TrialSpec, what: str,
 # Command construction (pure — this is what --dry-run shows and tests assert)
 # --------------------------------------------------------------------------- #
 def launch_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
-                   config: RunnerConfig) -> List[str]:
-    if config.launch_mode == "run":
-        # `ros2 run` takes no name:=value arguments; a single-node stack that
-        # needs parameters should use a launch file instead of growing a
-        # half-supported argument path here.
-        return ["ros2", "run", config.launch_package, config.launch_file]
-    cmd = ["ros2", "launch", config.launch_package, config.launch_file]
-    for name, value in sorted(trial.launch_args(factors).items()):
-        # An EMPTY value is dropped, not passed as a bare `name:=`. `ros2 launch`
-        # rejects that outright ("malformed launch argument ..., expected format
-        # '<name>:=<value>'") and refuses to start the whole stack, so a single
-        # empty factor value takes down the rig rather than the one node it
-        # describes. There is no CLI spelling for "pass an empty string" either
-        # — the shell strips the quotes in `name:=""` and launch sees the same
-        # malformed token — so omitting the argument is the only thing an empty
-        # value CAN mean, and it lands on the launch file's own default.
-        #
-        # Found 2026-08-14, lab day 5: `pose_source: mocap` sets
-        # `observer_pose_topic_override: ""` (added with the Exp 3 Part A wiring
-        # in 6e06c10db9 and first RUN today), which blocked the T-0 gate with
-        # three failures that all read like dead hardware — no robot driver node,
-        # no /mocap/drone_pose, no mocap frames — because the stack never
-        # started at all. The declared default for that argument is likewise "",
-        # so dropping it is behaviour-preserving.
-        if value == "":
-            continue
-        cmd.append(f"{name}:={value}")
-    return cmd
+                   config: RunnerConfig) -> Optional[List[str]]:
+    """The command that starts the stack for this trial, from the backend's launcher
+    (None when the experiment declares no stack)."""
+    try:
+        return config.backend().launcher.command(config.stack_spec(), trial.launch_args(factors),
+                                                 dict(trial.values))
+    except backends.BackendError as exc:
+        raise RunnerError(str(exc)) from exc
 
 
 def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                    config: RunnerConfig, bag_dir: Path) -> List[str]:
+    recorder = config.backend().recorder
+    options = {"storage": config.record_storage}
     if config.record_topics:
         # An explicit list beats a named profile for experiments whose topics are
         # not one of the project's named sets.
-        return (["ros2", "bag", "record", "-s", config.record_storage, "-o", str(bag_dir)]
-                + list(config.record_topics))
+        return recorder.command(bag_dir, list(config.record_topics), options)
 
-    from .record_profiles import build_record_command, default_record_profile
+    from .record_profiles import build_topics, default_record_profile
 
     profile = None
     for name, value in trial.values.items():
@@ -676,10 +679,9 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
     from .record_profiles import default_cf_name
 
     cf_name = trial.launch_args(factors).get("cf_name") or config.cf_name or default_cf_name()
-    return build_record_command(profile, str(bag_dir),
-                                cf_name=(str(cf_name) if cf_name else None),
-                                storage=config.record_storage,
-                                experiments_root=config.experiments_root)
+    sources = build_topics(profile, cf_name=(str(cf_name) if cf_name else None),
+                           experiments_root=config.experiments_root)
+    return recorder.command(bag_dir, sources, options)
 
 
 def action_command(trial: cs.TrialSpec, config: RunnerConfig,
@@ -1755,8 +1757,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # directory that claims to be a finished trial is worse than a loud failure:
     # it silently satisfies a cell of the coverage grid forever.
     try:
-        from .remote_exec_utils import bag_has_data, write_trial_file
-        recorded, why = bag_has_data(target, bag_dir)
+        from .remote_exec_utils import write_trial_file
+        recorded, why = config.backend().recorder.has_data(target, bag_dir)
     except Exception as exc:  # noqa: BLE001
         recorded, why = False, f"could not verify the bag ({exc})"
         write_trial_file = None  # type: ignore[assignment]
@@ -1884,22 +1886,13 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     _ctx["metadata"] = {"aborted": metadata.get("aborted"),
                         "abort_reason": metadata.get("abort_reason")}
 
-    # rosout.txt beside the bag (experiments/AGENTS.md), on the host that holds it, and
-    # before the slim copy, which carries it (2026-10-14). Never fatal.
-    export_rosout(bag_dir, target, hooks, cwd)
-
-    # Leave a slim, transferable copy. Never fatal: the trial has flown.
-    if slim:
-        try:
-            from .slim_bag_archive import archive_and_sync
-            local_slim = archive_and_sync(bag_dir, target, project_root=cwd)
-        except Exception as exc:  # noqa: BLE001
-            local_slim = None
-            print(f"[runner] slim archiving skipped ({exc})")
-        # The trial card's stills and camera video, from the local slim copy,
-        # when the experiment declares a camera (config/trial_media.yaml). Never fatal.
-        from .trial_media import make_after_trial
-        make_after_trial(local_slim, bag_dir if target is None else None)
+    # What the recorder does with a finished recording (for ROS 2: rosout.txt beside the
+    # bag, then a slim, transferable copy and the trial's stills). Never fatal: the trial
+    # has happened.
+    try:
+        config.backend().recorder.after_trial(bag_dir, target, hooks, cwd, reduced=slim)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[runner] work after the trial skipped ({exc})")
 
     status = "failed" if (action_failed or detail.startswith("execution error")) else "ran"
     return TrialResult(trial, bag_dir, status, detail, commands)
@@ -1908,23 +1901,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
 
 
-def export_rosout(bag_dir: Path, target, hooks: "ProcessHooks", project_root: Path) -> None:
-    """Write ``<bag>/rosout.txt`` from the bag's /rosout. Never raises: the trial has flown."""
-    try:
-        if target is None:
-            from .export_rosout_text import export_rosout_text
-            count = export_rosout_text(Path(bag_dir), Path(bag_dir) / "rosout.txt")
-            print(f"[runner] rosout.txt: {count} /rosout messages")
-            return
-        root = Path(project_root or target.workspace)
-        completed = hooks.run_foreground(
-            package_module_command(root, "export_rosout_text", [str(bag_dir)]),
-            target, cwd=root, check=False)
-        rc = getattr(completed, "returncode", 0)
-        print("[runner] rosout.txt written on the rig" if rc == 0
-              else f"[runner] rosout export failed on the rig (rc={rc}) - continuing")
-    except Exception as exc:  # noqa: BLE001 - a finished trial outranks a text export
-        print(f"[runner] rosout export skipped ({exc})")
+#: The ROS 2 recorder's text export, under its old name here for Explore and for callers
+#: of the runner module. It moves out with the ROS 2 package.
+from .backends.ros2.recorder import export_rosout  # noqa: E402,F401
 
 
 #: The attempt ledger's file name, under experiments/<name>/runs/.
@@ -2188,7 +2167,7 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                             f"the trial did not finish, so it cannot count as coverage")
         written = None
         if bag_dir is not None and Path(bag_dir).is_dir() \
-                and any(Path(bag_dir).glob("*.mcap")) \
+                and config.backend().recorder.holds_data(Path(bag_dir)) \
                 and not (Path(bag_dir) / "trial_metadata.json").exists():
             metadata = trial_metadata(trial, factors, config, trial_id=Path(bag_dir).name)
             metadata["aborted"] = True

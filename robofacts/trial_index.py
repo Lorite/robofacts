@@ -37,6 +37,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import sys
 from collections import Counter, defaultdict
@@ -86,6 +87,23 @@ NON_FACTOR_FIELDS = {
 RECORDINGS_ELSEWHERE = "recordings_elsewhere.json"
 
 
+@functools.lru_cache(maxsize=64)
+def _recorder_at(start: str):
+    """The recorder of the project at or above ``start``, resolved once per directory:
+    the index asks it of every trial."""
+    from . import backend
+    return backend.active(start).recorder
+
+
+def recording_holds_data(directory: Path) -> bool:
+    """Does this trial directory hold recorded data? The project's recorder says what a
+    data file is (backend.Recorder.holds_data). The project is found from the experiments
+    root, three levels above ``<root>/<experiment>/bags/<trial>``."""
+    directory = Path(directory)
+    start = directory.parents[2] if len(directory.parents) > 2 else directory
+    return _recorder_at(str(start)).holds_data(directory)
+
+
 @dataclass
 class Trial:
     experiment: str
@@ -130,7 +148,7 @@ class Trial:
             return False
         if (self.bag_dir / RECORDINGS_ELSEWHERE).is_file():
             return True
-        return any(p.suffix in (".mcap", ".db3") for p in self.bag_dir.iterdir())
+        return recording_holds_data(self.bag_dir)
 
     @property
     def status(self) -> str:
