@@ -183,6 +183,7 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
         for trial in bags:
             commands.append(_render(analysis.command, {
                 "bag": str(trial.bag_dir),
+                "recording": str(trial.bag_dir),   # the same directory, under the general name
                 "results": str(results_dir / trial.bag_dir.name),
                 "experiment": experiment,
             }, analysis.name))

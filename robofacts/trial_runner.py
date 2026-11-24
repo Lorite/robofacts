@@ -621,6 +621,16 @@ def run_metadata_probes(probes: List[Dict[str, Any]], hooks: "ProcessHooks", tar
     return out
 
 
+def recording_placeholders(directory: Any, values: Iterable[str] = ()) -> Dict[str, str]:
+    """The trial's recording directory as a placeholder: ``{recording}``, and ``{bag}``,
+    the name from before the backends existed, which every project's commands use. A
+    factor called ``recording`` keeps its own placeholder."""
+    out = {"bag": str(directory)}
+    if "recording" not in values:
+        out["recording"] = str(directory)
+    return out
+
+
 def templated_command(template: str, trial: cs.TrialSpec, what: str,
                       **extra: Any) -> List[str]:
     """Fill {factor} placeholders from the trial's values, as the action does.
@@ -923,6 +933,12 @@ class TrialResult:
     #: The attempt ledger line this result produced (None for a dry run).
     ledger: Optional[Dict[str, Any]] = None
 
+    @property
+    def recording_dir(self) -> Optional[Path]:
+        """The trial's recording directory. ``bag_dir`` is the same value under the name
+        from before the backends existed."""
+        return self.bag_dir
+
 
 #: Trial phases an operator may toggle per run. All on by default except the
 #: livestream (foxglove_bridge costs bandwidth on the lab Wi-Fi). Turning a
@@ -1095,6 +1111,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     if local_env is not None:
         hooks = hooks.with_local_setup(*local_env)
     steps = {**DEFAULT_STEPS, **(steps or {})}
+    #: The backend's word for one recording in what the runner prints ("bag" for ROS 2).
+    noun = config.backend().recorder.noun
 
     # SCRATCH FLIGHT (2026-08-12): scratch_label is not None means this is an
     # ad-hoc diagnostic flight, not a campaign trial. Recording is NOT optional
@@ -1196,7 +1214,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # script can be told where its trial's outputs live and leave its own
     # record of the commanded reference beside the bag (2026-08-13).
     action_cmd = (action_command(trial, config,
-                                 extra={"bag": str(bag_dir), **arg_ph})
+                                 extra={**recording_placeholders(bag_dir, trial.values), **arg_ph})
                   if steps["action"] else None)
     livestream_cmd = (shlex.split(config.livestream)
                       if steps["livestream"] and config.livestream else None)
@@ -1228,7 +1246,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # whole value is that its output is filed with the bag it describes rather
     # than in some scratch path nobody correlates later.
     aux_cmds = ([(a["name"], templated_command(a["command"], trial, f"aux launch {a['name']}",
-                                               **{"bag": str(bag_dir), **arg_ph}))
+                                               **{**recording_placeholders(bag_dir, trial.values),
+                                                  **arg_ph}))
                  for a in config.aux_launches] if steps["launch"] else [])
     if livestream_cmd:
         aux_cmds.append(("livestream", livestream_cmd))
@@ -1744,12 +1763,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 print(f"[runner] linked {link} -> {bag_dir}")
                 bag_dir = link
             else:
-                print(f"[runner] WARNING could not link the external bag into the repo; "
+                print(f"[runner] WARNING could not link the external {noun} into the repo; "
                       f"the trial is safe at {bag_dir} but will not be counted by "
                       f"trial_index until it is offloaded or linked by hand")
         except Exception as exc:  # noqa: BLE001 - never lose a finished trial
-            print(f"[runner] WARNING linking the external bag failed ({exc}); "
-                  f"the bag itself is intact at {bag_dir}")
+            print(f"[runner] WARNING linking the external {noun} failed ({exc}); "
+                  f"the {noun} itself is intact at {bag_dir}")
 
     # Did the recorder actually produce a bag, on the machine that recorded it?
     # Asked before the metadata is written, because writing trial_metadata.json
@@ -1760,17 +1779,17 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         from .remote_exec_utils import write_trial_file
         recorded, why = config.backend().recorder.has_data(target, bag_dir)
     except Exception as exc:  # noqa: BLE001
-        recorded, why = False, f"could not verify the bag ({exc})"
+        recorded, why = False, f"could not verify the {noun} ({exc})"
         write_trial_file = None  # type: ignore[assignment]
 
     if not recorded:
-        detail = f"{detail} | no bag recorded: {why}".strip(" |") if detail else \
-            f"no bag recorded: {why}"
+        detail = f"{detail} | no {noun} recorded: {why}".strip(" |") if detail else \
+            f"no {noun} recorded: {why}"
         trace_step("bag check", "record", ok=False, output=str(why),
              note="the recorder left no data, so no trial_metadata.json was written")
         print(f"[runner] TRIAL FAILED - {detail}")
-        print("[runner] no trial_metadata.json written: an empty bag must never "
-              "count as coverage")
+        print(f"[runner] no trial_metadata.json written: an empty {noun} must never "
+              f"count as coverage")
         return TrialResult(trial, bag_dir, "failed", detail, commands)
 
     # Did the trial actually HAPPEN? Asked of the bag, not of an exit code.
@@ -1786,7 +1805,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     _t_verify = time.monotonic()
     for step in all_verify:
         cmd = templated_command(step["command"], trial, f"verify step {step['name']}",
-                                bag=str(bag_dir), **arg_ph)
+                                **recording_placeholders(bag_dir, trial.values), **arg_ph)
         print(f"[verify] {step['name']}")
         _t_step = time.monotonic()
         completed = hooks.run_foreground(cmd, target, cwd=cwd, check=False)
@@ -1839,7 +1858,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                                                                             trial.named)
     if all_probes:
         probed = run_metadata_probes(all_probes, hooks, target, cwd,
-                                     placeholders={**trial.values, "bag": str(bag_dir),
+                                     placeholders={**trial.values,
+                                                   **recording_placeholders(bag_dir, trial.values),
                                                    **arg_ph})
         metadata.update(probed)
         if probed:

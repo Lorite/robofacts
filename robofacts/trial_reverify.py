@@ -88,6 +88,7 @@ def placeholders(values: Dict[str, Any], launch_args: Any, bag: Path) -> Dict[st
     if isinstance(launch_args, dict):
         out.update({f"arg_{k}": v for k, v in launch_args.items()})
     out["bag"] = str(bag)
+    out.setdefault("recording", str(bag))   # the same directory, under the general name
     return out
 
 

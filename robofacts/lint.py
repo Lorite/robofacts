@@ -136,6 +136,10 @@ def launch_dirs(package: str) -> list[Path]:
 PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
+#: The trial's recording directory in a command: ``{recording}``, or ``{bag}``, the older name.
+RECORDING_PLACEHOLDERS = ("bag", "recording")
+
+
 def ros2_project() -> bool:
     """Is this project on the ROS 2 backend? Some rules are facts about ROS 2 (the launch
     arguments of a launch file, /rosout in every recording) and bind only there."""
@@ -282,7 +286,7 @@ def test_command_placeholders_are_declared_factors(experiment):
             # Probes keep literal braces of their own (awk '{print $1}'), which
             # the runner leaves alone, so only identifiers that LOOK like
             # factor names are policed there.
-            if where.startswith("metadata_probes") and placeholder == "bag":
+            if where.startswith("metadata_probes") and placeholder in RECORDING_PLACEHOLDERS:
                 continue
             # The runner hands {bag} to the verify steps, to the action
             # (trial_runner.action_command extra placeholders, 2026-08-13:
@@ -291,7 +295,7 @@ def test_command_placeholders_are_declared_factors(experiment):
             # since 2026-08-18 to the AUX LAUNCHES, so a side process that
             # records something about the trial can file it with the trial
             # (sample_process_resources.py).
-            if placeholder == "bag" and (where == "action"
+            if placeholder in RECORDING_PLACEHOLDERS and (where == "action"
                                          or where.startswith("verify_steps")
                                          or where.startswith("aux_launches")):
                 continue

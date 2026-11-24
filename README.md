@@ -67,6 +67,17 @@ Every command resolves the experiments root in this order: the `--experiments-ro
 
 Besides the two roots, `trials.yaml` may hold the names a project gives to what used to be constants in the code, so that the package itself knows no robot: `stop_latch` (the file every stop command writes first, which the gate's `stop_latch` check refuses while it is younger than 120 s, default `/tmp/trial_stop_latch`) and `record_profiles` (the names, such as the drone or the camera namespace, that fill the placeholders of the project's record profiles. The core has no defaults, and an enabled robot adapter brings its own, `cf1` for the Crazyflie and `spot` for Spot). `adapters`, `parallel_safe_checks` and `stop_patterns` are described under "Robot adapters" below. An experiment's `runner.yaml` may still say `cf_name:` for its own drone. The environment variables the package reads all start with `TRIALS_`: `TRIALS_EXPERIMENTS_ROOT`, `TRIALS_PROJECT_ROOT`, `TRIALS_STOP_LATCH`, `TRIALS_PREFLIGHT_CONCURRENCY`, `TRIALS_PREFLIGHT_TIMING_LOG`, `TRIALS_VOICE`, `TRIALS_VOICE_HOST`, `TRIALS_VOICE_PORT`, `TRIALS_ROBOTS_CONFIG`. Two older names are the exception: `RIG_HOST` (read by the host registry and by `estop.sh`) and `RIG_CONTAINER` (read by `estop.sh`). They stay because operators type them during a stop.
 
+## The backend: how the stack starts and how a trial is recorded
+
+The planner, the linter, the gate protocol, the trial loop and the coverage index do not depend on the middleware of the system under test. Two things do: starting the stack and recording the trial. A backend supplies both as two interfaces that return command lines, a launcher and a recorder (`robofacts/backend.py`), and the runner keeps all process handling. `trials.yaml` names the backend:
+
+```yaml
+backend: ros2       # ros2 launch or ros2 run, ros2 bag record, a recording is a bag
+backend: process    # a shell command, and a recorder that stores what the system appends to its log files
+```
+
+A project that names none runs on `ros2`. `$TRIALS_BACKEND` overrides the file for one session. On the `process` backend, `runner.yaml` declares `launch: {command: "..."}` (templated like the action, optional) and `record_sources:` (the files to follow), and a recording is a directory with `data/` and a `recording.json` written last. A command may name the trial's recording directory as `{recording}` or, as before, `{bag}`. The folders keep their names on every backend: `bags/`, `bags_issues/`, `bags_slim/`, `bags_scratch/`.
+
 ## Where a trial runs
 
 The `execution_host` factor names a host level for each trial (for example `laptop` or `rig`). `<experiments root>/common/config/hosts.yaml` declares once how to reach each level: `local: true`, or an ssh `host` alias with its `container`, `container_hostname`, `shell` and setup files. An experiment's `runner.yaml` lists under `hosts:` the levels it may run on. A level with no value takes the registry's settings, and a level with keys replaces only those keys, for example `env_setup` for an overlay. A trial on a level the experiment does not declare is refused, where it used to run on the runner's own machine without a word. `RIG_HOST=<alias>` replaces the ssh alias of the registry's `rig:` level for one session, for example a VPN name when you work remotely. A project without `hosts.yaml` writes each level's full settings in `runner.yaml`, as before. Code: `robofacts/host_registry.py`.

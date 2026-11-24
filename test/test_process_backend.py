@@ -97,7 +97,7 @@ def write_project(root: Path, *, min_lines: int = 3, with_stack: bool = True) ->
         stop_grace_s: 0.3
         verify_steps:
           - name: plant_log_recorded
-            command: "python3 experiments/plant/scripts/verify_log.py {{bag}} {{rate}} {min_lines}"
+            command: "python3 experiments/plant/scripts/verify_log.py {{recording}} {{rate}} {min_lines}"
         hosts:
           laptop: {{local: true}}
         """), encoding="utf-8")
@@ -294,6 +294,7 @@ def test_a_stack_that_writes_nothing_leaves_no_trial(tmp_path, monkeypatch, caps
     use_project(root, monkeypatch)
     rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
     assert rc == 1 and "holds no data" in out
+    assert "no recording recorded" in out and "bag" not in out.replace("bags", ""), out
     assert ti.load_trials(experiments, "plant") == []
     ti._recorder_at.cache_clear()
 
@@ -314,3 +315,9 @@ def test_the_gate_restarts_the_daemon_only_for_the_ros2_backend(project, monkeyp
     monkeypatch.setenv(backend.ENV_BACKEND, "ros2")
     rp.prepare_gate()
     assert calls == ["restart"]
+
+
+def test_the_recording_directory_has_two_placeholder_names():
+    assert tr.recording_placeholders("/r/t1") == {"bag": "/r/t1", "recording": "/r/t1"}
+    # A project's own factor called `recording` keeps its placeholder.
+    assert tr.recording_placeholders("/r/t1", {"recording": "x"}) == {"bag": "/r/t1"}
