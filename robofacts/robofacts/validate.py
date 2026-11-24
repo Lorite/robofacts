@@ -239,7 +239,9 @@ def validate(target: str, experiments_root: Path, skip: Sequence[str] = ()) -> R
         lint_file = Path(__file__).with_name("lint.py")
 
         def run_lint():
-            rc, out, summary = _pytest([str(lint_file)], experiments_root,
+            from . import backend
+            lint_files = [str(lint_file), *[str(f) for f in backend.active(experiments_root).lint_files]]
+            rc, out, summary = _pytest(lint_files, experiments_root,
                                        {LINT_ENV: experiment})
             return ("ok" if rc == 0 else "FAIL"), summary, out
         _timed(report, "lint", experiment, run_lint)

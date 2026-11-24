@@ -100,6 +100,7 @@ def test_every_shipped_analyses_file_loads():
 # --------------------------------------------------------------------------- #
 # Cohort selection
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_only_usable_bags_are_selected_by_default(root):
     add_bag(root, "good", GOOD)
     add_bag(root, "aborted", dict(GOOD, aborted=True, abort_reason="r"))
@@ -107,6 +108,7 @@ def test_only_usable_bags_are_selected_by_default(root):
     assert [t.bag_dir.name for t in ar.select_bags("expA", root)] == ["good"]
 
 
+@pytest.mark.ros2
 def test_unverified_can_be_included_explicitly(root):
     add_bag(root, "good", GOOD)
     add_bag(root, "broken", {"trial_id": "x"})
@@ -114,6 +116,7 @@ def test_unverified_can_be_included_explicitly(root):
     assert names == ["broken", "good"]
 
 
+@pytest.mark.ros2
 def test_slim_copies_are_never_selected(root):
     """A slim bag is a copy of a trial, not another trial — analysing both would
     double-count every slimmed run."""
@@ -122,6 +125,7 @@ def test_slim_copies_are_never_selected(root):
     assert [t.bag_dir.name for t in ar.select_bags("expA", root)] == ["t1"]
 
 
+@pytest.mark.ros2
 def test_a_factor_filter_narrows_the_cohort(root):
     add_bag(root, "orin1", dict(GOOD, execution_host="orin"))
     add_bag(root, "laptop1", dict(GOOD, execution_host="laptop"))
@@ -132,6 +136,7 @@ def test_a_factor_filter_narrows_the_cohort(root):
 # --------------------------------------------------------------------------- #
 # Running
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_per_bag_analysis_builds_one_command_per_bag(root):
     add_bag(root, "a", GOOD)
     add_bag(root, "b", dict(GOOD, trial_id="b"))
@@ -141,6 +146,7 @@ def test_per_bag_analysis_builds_one_command_per_bag(root):
     assert all(cmd[0] == "echo" for cmd in result.commands)
 
 
+@pytest.mark.ros2
 def test_cohort_analysis_builds_a_single_command(root):
     add_bag(root, "a", GOOD)
     add_bag(root, "b", dict(GOOD, trial_id="b"))
@@ -157,6 +163,7 @@ def test_an_empty_cohort_is_an_error_not_a_silent_noop(root):
         ar.run_analysis(analyses["per_bag"], [], "expA", root)
 
 
+@pytest.mark.ros2
 def test_dry_run_writes_nothing(root):
     add_bag(root, "a", GOOD)
     analyses = ar.load_analyses("expA", root)
@@ -164,6 +171,7 @@ def test_dry_run_writes_nothing(root):
     assert not result.results_dir.exists()
 
 
+@pytest.mark.ros2
 def test_an_unknown_placeholder_is_reported(root):
     (root / "expA" / "config" / "analyses.yaml").write_text(
         'analyses:\n  x: {per: bag, command: "echo {nonsense}"}\n', encoding="utf-8")
@@ -176,6 +184,7 @@ def test_an_unknown_placeholder_is_reported(root):
 # --------------------------------------------------------------------------- #
 # Provenance — the reason this exists
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_results_record_which_bags_they_came_from(root):
     add_bag(root, "a", GOOD)
     add_bag(root, "b", dict(GOOD, trial_id="b"))
@@ -193,6 +202,7 @@ def test_results_record_which_bags_they_came_from(root):
     assert metadata["schema_version"] == 1
 
 
+@pytest.mark.ros2
 def test_failures_are_counted_and_reported(root):
     add_bag(root, "a", GOOD)
     analyses = ar.load_analyses("expA", root)
@@ -216,6 +226,7 @@ def test_cli_rejects_an_unknown_analysis(root, capsys):
     assert "unknown analysis" in capsys.readouterr().err
 
 
+@pytest.mark.ros2
 def test_cli_dry_runs(root, capsys):
     add_bag(root, "a", GOOD)
     assert ar.main(["expA", "per_bag", "--experiments-root", str(root)]) == 0

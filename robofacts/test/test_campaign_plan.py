@@ -88,6 +88,7 @@ def test_nothing_recorded_means_everything_to_fly(root):
     assert (plan.wanted, plan.covered, plan.needed) == (6, 0, 6)
 
 
+@pytest.mark.ros2
 def test_usable_trials_reduce_what_is_needed(root):
     add_trial(root, "expA", "t1", dict(GOOD, trajectory="hover"))
     add_trial(root, "expA", "t2", dict(GOOD, trial_id="b", trajectory="hover"))
@@ -97,6 +98,7 @@ def test_usable_trials_reduce_what_is_needed(root):
     assert plan.needed == 4
 
 
+@pytest.mark.ros2
 def test_more_bags_than_wanted_never_goes_negative(root):
     for i in range(5):
         add_trial(root, "expA", f"t{i}", dict(GOOD, trial_id=str(i), trajectory="hover"))
@@ -124,6 +126,7 @@ def test_issue_bags_never_count(root):
     assert hover.excluded == 1 and hover.needed(True) == 3
 
 
+@pytest.mark.ros2
 def test_unverified_trials_are_excluded_by_default(root):
     add_trial(root, "expA", "t1", {"trajectory": "hover"})  # violates the contract
     plan = plan_for(root)
@@ -131,6 +134,7 @@ def test_unverified_trials_are_excluded_by_default(root):
     assert hover.unverified == 1 and hover.needed() == 3
 
 
+@pytest.mark.ros2
 def test_include_unverified_counts_them(root):
     add_trial(root, "expA", "t1", {"trajectory": "hover"})
     plan = plan_for(root, include_unverified=True)
@@ -141,6 +145,7 @@ def test_include_unverified_counts_them(root):
 # --------------------------------------------------------------------------- #
 # Matching semantics
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_a_factor_without_a_metadata_key_never_narrows_the_match(root):
     """A factor the trial cannot record (no metadata key) cannot narrow the match."""
     add_trial(root, "expA", "t1", dict(GOOD, trajectory="hover", knob="b"))
@@ -156,6 +161,7 @@ def test_an_unnamed_factor_at_another_level_does_not_match(root):
     assert plan_for(root).covered == 0
 
 
+@pytest.mark.ros2
 def test_an_unnamed_factor_the_trial_never_recorded_counts_as_its_default(root):
     """A trial recorded before a factor existed has no key for it: it ran at the default."""
     contract = root / "common" / "config" / "trial_metadata_core.yaml"
@@ -168,6 +174,7 @@ def test_an_unnamed_factor_the_trial_never_recorded_counts_as_its_default(root):
     assert hover.usable == 1
 
 
+@pytest.mark.ros2
 def test_a_none_alias_keeps_older_trials_apart_when_a_default_changes(root):
     """A factor whose default changed maps the missing key of older trials to the
     old level with a ``None`` alias, so they stop counting for the new default."""
@@ -196,6 +203,7 @@ def test_a_fixed_factor_does_narrow_the_match(root):
     assert plan.covered == 0
 
 
+@pytest.mark.ros2
 def test_aliases_let_historical_values_match(root):
     """Host names were written ad hoc before the factor file existed; without
     aliases every historical bag is permanently unmatchable."""
@@ -223,6 +231,7 @@ def test_a_factor_without_a_metadata_key_is_reported_as_unmatchable(root):
     assert "knob" in plan.unmatchable_factors
 
 
+@pytest.mark.ros2
 def test_matched_bags_are_named_for_traceability(root):
     add_trial(root, "expA", "2026-07-25_t1", dict(GOOD, trajectory="hover"))
     hover = next(c for c in plan_for(root).cells if c.values["trajectory"] == "hover")
@@ -232,6 +241,7 @@ def test_matched_bags_are_named_for_traceability(root):
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_render_separates_todo_from_covered(root):
     for i in range(3):
         add_trial(root, "expA", f"t{i}", dict(GOOD, trial_id=str(i), trajectory="hover"))
@@ -240,6 +250,7 @@ def test_render_separates_todo_from_covered(root):
     assert "STILL MISSING 3" in text, "the paper's words: wanted, covered, still missing"
 
 
+@pytest.mark.ros2
 def test_render_warns_that_unverified_were_not_counted(root):
     add_trial(root, "expA", "t1", {"trajectory": "hover"})
     assert "not counted" in cp.render(plan_for(root)).lower()

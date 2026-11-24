@@ -9,9 +9,6 @@ not — and, more importantly, it applies to experiments that do not exist yet.
 The rules, and the incident behind each:
 
 L1  level_values may only map declared levels.
-L2  a launch_arg factor must name an argument the launch file declares.
-    (`trajectory` was mapped to a launch_arg this launch does not have; ros2
-    launch rejects unknown arguments, so every trial would have failed.)
 L3  an `internal` factor must be CONSUMED by some command template, else it is
     recorded in the metadata but never applied. (`altitude` was recorded while
     the action still used the script's 0.5 m default, so the campaign claimed
@@ -25,12 +22,6 @@ L4b (2026-11-04) the same for a campaign's own setup_steps (a reset step between
     repeated trials): {factor} or {arg_<launch argument>}, never {bag}, because
     setup runs before the trial has a bag. Its `when` must be first, repeat or
     always, and so must an operator step's.
-L5  a campaign's pre-flight operator_steps must not start ROS processes: a
-    trial's setup steps tear down the previous stack first (scripts/kill_ros.sh,
-    which matches /opt/ros/ and any *_ws/install/, or an experiment's own stop
-    script), so anything the operator starts beforehand is killed by the trial
-    it was started for. Such things belong in aux_launches, or in
-    operator_live_steps.
 L6  every experiment must declare verify_steps in runner.yaml, or say why it has
     none with `no_verify_steps: <reason>`. An action's exit code describes a
     process, only the recording describes the trial. (A latched e-stop produced
@@ -59,13 +50,6 @@ L10 every campaign must LOAD — or be refused only because it asks for a level
     three bags labelled `on` would have read as coverage forever. A level whose
     apparatus does not exist is refused at plan time; this rule is what keeps
     that refusal a reviewed declaration instead of a broken file.)
-L11 every record profile, and every explicit record_topics list, must record
-    /rosout. On goTo flights the /rosout log is a recorder of the commanded
-    reference itself (the swarm server logs every go_to call, and the
-    2026-08-13 goto_tracking analysis reconstructs lateral tracking from it),
-    besides being the trim-window and backfill source for every bag. A profile
-    edit that drops it would silently make future flights unanalyzable, so the
-    guard lives here rather than in prose.
 L12 a factor of `maps_to.kind: gate` (levels that bind, shadow or disable the
     T-0 gate per trial, 2026-10-01, the SAC 2027 gate-effect experiment) is
     allowed only in an experiment whose runner.yaml declares
@@ -97,12 +81,8 @@ L15 a campaign's spoken cues (`voice_cues`, `voice_announce`, 2026-10-13) are
     or after runner.yaml's `action_timeout_s`: the runner stops the timeline
     when the action ends, so such a cue would never be spoken, and the
     operator who waits for it would wait in vain.
-L16 on a real robot (`simulation: false`), runner.yaml's `explore:` block may
-    not open every parameter (2026-10-16, Explore mode). Its
-    `param_whitelist` is what a Foxglove tab may change on a running stack, so
-    a pattern such as `.*` would make every gain and every safety limit of the
-    robot writable from a browser. Name each parameter you allow. In
-    simulation the default is `['.*']` and this rule does not apply.
+The rules L2, L5, L11 and L16 are facts about ROS 2. They are in the ROS 2 package
+(robofacts_ros2/lint_ros2.py), and `trials lint` runs them for a project on that backend.
 """
 from __future__ import annotations
 
@@ -116,7 +96,6 @@ import yaml
 
 
 from . import campaign_spec as cs
-from . import explore as ex
 from . import trial_runner as tr
 from . import roots
 from .preflight import run_preflight
@@ -127,25 +106,11 @@ EXPERIMENTS_ROOT = roots.experiments_root()
 REPO_ROOT = roots.project_root(experiments=EXPERIMENTS_ROOT)
 
 
-def launch_dirs(package: str) -> list[Path]:
-    """Where a source package's launch files may live under the project root."""
-    return [REPO_ROOT / "ros2_ws" / "src" / package / "launch",
-            REPO_ROOT / "src" / package / "launch",
-            REPO_ROOT / package / "launch"]
-
 PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
 #: The trial's recording directory in a command: ``{recording}``, or ``{bag}``, the older name.
 RECORDING_PLACEHOLDERS = ("bag", "recording")
-
-
-def ros2_project() -> bool:
-    """Is this project on the ROS 2 backend? Some rules are facts about ROS 2 (the launch
-    arguments of a launch file, /rosout in every recording) and bind only there."""
-    from . import backend
-    return backend.configured_name(EXPERIMENTS_ROOT) == "ros2"
-STARTS_ROS_PROCESS = re.compile(r"\bros2\s+(run|launch)\b")
 
 
 # `trials lint --experiment <name>` (and `trials validate`) set this to lint ONE experiment.
@@ -162,15 +127,6 @@ def experiments_with_runner() -> list[str]:
 
 def campaigns_of(experiment: str) -> list[Path]:
     return sorted((EXPERIMENTS_ROOT / experiment / "campaigns").glob("*.yaml"))
-
-
-def declared_launch_args(launch_file: str, package: str = "") -> set[str] | None:
-    """Arguments a launch file declares, or None if it cannot be read."""
-    path = next((d / launch_file for d in launch_dirs(package) if (d / launch_file).is_file()), None)
-    if path is None:
-        return None
-    src = path.read_text(encoding="utf-8")
-    return set(re.findall(r"DeclareLaunchArgument\(\s*[\"']([a-zA-Z_][a-zA-Z0-9_]*)[\"']", src))
 
 
 def command_templates(config) -> list[tuple[str, str]]:
@@ -214,23 +170,6 @@ def test_level_values_map_declared_levels_only(experiment):
             assert str(level) in levels, (
                 f"{experiment}: factor {name!r} maps level_values[{level!r}], which is not "
                 f"one of its levels {sorted(levels)} — it would never be used")
-
-
-@pytest.mark.parametrize("experiment", experiments_with_runner())
-def test_launch_arg_factors_name_real_launch_arguments(experiment):
-    """L2 — ros2 launch REJECTS an unknown argument, so this fails every trial."""
-    config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    declared = declared_launch_args(config.launch_file, config.launch_package)
-    if declared is None:
-        pytest.skip(f"{config.launch_file} not found (external package?)")
-    for name, factor in cs.load_factors(experiment, EXPERIMENTS_ROOT).items():
-        if factor.maps_to.get("kind") != "launch_arg":
-            continue
-        targets = factor.maps_to.get("names") or [factor.maps_to.get("name")]
-        for target in targets:
-            assert target in declared, (
-                f"{experiment}: factor {name!r} maps to launch argument {target!r}, which "
-                f"{config.launch_file} does not declare — ros2 launch would reject it")
 
 
 @pytest.mark.parametrize("experiment", experiments_with_runner())
@@ -341,21 +280,6 @@ def test_campaign_setup_step_placeholders_are_declared_factors(experiment):
                 assert str(step.get("when") or "always") in cs.STEP_WHEN, (
                     f"{path.name}: operator_steps[{i}] when={step.get('when')!r} is not one of "
                     f"{', '.join(cs.STEP_WHEN)}")
-
-
-@pytest.mark.parametrize("experiment", experiments_with_runner())
-def test_pre_flight_operator_steps_do_not_start_ros_processes(experiment):
-    """L5: the setup steps' stack teardown would kill them. They belong in aux or live steps."""
-    for path in campaigns_of(experiment):
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for step in raw.get("operator_steps") or []:
-            assert not STARTS_ROS_PROCESS.search(str(step)), (
-                f"{path.name}: an operator_step starts a ROS process:\n  {str(step)[:120]}\n"
-                f"A trial's setup steps tear down the previous stack before the launch "
-                f"(scripts/kill_ros.sh matches /opt/ros/ and any *_ws/install/), so it would "
-                f"be killed by the very trial it was started for. Put it in aux_launches "
-                f"(the runner starts it) or operator_live_steps (started while the trial "
-                f"runs)")
 
 
 #: runner.yaml's way to say that an experiment has no verify step on purpose (L6).
@@ -511,48 +435,6 @@ def test_every_record_profile_is_a_legal_metadata_level():
             f"is then unverifiable.")
 
 
-def test_every_record_profile_records_rosout():
-    """L11 - /rosout is a recorder of the commanded reference, not just a log.
-
-    On goTo flights nothing streams a setpoint topic: the reference is
-    reconstructed from the swarm server's go_to log on /rosout (the
-    goto_tracking analysis, 2026-08-13), cross-checked against the flight-time
-    commanded_waypoints.json. /rosout is also what the trim windows and the
-    metadata backfill read. Today every profile inherits it from a composed
-    topic group; this pins that so a future profile (or a group edit) cannot
-    silently drop the channel and make every flight recorded on it
-    unanalyzable.
-    """
-    from .record_profiles import build_topics, profiles
-
-    if not ros2_project():
-        pytest.skip("a rule of the ROS 2 backend")
-    for profile in profiles(EXPERIMENTS_ROOT):
-        topics = build_topics(profile, experiments_root=EXPERIMENTS_ROOT)
-        assert "/rosout" in topics, (
-            f"record profile {profile!r} does not record /rosout. That channel "
-            f"carries the go_to log (the commanded reference of goTo flights), "
-            f"the analysis trim events and the backfill evidence, so a bag "
-            f"without it cannot be trimmed, backfilled, or scored for "
-            f"tracking. Add /rosout (or a group that carries it) to the "
-            f"profile.")
-
-
-@pytest.mark.parametrize("experiment", experiments_with_runner())
-def test_explicit_record_topics_record_rosout(experiment):
-    """L11 (explicit-list form) - a runner.yaml that bypasses the named
-    profiles with its own record_topics list must still record /rosout."""
-    config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    if not ros2_project():
-        pytest.skip("a rule of the ROS 2 backend")
-    if not config.record_topics:
-        pytest.skip("uses a named record profile (covered by the profile rule)")
-    assert "/rosout" in config.record_topics, (
-        f"{experiment}: config/runner.yaml record_topics does not include "
-        f"/rosout. The trim windows, the metadata backfill and (for goTo "
-        f"flights) the commanded reference all read it.")
-
-
 @pytest.mark.parametrize("experiment", experiments_with_runner())
 def test_gate_factors_only_in_simulated_experiments(experiment):
     """L12 - a gate that may be shadowed or disabled belongs in simulation only."""
@@ -661,14 +543,3 @@ def test_voice_cues_are_speakable(experiment):
     assert not problems, "\n  ".join(problems)
 
 
-@pytest.mark.parametrize("experiment", experiments_with_runner())
-def test_explore_does_not_open_every_parameter_of_a_real_robot(experiment):
-    """L16 - on hardware, each parameter Explore may change is named."""
-    config = tr.RunnerConfig.load(experiment, EXPERIMENTS_ROOT)
-    if config.simulation or not config.explore_declared:
-        return
-    wide = [p for p in config.explore.get("param_whitelist", []) if ex.matches_everything(p)]
-    assert not wide, (
-        f"{experiment}: explore.param_whitelist has {wide}, which matches every parameter. "
-        f"On real robots Explore lets a Foxglove tab change these on the running stack, so "
-        f"name the parameters you allow, one pattern each (for example '^/drone1/controller\\.kp$')")

@@ -86,9 +86,9 @@ MAX_DIRTY_FILES = 20
 
 DEFAULT_TIMEOUT_S = 20.0
 
-#: Tried when ``trials.yaml`` declares no ``colcon_workspaces``: the project is itself a
-#: colcon workspace, or it holds one at ``ros2_ws/`` (the layout of the lab this came from).
-DEFAULT_WORKSPACES = (".", "ros2_ws")
+#: Tried when ``trials.yaml`` declares no ``build_workspaces`` and the backend names none:
+#: the project itself, when it holds ``src/`` and ``install/``.
+DEFAULT_WORKSPACES = (".",)
 
 # `safe.directory` because the workspace is a bind mount owned by the host user
 # while the container runs as another: without it git refuses with "detected
@@ -151,9 +151,16 @@ def workspaces_to_probe() -> List[str]:
     ``colcon_workspaces`` in ``trials.yaml`` wins. Without it, ``.`` and ``ros2_ws`` are
     tried, and the probe itself skips a candidate without ``src/`` and ``install/``.
     """
-    declared = roots.setting("colcon_workspaces")
+    from . import backend
+    try:
+        active = backend.active()
+    except backend.BackendError:
+        active = None
+    declared = roots.setting("build_workspaces")
+    if declared is None and active is not None and active.workspaces_setting:
+        declared = roots.setting(active.workspaces_setting)   # the backend's older name of the key
     if declared is None:
-        return list(DEFAULT_WORKSPACES)
+        return list(active.build_workspaces if active is not None else DEFAULT_WORKSPACES)
     if isinstance(declared, str):
         declared = [declared]
     return [str(w) for w in declared]

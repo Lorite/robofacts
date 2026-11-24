@@ -36,6 +36,18 @@ def _render(template: Path, destination: Path, name: str) -> None:
     shutil.copymode(template, destination)
 
 
+def experiment_template(experiments_root: Optional[Path] = None) -> Path:
+    """The experiment template in force: the one of the project's backend, else the core's."""
+    from . import backend
+    try:
+        custom = backend.active(experiments_root).skeleton_dir
+    except backend.BackendError:
+        custom = None
+    if custom is not None and (custom / "experiment").is_dir():
+        return custom / "experiment"
+    return SKELETON / "experiment"
+
+
 def new_experiment(name: str, experiments_root: Path) -> List[Path]:
     """Write experiments/<name>/ from the template. Returns the files written."""
     if not NAME_RE.match(name):
@@ -48,7 +60,7 @@ def new_experiment(name: str, experiments_root: Path) -> List[Path]:
         raise ScaffoldError(f"{experiments_root} is not an experiments root (no "
                             f"{roots.CORE_SCHEMA_REL}); run 'trials init' first")
     written = []
-    source = SKELETON / "experiment"
+    source = experiment_template(experiments_root)
     for template in _template_files(source):
         destination = target / template.relative_to(source)
         _render(template, destination, name)
@@ -293,12 +305,21 @@ def new_experiment_from(name: str, source_name: str, experiments_root: Path,
     return report
 
 
-def init_project(directory: Path) -> List[Path]:
-    """Write a project: trials.yaml and experiments/common/config/. Returns the files written."""
+def init_project(directory: Path, backend_name: Optional[str] = None) -> List[Path]:
+    """Write a project: trials.yaml and experiments/common/config/. Returns the files written.
+
+    ``backend_name`` picks the backend the project runs on (default: the one in force, see
+    robofacts.backend). A backend may replace template files with its own."""
+    from . import backend
+    chosen = backend.load(backend_name or backend.configured_name(directory))
     source = SKELETON / "project"
+    overlay = (chosen.skeleton_dir / "project") if chosen.skeleton_dir else None
+    templates = {t.relative_to(source): t for t in _template_files(source)}
+    if overlay is not None and overlay.is_dir():
+        templates.update({t.relative_to(overlay): t for t in _template_files(overlay)})
     written = []
-    for template in _template_files(source):
-        destination = directory / template.relative_to(source)
+    for relative, template in sorted(templates.items()):
+        destination = directory / relative
         if destination.exists():
             raise ScaffoldError(f"{destination} already exists")
         _render(template, destination, directory.name)
@@ -405,10 +426,14 @@ def main_init(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("directory", type=Path, nargs="?", default=Path("."),
                     help="the project root (default: the current directory)")
     ap.add_argument("--experiment", metavar="NAME", help="also create a first experiment")
+    ap.add_argument("--backend", metavar="NAME", default=None,
+                    help="the backend the project runs on: process (built in), ros2 (the package "
+                         "robofacts_ros2), or a module (default: $TRIALS_BACKEND, else the one of "
+                         "the project above this directory, else process)")
     args = ap.parse_args(argv)
     directory = args.directory.expanduser().resolve()
     try:
-        written = init_project(directory)
+        written = init_project(directory, args.backend)
         if args.experiment:
             written += new_experiment(args.experiment, directory / "experiments")
     except ScaffoldError as exc:

@@ -40,11 +40,6 @@ def _run(argv):
     return trial_runner.main(argv)
 
 
-def _explore(argv):
-    from . import explore
-    return explore.main(argv)
-
-
 def _index(argv):
     from . import trial_index
     return trial_index.main(argv)
@@ -105,31 +100,9 @@ def _profiles(argv):
     return record_profiles.main(argv)
 
 
-def _slim(argv):
-    from . import slim_bag_archive
-    return slim_bag_archive.main(argv)
-
-
 def _version_probe(argv):
     from . import code_version
     return code_version.main(argv)
-
-
-def _ui(argv):
-    # The parser lives apart from the app, so the help needs no Flask.
-    from .ui.arguments import build_parser
-    if any(a in ("-h", "--help") for a in argv):
-        build_parser().print_help()
-        return 0
-    try:
-        from .ui import app
-    except ImportError as exc:
-        if "flask" in str(exc).lower():
-            print("trials ui: the web interface needs Flask (`pip install flask`), which the dev "
-                  "container has. The other commands do not need it.", file=sys.stderr)
-            return 2
-        raise
-    return app.main(argv)
 
 
 def _validate(argv):
@@ -187,8 +160,10 @@ def _lint(argv):
         os.environ["TRIALS_LINT_EXPERIMENT"] = args.experiment
     import pytest
 
-    from . import lint
-    return int(pytest.main(["-q", "-p", "no:cacheprovider", lint.__file__, *passthrough, *args.pytest_args]))
+    from . import backend, lint
+    # The core's rules, then the rules of the project's backend.
+    files = [lint.__file__, *[str(f) for f in backend.active(args.experiments_root).lint_files]]
+    return int(pytest.main(["-q", "-p", "no:cacheprovider", *files, *passthrough, *args.pytest_args]))
 
 
 def _roots(argv):
@@ -215,8 +190,6 @@ def _roots(argv):
 COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "plan": (_plan, "what a campaign still needs (the planner)"),
     "run": (_run, "run the trials a campaign still needs (dry run without --execute)"),
-    "explore": (_explore, "bring up one condition's stack with a Foxglove view that may change "
-                          "parameters (dry run without --execute, never coverage)"),
     "index": (_index, "the coverage index over the recorded trials"),
     "records": (_records, "every trial of an experiment with its campaign, gate, slim bag, analyses, video"),
     "exclude": (_exclude, "move a trial out of coverage into bags_issues, with exclusion.json "
@@ -234,9 +207,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "metadata": (_metadata, "audit the recorded trial metadata against the contract"),
     "storage": (_storage, "where this host writes heavy bags"),
     "profiles": (_profiles, "the record profiles in force (--list), or one profile's topics or record command"),
-    "slim": (_slim, "archive slim copies of recorded bags"),
     "version": (_version_probe, "the code version stamped into trials"),
-    "ui": (_ui, "the web interface"),
     "new": (_new, "a new experiment from the template, or --from a similar one"),
     "init": (_init, "a new project: the experiments root with its shared config"),
     "tool": (_tool, "run a packaged shell tool (kill_ros.sh, estop.sh, robot_action.sh)"),
@@ -244,11 +215,34 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
 }
 
 
+def _backend_handler(target: str) -> Handler:
+    """A handler for a backend's command, given as ``module:function`` and loaded on use."""
+    def handler(argv):
+        import importlib
+        module, _, function = target.partition(":")
+        return getattr(importlib.import_module(module), function)(argv)
+    return handler
+
+
+def commands() -> Dict[str, Tuple[Handler, str]]:
+    """The core's commands plus the ones the project's backend adds (backend.Backend.commands)."""
+    out = dict(COMMANDS)
+    try:
+        from . import backend
+        extra = backend.active().commands
+    except Exception:  # noqa: BLE001 - an unknown backend adds nothing, its error comes with the first real use
+        extra = {}
+    for name, (target, help_) in extra.items():
+        out[name] = (_backend_handler(target), help_)   # a backend may replace a core command
+    return out
+
+
 def _usage() -> str:
-    width = max(len(name) for name in COMMANDS)
-    lines = [f"trials {__version__}: declarative experiment design for ROS 2 trials", "",
+    table = commands()
+    width = max(len(name) for name in table)
+    lines = [f"trials {__version__}: declarative experiment design for robot trials", "",
              "usage: trials <command> [arguments]   (each command answers --help)", ""]
-    lines += [f"  {name:<{width}}  {help_}" for name, (_, help_) in COMMANDS.items()]
+    lines += [f"  {name:<{width}}  {help_}" for name, (_, help_) in table.items()]
     return "\n".join(lines)
 
 
@@ -261,11 +255,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(__version__)
         return 0
     name, rest = argv[0], argv[1:]
-    if name not in COMMANDS:
+    table = commands()
+    if name not in table:
         print(f"trials: unknown command {name!r}\n\n{_usage()}", file=sys.stderr)
         return 2
     try:
-        return int(COMMANDS[name][0](rest) or 0)
+        return int(table[name][0](rest) or 0)
     except roots.RootNotFound as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

@@ -130,6 +130,7 @@ def status(root, name):
     return next(t for t in ti.load_trials(root, "expA") if t.bag_dir.name == name)
 
 
+@pytest.mark.ros2
 def test_a_pass_lifts_a_verify_only_abort_and_never_edits_the_metadata(root):
     full = trial(root, "t1", aborted=True, abort_reason=VERIFY_ABORT)
     before = (full / "trial_metadata.json").read_text()
@@ -146,6 +147,7 @@ def test_a_pass_lifts_a_verify_only_abort_and_never_edits_the_metadata(root):
     assert st == "usable" and "re-verified" in why and "abort is lifted" in why
 
 
+@pytest.mark.ros2
 def test_every_step_runs_and_a_failure_changes_nothing(root):
     trial(root, "t2", aborted=True, abort_reason=VERIFY_ABORT)
     run = FakeRun({"check_rates.py": 1})
@@ -158,6 +160,7 @@ def test_every_step_runs_and_a_failure_changes_nothing(root):
     assert status(root, "t3").status == "usable"
 
 
+@pytest.mark.ros2
 def test_an_action_failure_is_never_lifted(root):
     trial(root, "t4", aborted=True, abort_reason="action returned rc=1 | " + VERIFY_ABORT)
     record = go(root, "t4", FakeRun())
@@ -165,6 +168,7 @@ def test_an_action_failure_is_never_lifted(root):
     assert status(root, "t4").status == "excluded"
 
 
+@pytest.mark.ros2
 def test_a_record_written_against_another_abort_reason_does_not_lift(root):
     full = trial(root, "t5", aborted=True, abort_reason=VERIFY_ABORT)
     go(root, "t5", FakeRun())
@@ -174,6 +178,7 @@ def test_a_record_written_against_another_abort_reason_does_not_lift(root):
     assert status(root, "t5").status == "excluded"
 
 
+@pytest.mark.ros2
 def test_steps_are_rendered_as_the_runner_renders_them(root):
     full = trial(root, "t6", route="building_loop", aborted=True, abort_reason=VERIFY_ABORT)
     run = FakeRun()
@@ -184,6 +189,7 @@ def test_steps_are_rendered_as_the_runner_renders_them(root):
     assert run.calls[0][1]["cwd"] == str(root.parent)
 
 
+@pytest.mark.ros2
 def test_a_staging_copy_without_the_mcap_reads_the_slim_copy(root):
     trial(root, "t7", mcap_in_full=False, aborted=True, abort_reason=VERIFY_ABORT)
     run = FakeRun()
@@ -192,6 +198,7 @@ def test_a_staging_copy_without_the_mcap_reads_the_slim_copy(root):
     assert run.calls[0][0][2].endswith("bags_slim/t7_slim")
 
 
+@pytest.mark.ros2
 def test_dry_run_writes_nothing_and_a_rerun_keeps_the_history(root):
     full = trial(root, "t8", aborted=True, abort_reason=VERIFY_ABORT)
     run = FakeRun()

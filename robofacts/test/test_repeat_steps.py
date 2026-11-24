@@ -137,6 +137,7 @@ def test_the_spec_refuses_a_bad_when_or_a_bad_setup_step(root, snippet, expected
     assert any(expected in p for p in problems), problems
 
 
+@pytest.mark.ros2
 def test_runner_yaml_refuses_a_bad_when(root):
     (root / "expA" / "config" / "runner.yaml").write_text(
         RUNNER.replace("when: first", "when: once"), encoding="utf-8")
@@ -154,6 +155,7 @@ def test_a_repeat_with_no_steps_left_still_pauses_once():
     assert tr.operator_steps_for([], repeat=True) == []      # no steps declared: no pause, as before
 
 
+@pytest.mark.ros2
 def test_campaign_setup_steps_follow_the_runners_and_honour_when(root):
     config = tr.RunnerConfig.load("expA", root)
     c = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
@@ -176,6 +178,7 @@ def dry_run_two(root):
     return results, out.getvalue()
 
 
+@pytest.mark.ros2
 def test_a_dry_run_of_two_shows_the_first_then_the_repeat_steps(root):
     results, text = dry_run_two(root)
     assert len(results) == 2
@@ -196,6 +199,7 @@ def test_a_dry_run_of_two_shows_the_first_then_the_repeat_steps(root):
         assert all(i < launch for i, c in enumerate(cmds) if c.startswith(("bash kill_ros", "python3 power_cycle")))
 
 
+@pytest.mark.ros2
 def test_a_trial_after_a_blocked_one_starts_over_as_first(root, monkeypatch):
     config = tr.RunnerConfig.load("expA", root)
     c = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)
@@ -214,6 +218,7 @@ def test_a_trial_after_a_blocked_one_starts_over_as_first(root, monkeypatch):
     assert seen == [False, True, False, True]
 
 
+@pytest.mark.ros2
 def test_the_confirmation_gets_the_repeat_steps_and_the_gate_still_runs(root, monkeypatch):
     config = tr.RunnerConfig.load("expA", root)
     c = cs.load_campaign(root / "expA" / "campaigns" / "c.yaml", root)

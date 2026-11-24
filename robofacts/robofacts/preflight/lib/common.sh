@@ -24,11 +24,6 @@ PF_FAIL=1
 PF_USAGE=2
 PF_SKIP=3
 
-# `ros2 topic echo` spends roughly this long establishing the subscription
-# before the first sample arrives. Ignoring it made a healthy 100 Hz stream
-# read exactly-at-threshold and NO-GO two good gates (2026-07-23).
-PF_ECHO_CONNECT_S=1.2
-
 # --- result helpers -----------------------------------------------------------
 pf_pass() { echo "PASS: $*"; exit "$PF_PASS"; }
 pf_fail() { echo "FAIL: $*"; exit "$PF_FAIL"; }
@@ -82,78 +77,7 @@ pf_arg() {
 # Checks override this to document themselves; run_preflight.sh --list uses it.
 pf_print_help() { echo "${PF_HELP:-No help available for this check.}"; }
 
-# --- environment --------------------------------------------------------------
-pf_require_ros() {
-    command -v ros2 >/dev/null 2>&1 \
-        || pf_fail "ros2 is not on PATH - the workspace is not sourced in this shell"
-}
-
 # --- measurement helpers ------------------------------------------------------
-# Count messages on a topic over a window, correcting for the subscription
-# connect time. Echoes the measured Hz (may be 0).
-#
-# Counts the '---' separator ros2 topic echo prints after EVERY message, NOT
-# header stamps: `--field header.stamp` yields nothing for headerless types
-# (std_msgs/String — e.g. an estimator's ~/status), which made a
-# topic_rate check read a permanent 0.0 Hz "stalled or dead" against a node
-# that was demonstrably firing (2026-07-31, a shadow campaign's T-0
-# gate). --no-arr keeps image/array payloads cheap to render.
-#
-#   pf_topic_hz <topic> <window_s>
-pf_topic_hz() {
-    local topic="$1" window="$2" lines effective
-    lines="$(timeout "$window" ros2 topic echo --no-arr "$topic" 2>/dev/null \
-        | grep -c '^---$')"
-    effective="$(awk -v w="$window" -v c="$PF_ECHO_CONNECT_S" 'BEGIN{d=w-c; print (d>0)?d:0}')"
-    awk -v n="$lines" -v d="$effective" 'BEGIN{ if (d<=0) print 0; else printf "%.1f", n/d }'
-}
-
-# True when the topic is advertised at all (cheap existence probe).
-pf_topic_exists() {
-    timeout 6 ros2 topic list 2>/dev/null | grep -qx "$1"
-}
-
-pf_service_exists() {
-    timeout 6 ros2 service list 2>/dev/null | grep -q "$1"
-}
-
-# Which LIVE node advertises <service> as a service server? Echoes the first
-# owning node name, or returns 1 when no live node offers it.
-#
-# `ros2 service list` is a NAME lookup across the whole DDS domain, so it is
-# satisfied by any participant on the network - a foreign machine's stack, or a
-# stale endpoint whose node is already gone. On 2026-08-18 the rig saw
-# /all/emergency advertised while `ros2 node list` was EMPTY and the only topics
-# were /parameter_events and /rosout, and the name-only e-stop gate PASSED
-# against a kill path that did not exist. Resolving the owner turns a name match
-# back into evidence.
-pf_service_owner() {
-    local svc="$1" node
-    while IFS= read -r node; do
-        [ -n "$node" ] || continue
-        if timeout 6 ros2 node info "$node" 2>/dev/null \
-            | awk '/^  Service Servers:/{f=1; next} /^  [A-Za-z]/{f=0} f {sub(/:.*/, "", $1); print $1}' \
-            | grep -q -- "$svc"; then
-            echo "$node"
-            return 0
-        fi
-    done < <(timeout 6 ros2 node list 2>/dev/null)
-    return 1
-}
-
-pf_node_exists() {
-    timeout 6 ros2 node list 2>/dev/null | grep -q "$1"
-}
-
-# Exact variant: the whole `ros2 node list` line must equal <name> (e.g.
-# /detector_node). The substring form above let a pose bridge node
-# satisfy a check aimed at the detector while both detector components had
-# failed to load (2026-08-12), so any check whose target has similarly-named
-# neighbours must use this one.
-pf_node_exists_exact() {
-    timeout 6 ros2 node list 2>/dev/null | grep -qxF -- "$1"
-}
-
 # Numeric comparison without relying on bash arithmetic (values are floats).
 #   pf_ge <a> <b>  -> true when a >= b
 pf_ge() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>=b)}'; }

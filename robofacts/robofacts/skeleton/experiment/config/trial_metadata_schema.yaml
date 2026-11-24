@@ -1,33 +1,19 @@
-# Metadata contract of the experiment {{name}}: the fields every trial records.
-#
-# Merged over the shared core (experiments/common/config/trial_metadata_core.yaml),
-# which already requires trial_id, execution_host, aborted and a few more. The
-# runner writes trial_metadata.json next to every bag from this contract, and the
-# coverage index counts a trial as usable only when its metadata satisfies it.
-#
-# Field spec:
-#   required  bool    must be present and non-null
-#   type      str | int | float | bool | list | dict
-#   enum      the allowed values (optional)
-#   factor    bool    an axis the coverage grid may group by. Every factor of
-#                     factors.yaml needs its metadata_key declared here with
-#                     factor: true.
-#   describe  why it matters, shown in validation errors
-
+# The metadata contract of the experiment {{name}}: the fields every trial records, on top of
+# the project's core contract (experiments/common/config/trial_metadata_core.yaml). A field
+# with `factor: true` is a coverage axis: the index groups the trials by it. A trial whose
+# metadata breaks the contract does not count.
 version: 1
 
 fields:
-  listen_time:
+  rate:
     required: true
     type: str
     factor: true
-    enum: [short, long]
-    describe: "The level of the listen_time factor this trial ran at."
-
-  # A core field can be overridden by name, for example to narrow an enum:
+    enum: [slow, fast]
+    describe: "The level of the rate factor this trial ran at."
   record_profile:
     required: false
     type: str
     factor: true
     enum: [custom]
-    describe: "This experiment lists its topics in runner.yaml (record_topics)."
+    describe: "This experiment lists what it records in runner.yaml (record_sources)."

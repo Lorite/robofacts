@@ -1,16 +1,10 @@
-# Named, repeatable analyses of the experiment {{name}}.
-#
-# Anything you would want to re-run months later over an explicitly chosen cohort
-# belongs here rather than in a notebook cell. `trials analyze {{name}} <name>`
-# selects the usable bags (optionally --where factor=level), prints the commands,
-# and with --execute runs them and records which bags each result came from.
-#
-# Placeholders: {bag} and {results} per bag, {bags} and {results} per cohort.
-
+# The named analyses of the experiment {{name}}: repeatable computations over a cohort of
+# usable trials. `trials analyze {{name}} <name>` prints the commands, `--execute` runs them
+# and writes analysis_metadata.json with the exact list of recordings.
 analyses:
-  message_count:
-    describe: "How many messages each bag holds, as a JSON file per bag."
+  line_count:
+    describe: "How many lines each recording holds, as a JSON file per recording."
     per: bag
     command: >-
-      python3 experiments/{{name}}/scripts/verify_chatter.py {bag}
-      --min-messages 0 --json {results}/message_count.json
+      python3 experiments/{{name}}/scripts/verify_log.py {recording}
+      --min-lines 0 --json {results}/line_count.json

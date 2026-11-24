@@ -119,10 +119,16 @@ def current_steps(experiments_root: Path, experiment: str, campaign: str) -> Lis
     return list(config.verify_steps) + list(spec.verify_steps or [])
 
 
+def reader_problem(root: Optional[Path] = None) -> Optional[str]:
+    """Why this machine cannot read the project's recordings, or None when it can. The
+    backend's recorder answers (an optional method ``reader_problem``)."""
+    from . import backend
+    check = getattr(backend.active(root).recorder, "reader_problem", None)
+    return check() if check is not None else None
+
+
 def can_read_bags() -> bool:
-    try:
-        import rosbag2_py  # noqa: F401
-    except ImportError:
+    if reader_problem() is not None:
         return False
     return True
 
@@ -188,8 +194,7 @@ def reverify(experiments_root: Path, experiment: str, trial: str, *, reason: str
         return {"trial": dirs.name, "campaign": campaign, "bag_read": str(bag),
                 "steps": [{"name": n, "command": c} for n, c in rendered], "dry_run": True}
     if check_ros and not can_read_bags():
-        raise td.DecisionError("rosbag2_py does not import here: run trials reverify inside the "
-                               "dev container of the host that recorded the trial")
+        raise td.DecisionError(reader_problem() or "the recordings cannot be read here")
     cwd = Path(project_root) if project_root else roots.project_root(experiments=root)
     results = run_steps(rendered, cwd, run=run)
     verify_ok = all(r["rc"] == 0 for r in results)

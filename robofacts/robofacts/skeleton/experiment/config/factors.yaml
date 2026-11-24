@@ -1,53 +1,19 @@
-# Factors of the experiment {{name}}: the axes a campaign may vary.
+# The factors of the experiment {{name}}: the axes a campaign may vary.
 #
-# Merged over the shared core (experiments/common/config/factors.yaml), which
-# already defines execution_host (which machine runs the trial) and
-# record_profile (which topics are recorded). An experiment may override a core
-# factor by name to narrow its levels or change its default.
-#
-# Each factor says:
-#   describe      what the axis means and why it matters
-#   levels        the legal values. A campaign may only sweep these.
-#   default       the value used when a campaign does not mention the factor
-#   metadata_key  the trial_metadata.json field the level is recorded under. It
-#                 must be declared `factor: true` in trial_metadata_schema.yaml,
-#                 or the campaign is refused: a factor that is never recorded
-#                 produces bags whose coverage can never be measured.
-#   maps_to       how the runner realizes a level:
-#                   {kind: launch_arg, name: <arg>}  passed as <arg>:=<level> to ros2 launch
-#                   {kind: internal}                 used only in runner.yaml {placeholders}
-#                   {kind: host}                     selects the machine (core factor)
-#                   {kind: record_profile}           selects the topic set (core factor)
-#                   {kind: gate}                     the T-0 gate mode, simulation only
-#                   {kind: operator}                 realized by the operator, confirmed by a check
-#
-# The template experiment has one factor, `listen_time`, consumed as an
-# {listen_time} placeholder by the action in runner.yaml. Rename or replace it.
-
+# Each factor has levels, a default (the level of a campaign that does not name it), the
+# metadata key every trial records it under, and how the runner realizes a level
+# (maps_to.kind): internal (a {placeholder} in a command), launch_arg (an argument of the
+# stack), host (the computer), record_profile (what is recorded), operator (a person, with a
+# check or an explicit `unchecked:` reason).
 version: 1
 
 factors:
-  listen_time:
+  rate:
     describe: >-
-      How long the trial listens, in seconds. A stand-in for a real independent
-      variable: different levels produce different bags, so the coverage grid
-      visibly fills in as trials run.
-    levels: [short, long]
-    default: short
-    metadata_key: listen_time
+      How fast the system writes to its log, as a stand-in for a real independent variable.
+      Different levels produce different recordings, so the coverage grid fills in as
+      trials run.
+    levels: [slow, fast]
+    default: slow
+    metadata_key: rate
     maps_to: {kind: internal}
-
-  # A factor the operator realizes, confirmed at T-0 by a gate check with one
-  # band per level (the measured value is recorded in the trial's metadata):
-  # lighting:
-  #   levels: [lights_on, lights_dimmed]
-  #   default: lights_on
-  #   metadata_key: lighting
-  #   maps_to: {kind: operator}
-  #   check:
-  #     script: image_brightness        # a check in common/preflight/checks/
-  #     topic: /camera/image_raw/compressed
-  #     window_s: 6
-  #     per_level:
-  #       lights_on: {min: 95, max: 160}
-  #       lights_dimmed: {min: 20, max: 70}

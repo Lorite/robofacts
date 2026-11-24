@@ -96,11 +96,13 @@ def test_experiment_filter(root):
 # --------------------------------------------------------------------------- #
 # The three-state model — the thing that makes the grid honest
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_a_clean_trial_is_usable(root):
     make_trial(root, "expA", "t1", BASE)
     assert ti.load_trials(root)[0].status == "usable"
 
 
+@pytest.mark.ros2
 def test_a_contract_violation_is_unverified_not_excluded(root):
     """A trial that predates the contract is 'we cannot prove it', NOT 'it is
     bad'. Collapsing the two made the first report claim 0 usable trials for 37
@@ -162,6 +164,7 @@ def test_identifier_and_prose_fields_are_never_axes(root):
 # --------------------------------------------------------------------------- #
 # Coverage
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_cells_split_the_three_states(root):
     make_trial(root, "expA", "t1", dict(BASE, mode="a"))
     make_trial(root, "expA", "t2", dict(BASE, mode="a"))

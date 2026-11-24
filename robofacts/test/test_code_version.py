@@ -287,6 +287,7 @@ def default_workspaces(monkeypatch):
     monkeypatch.setattr(cv.roots, "setting", lambda key, default=None, start=None: default)
 
 
+@pytest.mark.ros2
 def test_the_probe_records_each_source_repository_and_the_build_time(repo, workspace, default_workspaces):
     version = cv.probe(None, repo)
     (build,) = version["builds"]
@@ -302,6 +303,7 @@ def test_the_probe_records_each_source_repository_and_the_build_time(repo, works
     assert "built before" not in cv.summary(version)
 
 
+@pytest.mark.ros2
 def test_a_commit_after_the_build_is_listed_as_possibly_unbuilt(repo, workspace, default_workspaces):
     driver = workspace / "src" / "driver"
     (driver / "node.py").write_text("x = 2\n", encoding="utf-8")
@@ -312,6 +314,7 @@ def test_a_commit_after_the_build_is_listed_as_possibly_unbuilt(repo, workspace,
     assert "built before the last commit of ., driver" in cv.summary(version)
 
 
+@pytest.mark.ros2
 def test_a_dirty_source_repository_is_counted(repo, workspace, default_workspaces):
     (workspace / "src" / "driver" / "node.py").write_text("x = 3\n", encoding="utf-8")
     assert cv.probe(None, repo)["builds"][0]["sources"]["driver"]["dirty_file_count"] == 1
@@ -322,6 +325,7 @@ def test_a_workspace_without_install_is_not_reported(repo, default_workspaces):
     assert cv.probe(None, repo)["builds"] == []
 
 
+@pytest.mark.ros2
 def test_the_declared_workspaces_replace_the_defaults(repo, workspace, monkeypatch):
     monkeypatch.setattr(cv.roots, "setting",
                         lambda key, default=None, start=None: ["elsewhere"] if key == "colcon_workspaces" else default)

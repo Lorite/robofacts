@@ -181,6 +181,7 @@ def test_exclude_refuses_a_trial_of_the_run_in_progress(root):
     td.exclude(root, "expA", "t1", reason="x", category="other")
 
 
+@pytest.mark.ros2
 def test_restore_moves_it_back_and_keeps_the_old_reason_as_history(root):
     bag(root, "t1")
     td.exclude(root, "expA", "t1", reason="looked broken", category="estimator", now=LATER)
@@ -219,6 +220,7 @@ def test_amend_writes_corrections_beside_both_and_never_edits_the_metadata(root)
         assert [e["corrected"] for e in td.read_corrections(d)] == ["building_loop"]
 
 
+@pytest.mark.ros2
 def test_the_index_the_plan_and_the_records_read_the_corrected_value(root):
     bag(root, "t1")
     td.amend(root, "expA", "t1", ["route=building_loop"], reason="video", now=LATER)

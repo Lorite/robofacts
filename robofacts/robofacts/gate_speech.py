@@ -5,8 +5,9 @@ no go", so every block sent them to the laptop. On a NO-GO (pre-launch or T-0) t
 speaks at most three failed checks in short plain sentences:
 
 1. the checklist entry's own ``"speak"`` text, when it has one (``{detail}`` is filled in);
-2. else a sentence built from the check's FAIL line for the common checks (battery, topic rates,
-   mocap, a sensor value, nodes, hosts), with its numbers read aloud;
+2. else a sentence built from the check's FAIL line for the common checks (hosts, disk, the
+   stop latch here, and the ones the backend and the robot adapters add), with its numbers
+   read aloud;
 3. else a generic "<check> failed."
 
 The sentences are plain text for ``operator_voice.speak``, which respects ``TRIALS_VOICE=off``
@@ -30,69 +31,10 @@ def _num(text: str) -> str:
     return out if out not in ("-0", "") else "0"
 
 
-def _topic_words(topic: str) -> str:
-    """``/drone1/flow_log`` -> ``flow log``: the last name, spoken."""
-    last = [p for p in topic.split("/") if p]
-    return (last[-1] if last else topic).replace("_", " ")
-
-
-def _battery(detail: str) -> str:
-    m = re.search(_NUM + r"\s*V.*?" + _NUM + r"\s*V", detail)
-    if m:
-        return f"Battery {_num(m.group(1))} volts, below {_num(m.group(2))}. Swap the battery."
-    if "UNREADABLE" in detail.upper() or "unreadable" in detail:
-        return "Battery voltage unreadable. Check that the drone is on."
-    return "Battery check failed. Swap the battery."
-
-
-def _topic_rate(detail: str) -> str:
-    found = re.search(r"(/[\w/]+)", detail)
-    words = _topic_words(found.group(1)) if found else "A topic"
-    if "not advertised" in detail:
-        return f"{words.capitalize()} missing."
-    m = re.search(r"~\s*" + _NUM + r"\s*Hz.*?need\s*>=\s*" + _NUM, detail)
-    if m:
-        return f"{words.capitalize()} at {_num(m.group(1))} hertz, needs {_num(m.group(2))}."
-    m = re.search(r"~\s*" + _NUM + r"\s*Hz.*?max_hz=\s*" + _NUM, detail)
-    if m:
-        return f"{words.capitalize()} at {_num(m.group(1))} hertz, above {_num(m.group(2))}."
-    return f"{words.capitalize()} rate too low."
-
-
-def _topic_value(detail: str) -> str:
-    topic = re.search(r"(/[\w/]+)", detail)
-    words = _topic_words(topic.group(1)) if topic else "A sensor"
-    if "constant" in detail:
-        return f"{words.capitalize()} is frozen."
-    m = re.search(r"median\s*" + _NUM + r"\s*<\s*min\s*" + _NUM, detail)
-    if m:
-        return f"{words.capitalize()} at {_num(m.group(1))}, needs {_num(m.group(2))}."
-    return f"{words.capitalize()} out of range."
-
-
-def _rigidbody_continuity(detail: str) -> str:
-    """Name the body: the check guards a robot's body in the walks and the drone's in the flights. On
-    2026-11-09 'Mocap does not track the drone' sent the operator looking for a drone that the campaign
-    did not use, while the motion-capture system was not solving the walking robot's rigid body."""
-    m = re.search(r"rigid body '([^']+)'", detail)
-    if m:
-        return f"Mocap does not track the rigid body {m.group(1).replace('_', ' ')}."
-    return "Mocap does not track the rigid body."
-
-
 BUILT_IN = {
-    "topic_rate": _topic_rate,
-    "topic_value": _topic_value,
-    "mocap_stream": lambda d: "Mocap stream missing." if "not advertised" in d else "Mocap stream too slow.",
-    "rigidbody_continuity": _rigidbody_continuity,
-    "rigidbody_near": lambda d: "The drone is not on its takeoff point.",
-    "node_present": lambda d: "A required node is missing.",
     "host_reachable": lambda d: "A host is not reachable.",
-    "estop_reachable": lambda d: "The emergency stop is not reachable.",
-    "camera_frames": lambda d: "Camera frames missing.",
     "disk_space": lambda d: "Disk almost full.",
     "stop_latch": lambda d: "The stop latch is set. Clear it first.",
-    "ros_clean_slate": lambda d: "Old ROS processes are still running.",
 }
 
 
@@ -109,8 +51,9 @@ def sentence(item: Dict[str, Any]) -> str:
     fn = BUILT_IN.get(check)
     if fn is None:
         try:
-            from . import adapters
-            fn = adapters.merged_dict("GATE_SENTENCES").get(check)
+            from . import adapters, backend
+            fn = (backend.active().gate_sentences.get(check)
+                  or adapters.merged_dict("GATE_SENTENCES").get(check))
         except Exception:  # noqa: BLE001 - a sentence must never break a NO-GO
             fn = None
     if fn is not None:

@@ -9,8 +9,8 @@ sequence, the run log), so a backend never starts or stops a process itself.
 
 A project names its backend in ``trials.yaml``::
 
-    backend: ros2          # the ROS 2 backend
     backend: process       # the built-in one: a shell command and a file recorder
+    backend: ros2          # the package robofacts_ros2 (a name loads robofacts_<name>)
     backend: my_pkg.trials # any importable module with a BACKEND object
 
 ``$TRIALS_BACKEND`` overrides the file for one session.
@@ -24,18 +24,18 @@ import importlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from types import ModuleType
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Protocol, Tuple, runtime_checkable
 
 ENV_BACKEND = "TRIALS_BACKEND"
 
-#: The backend of a project that names none. While the ROS 2 code still lives inside this
-#: package it is ``ros2``, so a project written before the backends existed runs unchanged.
-DEFAULT_BACKEND = "ros2"
+#: The backend of a project that names none: the one that ships with this package.
+DEFAULT_BACKEND = "process"
 
-#: Backends that ship with this package, by the name a project writes.
+#: Backends that ship with this package, by the name a project writes. Any other name
+#: loads the module ``robofacts_<name>``.
 BUILT_IN = {
     "process": "robofacts.backends.process",
-    "ros2": "robofacts.backends.ros2",
 }
 
 
@@ -111,9 +111,50 @@ class Backend:
     #: (the keys ``ros_setup`` and ``ws_setup``, whose names are older than the backends).
     #: A backend supplies its defaults for a host that names none.
     host_setup: Callable[[Dict[str, Any], Path], Tuple[str, str]] = _default_host_setup
-    #: Run once before the machine checks of a gate. The ROS 2 backend restarts the ros2
-    #: daemon here, a backend without such a daemon keeps the default, which does nothing.
+    #: Run once before the machine checks of a gate (a middleware daemon restart). The
+    #: default does nothing.
     gate_prepare: Callable[[], None] = field(default=lambda: None)
+    #: Gate checks the backend ships: a directory of ``<name>.sh`` scripts, found after the
+    #: project's and the adapters' checks and before the core's. Which of them are read-only
+    #: probes that may share a batch, which must run alone (with the reason), and the
+    #: sentence the voice says when one fails.
+    checks_dir: Optional[Path] = None
+    parallel_safe_checks: FrozenSet[str] = frozenset()
+    sequential_checks: Dict[str, str] = field(default_factory=dict)
+    gate_sentences: Dict[str, Callable[[str], str]] = field(default_factory=dict)
+    #: The bash helper the backend's checks source, a superset of the core's. None means
+    #: the core's own (preflight/lib/common.sh).
+    checks_lib: Optional[Path] = None
+    #: The dotted package that holds the backend's robot adapters (``<package>.<name>``),
+    #: which a project enables in trials.yaml ``adapters:``.
+    adapters_package: str = ""
+    #: Optional parts of the framework that only this backend can offer, by name, as dotted
+    #: module paths loaded on first use (:meth:`feature`).
+    features: Dict[str, str] = field(default_factory=dict)
+    #: Extra ``trials`` subcommands: name -> ("module:function", help).
+    commands: Dict[str, Tuple[str, str]] = field(default_factory=dict)
+    #: Lint rules of the backend: pytest files that ``trials lint`` runs after the core's.
+    lint_files: Tuple[Path, ...] = ()
+    #: The backend's templates for ``trials new`` and ``trials init``: a directory like the
+    #: core's ``skeleton/``. Its ``experiment/`` replaces the core's experiment template, and
+    #: a file under its ``project/`` replaces the core's file of the same path.
+    skeleton_dir: Optional[Path] = None
+    #: Shell tools the backend ships, found by ``trials tool`` after the core's.
+    tools_dir: Optional[Path] = None
+    #: How to start ``trials`` on another machine where the package is installed.
+    cli: Tuple[str, ...] = ("trials",)
+    #: The package whose modules run on another machine as ``python3 -m <package>.<module>``.
+    package: str = "robofacts"
+    #: Build workspaces of a project that declares none in trials.yaml ``build_workspaces:``,
+    #: relative to the checkout. The code version of a trial says whether each one was built
+    #: after the last commit. ``workspaces_setting`` is the backend's older name of that key.
+    build_workspaces: Tuple[str, ...] = (".",)
+    workspaces_setting: str = ""
+
+    def feature(self, name: str) -> Optional[ModuleType]:
+        """The module of an optional feature, or None when this backend does not offer it."""
+        dotted = self.features.get(name)
+        return importlib.import_module(dotted) if dotted else None
     #: Run once before the machine checks of a gate (a middleware daemon restart).
     gate_prepare: Callable[[], None] = field(default=lambda: None)
 
@@ -160,6 +201,21 @@ def load(name: str) -> Backend:
         raise BackendError(f"backend {name!r}: the module {module.__name__} has no BACKEND object")
     _LOADED[name] = found
     return found
+
+
+def source_dirs(start: Optional[Any] = None) -> List[Path]:
+    """The directories that hold this package and the package of the project's backend, for
+    the PYTHONPATH of a child process or of another machine that runs them from a checkout."""
+    dirs = [Path(__file__).resolve().parents[1]]
+    try:
+        found = active(start)
+        top = type(found.launcher).__module__.split(".")[0]
+        location = Path(importlib.import_module(top).__file__).resolve().parents[1]
+        if location not in dirs:
+            dirs.append(location)
+    except Exception:  # noqa: BLE001 - an unknown backend adds nothing
+        pass
+    return dirs
 
 
 def active(start: Optional[Any] = None) -> Backend:

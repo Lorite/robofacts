@@ -1921,11 +1921,6 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
 
 
-#: The ROS 2 recorder's text export, under its old name here for Explore and for callers
-#: of the runner module. It moves out with the ROS 2 package.
-from .backends.ros2.recorder import export_rosout  # noqa: E402,F401
-
-
 #: The attempt ledger's file name, under experiments/<name>/runs/.
 ATTEMPT_LEDGER_NAME = "attempts.jsonl"
 

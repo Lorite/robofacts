@@ -236,6 +236,7 @@ def _pieces(root):
     return factors, config, trial
 
 
+@pytest.mark.ros2
 def test_a_dry_run_prints_the_plan_and_sends_nothing(root, monkeypatch, capsys):
     sent = []
     monkeypatch.setattr(ov, "send", lambda text, **kw: sent.append(text) or True)
@@ -251,6 +252,7 @@ def test_a_dry_run_prints_the_plan_and_sends_nothing(root, monkeypatch, capsys):
         < out.index("+8.0 s: Pick up and walk.") < out.index("record_end: Recording stopped.")
 
 
+@pytest.mark.ros2
 def test_the_runner_speaks_the_timeline_in_order_and_announces_around_the_recording(
         root, monkeypatch, no_sleep):
     events = []
@@ -280,6 +282,7 @@ def test_the_runner_speaks_the_timeline_in_order_and_announces_around_the_record
     assert [c["text"] for c in cues_logged if not c["spoken"]] == ["Never reached."]
 
 
+@pytest.mark.ros2
 def test_a_dead_daemon_does_not_delay_or_break_the_trial(root, monkeypatch, no_sleep):
     """The real sender, forced on, aimed at a port where nobody listens."""
     import socket
@@ -299,6 +302,7 @@ def test_a_dead_daemon_does_not_delay_or_break_the_trial(root, monkeypatch, no_s
     assert (result.bag_dir / "trial_metadata.json").is_file()
 
 
+@pytest.mark.ros2
 def test_voice_off_prints_the_cues_but_sends_nothing(root, monkeypatch, no_sleep, capsys):
     import socket
     monkeypatch.setenv(ov.ENV_SWITCH, "off")
@@ -318,6 +322,7 @@ def test_voice_off_prints_the_cues_but_sends_nothing(root, monkeypatch, no_sleep
         sock.close()
 
 
+@pytest.mark.ros2
 def test_a_no_go_is_announced(root, monkeypatch, no_sleep):
     said = []
     monkeypatch.setattr(ov, "send", lambda text, **kw: said.append(text) or True)
@@ -335,6 +340,7 @@ def test_a_no_go_is_announced(root, monkeypatch, no_sleep):
     assert said == [tr.DEFAULT_VOICE_ANNOUNCE["gate_blocked"]]
 
 
+@pytest.mark.ros2
 def test_run_plan_hands_the_campaign_voice_to_each_trial(root, monkeypatch):
     from robofacts import campaign_plan as cp
     seen = {}
@@ -351,6 +357,7 @@ def test_run_plan_hands_the_campaign_voice_to_each_trial(root, monkeypatch):
     assert seen["voice_announce"] is False
 
 
+@pytest.mark.ros2
 def test_a_go_is_announced(root, monkeypatch, no_sleep):
     """The operator stands at the drone: a passed gate is spoken too (2026-11-04)."""
     said = []

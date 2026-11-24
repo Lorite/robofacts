@@ -106,8 +106,10 @@ def runner_env() -> Dict[str, str]:
     that holds this package first on PYTHONPATH, so ``-m`` finds the same copy
     of the package whether it is installed or imported from a source tree."""
     env = dict(os.environ)
-    package_parent = str(Path(__file__).resolve().parents[1])
-    env["PYTHONPATH"] = package_parent + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    from . import backend
+    # This package and the backend's, so the runner finds the backend's checks too.
+    parents = os.pathsep.join(str(d) for d in backend.source_dirs())
+    env["PYTHONPATH"] = parents + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     return env
 
 RC_PASS, RC_FAIL, RC_USAGE = 0, 1, 2
@@ -476,12 +478,15 @@ class PreflightGate:
         """
         if self.project_root is None:
             return ""
-        package_parent = Path(__file__).resolve().parents[1]
-        try:
-            rel = package_parent.relative_to(Path(self.project_root).resolve())
-        except ValueError:
-            return ""
-        return str(Path(self.target.workspace) / rel)
+        from . import backend
+        remote = []
+        for package_parent in backend.source_dirs(self.project_root):
+            try:
+                rel = package_parent.relative_to(Path(self.project_root).resolve())
+            except ValueError:
+                continue
+            remote.append(str(Path(self.target.workspace) / rel))
+        return os.pathsep.join(remote)
 
     def _run(self, values: Optional[Dict[str, Any]] = None,
              checklist: Optional[Path] = None) -> tuple[int, str]:

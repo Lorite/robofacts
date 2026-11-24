@@ -1,5 +1,9 @@
-"""Test setup: import the package from this source tree when it is not installed,
-and point the framework at the shipped example project unless the caller set a root."""
+"""Test setup of the core package: import it from this source tree when it is not installed.
+
+These tests run with the core alone on the path. They must not need the ROS 2 package, a
+ROS installation or the ROS example project: the tests of the two packages together are in
+robofacts_ros2/test.
+"""
 import os
 import sys
 import time
@@ -8,30 +12,39 @@ from pathlib import Path
 import pytest
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE_PROJECT = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
-#: The roots the caller set before pytest started, which the fixture below keeps.
-_CALLER_ROOTS = {name: os.environ.get(name) for name in ("TRIALS_EXPERIMENTS_ROOT", "TRIALS_PROJECT_ROOT")}
+
+
+#: The ROS 2 package's example project, for the tests marked ``ros2``.
+ROS2_EXAMPLE = PACKAGE_ROOT.parent / "robofacts_ros2" / "example_project"
 
 
 @pytest.fixture(autouse=True)
-def _example_project_roots(monkeypatch):
-    """The package's tests run against the shipped example project, unless the caller set a root.
+def _project_environment(request, monkeypatch):
+    """A root or a backend set in the caller's shell must not decide what these tests see.
 
-    A fixture, not os.environ at import time (2026-10-15): pytest imports every conftest
-    before it runs a test, so in a project that collects this suite next to its own tests
-    (the lab repo's pytest.ini) the import-time variables pointed the project's tests at
-    the example project too. Its lint then checked one experiment instead of all of them,
-    and its settings tests failed, in the full run only."""
-    defaults = {"TRIALS_EXPERIMENTS_ROOT": str(EXAMPLE_PROJECT / "experiments"),
-                "TRIALS_PROJECT_ROOT": str(EXAMPLE_PROJECT)}
-    for name, value in defaults.items():
-        if not _CALLER_ROOTS[name]:
-            monkeypatch.setenv(name, value)
+    A test marked ``ros2`` exercises the core together with the ROS 2 backend (its fixtures
+    declare a ROS 2 stack or hold bags). It runs with that backend and the ROS 2 example
+    project in force, and it is skipped where the package robofacts_ros2 is not installed,
+    which is the case in the job that tests the core alone."""
+    for name in ("TRIALS_EXPERIMENTS_ROOT", "TRIALS_PROJECT_ROOT", "TRIALS_BACKEND"):
+        monkeypatch.delenv(name, raising=False)
+    if request.node.get_closest_marker("ros2") is None:
+        return
+    pytest.importorskip("robofacts_ros2")
+    monkeypatch.setenv("TRIALS_BACKEND", "ros2")
+    if ROS2_EXAMPLE.is_dir():
+        monkeypatch.setenv("TRIALS_EXPERIMENTS_ROOT", str(ROS2_EXAMPLE / "experiments"))
+        monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(ROS2_EXAMPLE))
+    from robofacts import trial_index
+    trial_index._recorder_at.cache_clear()
 
 
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "ros2: the test needs the package robofacts_ros2 (its backend and its example "
+        "project). Skipped where that package is not installed")
     config.addinivalue_line(
         "markers", "real_sleep: keep the trial runner's real time.sleep (settle, recorder "
         "start, stop grace, manual hold), for tests that drive real processes")
@@ -60,13 +73,3 @@ def _runner_sleeps_cost_nothing(request, monkeypatch):
         return
     from robofacts import trial_runner
     monkeypatch.setattr(trial_runner, "time", _TimeWithoutSleep())
-
-
-@pytest.fixture
-def enable_adapters(monkeypatch):
-    """Enable robot adapters for one test, as `adapters: [...]` in trials.yaml would."""
-    from robofacts import adapters
-
-    def enable(*names):
-        monkeypatch.setattr(adapters, "_setting", lambda: list(names))
-    return enable

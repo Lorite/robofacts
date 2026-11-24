@@ -852,6 +852,12 @@ def make_stills(root: Path, experiment: str, records: List[TrialRecord], *,
     exp_dir = root / experiment
     try:
         camera = tm.load_camera(exp_dir)
+        from . import backend
+        maker = backend.active(root).feature("trial_media")
+        if maker is None:
+            print(f"trials records: the backend {backend.active(root).name!r} cannot make "
+                  f"pictures from a recording", file=sys.stderr)
+            return 2
     except tm.MediaConfigError as exc:
         print(f"trials records: {exc}", file=sys.stderr)
         return 2
@@ -863,15 +869,15 @@ def make_stills(root: Path, experiment: str, records: List[TrialRecord], *,
     for r in records:
         if r.bag_dir is None and r.slim_dir is None:
             continue
-        source, _info, topic, _label = tm.find_source([r.slim_dir, r.bag_dir], camera)
+        source, _info, topic, _label = maker.find_source([r.slim_dir, r.bag_dir], camera)
         if source is None:
             without += 1
             continue
-        if not force and tm.is_current(exp_dir, r.name, camera, source, topic):
+        if not force and maker.is_current(exp_dir, r.name, camera, source, topic):
             kept += 1
             continue
         try:
-            result = tm.make(exp_dir, r.name, [r.slim_dir, r.bag_dir], camera, force=True)
+            result = maker.make(exp_dir, r.name, [r.slim_dir, r.bag_dir], camera, force=True)
         except Exception as exc:  # noqa: BLE001 - one unreadable bag must not stop the rest
             failed += 1
             print(f"  {r.name}: failed ({exc})", file=sys.stderr)

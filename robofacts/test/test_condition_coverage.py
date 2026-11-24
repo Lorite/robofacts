@@ -101,6 +101,7 @@ def _checked(level, result="PASS", overridden=False):
 # --------------------------------------------------------------------------- #
 # The runner writes the domain
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 @pytest.mark.parametrize("exp,values,expected", [
     ("simexp", {"lighting": "dark"}, ("simulation", "runner.yaml simulation: true")),
     ("hwexp", {"lighting": "lights_on", "backend": "cpp"}, ("hardware", "runner.yaml simulation: false")),
@@ -121,6 +122,7 @@ def test_an_unknown_domain_level_is_refused(root):
         cs.load_factors("hwexp", root)
 
 
+@pytest.mark.ros2
 def test_the_runner_knows_whether_simulation_was_declared(root):
     assert tr.RunnerConfig.load("simexp", root).simulation_declared
     assert not tr.RunnerConfig.load("oldexp", root).simulation_declared
@@ -154,6 +156,7 @@ def _cov(root, space=SPACE):
             ti.condition_coverage(space, ti.load_trials(root, validate=False), root)["levels"]}
 
 
+@pytest.mark.ros2
 def test_levels_are_counted_per_domain_with_a_status(root):
     _bag(root, "simexp", "s1", {"lighting": "lights_on", "domain": "simulation", **_checked("lights_on")})
     _bag(root, "simexp", "s2", {"lighting": "dark", "domain": "simulation", **_checked("dark")})
@@ -168,6 +171,7 @@ def test_levels_are_counted_per_domain_with_a_status(root):
     assert cov["backlit"]["status"] == "none"
 
 
+@pytest.mark.ros2
 def test_only_confirmed_usable_trials_count(root):
     _bag(root, "simexp", "fail", {"lighting": "dark", "domain": "simulation",
                                   **_checked("dark", result="FAIL")})
@@ -183,6 +187,7 @@ def test_only_confirmed_usable_trials_count(root):
     assert relaxed["dark"]["simulation"] == 3
 
 
+@pytest.mark.ros2
 def test_a_simulated_backend_counts_as_simulation_in_a_hardware_experiment(root):
     _bag(root, "hwexp", "old_sim_backend", {"lighting": "lights_on", "backend": "sim",
                                             **_checked("lights_on")})
@@ -191,6 +196,7 @@ def test_a_simulated_backend_counts_as_simulation_in_a_hardware_experiment(root)
     assert cov["lights_on"]["derived_domain"] == 1
 
 
+@pytest.mark.ros2
 def test_refused_attempts_and_level_maps(root):
     runs = root / "hwexp" / "runs"
     runs.mkdir()
@@ -211,6 +217,7 @@ def test_an_experiment_without_the_factor_is_a_note_not_an_error(root):
     assert any("weather" in n for n in cov["notes"])
 
 
+@pytest.mark.ros2
 def test_the_condition_space_cli(root, tmp_path, capsys):
     _bag(root, "simexp", "s1", {"lighting": "dark", "domain": "simulation", **_checked("dark")})
     path = tmp_path / "space.yaml"

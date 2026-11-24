@@ -43,6 +43,7 @@ def test_the_neutral_defaults_without_a_project(no_project):
     assert rp.profiles() == {}, "without a project there are no record profiles"
 
 
+@pytest.mark.ros2
 def test_a_project_sets_its_own_names(project):
     assert slc.latch_path() == Path("/tmp/lab_stop_latch")
     assert rp.default_cf_name() == "lab_drone"
@@ -57,7 +58,8 @@ def test_a_project_sets_its_own_names(project):
     assert "/lab_cam/color/camera_info" in topics and "/lab_watchdog/health" in topics
     assert "/lab_spot/odometry" in topics
     assert rp.names()["spot_name"] == "lab_spot"
-    cmd = rp.build_record_command("position_only", "/tmp/x")
+    from robofacts_ros2 import record_profiles as ros_rp
+    cmd = ros_rp.build_record_command("position_only", "/tmp/x")
     assert "/lab_drone/pose" in cmd
 
 

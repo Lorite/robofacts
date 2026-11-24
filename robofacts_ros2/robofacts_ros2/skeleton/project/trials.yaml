@@ -1,0 +1,23 @@
+# The project file of the robofacts framework. `trials` commands run
+# from anywhere below this directory find the experiments through it.
+experiments_root: experiments
+project_root: .
+
+# How the stack starts and how a trial is recorded: ros2 launch, ros2 bag record, a recording
+# is a bag. The package robofacts_ros2 provides this backend.
+backend: ros2
+
+
+# Optional project settings (the package defaults apply when a key is absent):
+# stop_latch: /tmp/trial_stop_latch        # the file every stop command writes first; the gate refuses a fresh one
+# colcon_workspaces: [ros2_ws]             # the colcon workspaces whose source repositories and install/ time the code stamp records (default: . and ros2_ws)
+# default_record_profile: flight            # the profile of a trial without a record_profile factor (default: none, the runner refuses)
+# adapters: [crazyflie]                    # the robot adapters this project uses: crazyflie, spot, px4 (default: none)
+# parallel_safe_checks: [my_check]          # the project's own gate checks that are read-only probes
+# stop_patterns:                           # what the stop sweeps must also match
+#   recorder_scripts: [record_my_bag]      #   wrappers that exec ros2 bag record
+#   owned_containers: [my_container]       #   composable containers the project's launches start
+#   kinds: {my_kind: "ros2 launch.*my_subsystem"}
+# record_profiles:                         # the names that fill the placeholders of experiments/common/config/record_profiles.yaml
+#   cf_name: cf1                           #   (an enabled adapter brings its own default)
+#   camera: /camera

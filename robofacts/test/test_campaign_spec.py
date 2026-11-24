@@ -472,6 +472,7 @@ def test_campaign_plan_refuses_it_too(root, capsys):
     assert "secret_knob" in capsys.readouterr().err
 
 
+@pytest.mark.ros2
 def test_the_runner_refuses_it_before_any_trial_starts(root, capsys):
     from robofacts import campaign_plan as cp
     from robofacts import trial_runner as tr

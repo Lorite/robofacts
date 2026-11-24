@@ -182,6 +182,7 @@ def test_explicit_modes_override_the_default_table(root):
     assert cs.gate_mode(factors["gate"], "off") == "disabled"
 
 
+@pytest.mark.ros2
 def test_the_trial_level_selects_the_gate_mode(root):
     factors = cs.load_factors("expE", root)
     config = tr.RunnerConfig.load("expE", root)
@@ -198,6 +199,7 @@ def test_the_trial_level_selects_the_gate_mode(root):
     assert meta["gate"] == "off" and meta["preflight"]["mode"] == "shadow"
 
 
+@pytest.mark.ros2
 def test_a_gate_factor_is_refused_outside_simulation(root):
     (root / "expE" / "config" / "runner.yaml").write_text(
         RUNNER.replace("simulation: true", "simulation: false"))
@@ -213,6 +215,7 @@ def test_a_gate_factor_is_refused_outside_simulation(root):
     assert tr.gate_factor_problems(_campaign(root), config), "the CLI refuses it too"
 
 
+@pytest.mark.ros2
 def test_simulation_must_be_a_real_boolean(root):
     (root / "expE" / "config" / "runner.yaml").write_text(
         RUNNER.replace("simulation: true", "simulation: 'yes'"))
@@ -220,6 +223,7 @@ def test_simulation_must_be_a_real_boolean(root):
         tr.RunnerConfig.load("expE", root)
 
 
+@pytest.mark.ros2
 def test_a_gate_that_cannot_change_mode_refuses_the_trial(root):
     class ShellGate:
         def check(self, label, values=None):
@@ -233,12 +237,14 @@ def test_a_gate_that_cannot_change_mode_refuses_the_trial(root):
     assert result.status == "blocked" and "cannot" in result.detail
 
 
+@pytest.mark.ros2
 def test_gate_override_and_a_gate_factor_do_not_mix(root):
     config = tr.RunnerConfig.load("expE", root)
     problems = tr.gate_factor_problems(_campaign(root), config, override_reason="x")
     assert any("--gate-override" in p for p in problems)
 
 
+@pytest.mark.ros2
 def test_a_blocked_attempt_does_not_stop_a_gate_factor_campaign(root):
     campaign = _campaign(root, CAMPAIGN.replace("repetitions_where:\n  - {where: {fault: none}, repetitions: 4}\n", "")
                          .replace("repetitions: 2", "repetitions: 1"))
@@ -259,6 +265,7 @@ def _ledger(root):
     return [json.loads(l) for l in path.read_text().splitlines()]
 
 
+@pytest.mark.ros2
 def test_every_executed_attempt_leaves_one_ledger_line(root):
     factors = cs.load_factors("expE", root)
     config = tr.RunnerConfig.load("expE", root)
@@ -283,6 +290,7 @@ def test_every_executed_attempt_leaves_one_ledger_line(root):
     assert "record" not in blocked["timings_s"], "a NO-GO never reached the recorder"
 
 
+@pytest.mark.ros2
 def test_a_dry_run_writes_no_ledger_line(root):
     plan = cp.build_plan(_campaign(root), [])
     tr.run_plan(plan, tr.RunnerConfig.load("expE", root), root / "expE" / "bags",
@@ -344,6 +352,7 @@ def test_without_order_the_runner_keeps_its_old_sequence(root):
     assert all(s.order is None for s in sched)
 
 
+@pytest.mark.ros2
 def test_the_order_lands_in_the_trial_metadata(root):
     plan = cp.build_plan(_campaign(root, CAMPAIGN.replace(
         'gate: ["on", "off"]', 'gate: ["off"]')), [])
@@ -374,6 +383,7 @@ def test_malformed_order_and_repetitions_are_refused(root, bad, msg):
 # --------------------------------------------------------------------------- #
 # C6: metadata probes receive the trial's placeholders
 # --------------------------------------------------------------------------- #
+@pytest.mark.ros2
 def test_probes_get_the_trial_placeholders_and_keep_literal_braces(root):
     factors = cs.load_factors("expE", root)
     config = tr.RunnerConfig.load("expE", root)
@@ -397,6 +407,7 @@ def test_probes_without_placeholders_run_unchanged(tmp_path):
     assert out == {"k": "v1"} and seen == [["sh", "-c", "echo {fault}"]]
 
 
+@pytest.mark.ros2
 def test_the_gate_also_receives_the_resolved_launch_arguments(root):
     """arg_<name> reaches the gate (2026-10-02, E2's fleet check needs arg_symmetric_ns)."""
     (root / "expE" / "config" / "factors.yaml").write_text(FACTORS + """
@@ -448,6 +459,7 @@ def _run(root, level, hooks):
                         pause_before_action=False, campaign_name="ablation")
 
 
+@pytest.mark.ros2
 def test_the_ledger_line_carries_a_step_trace(root):
     _run(root, "off", Hooks())
     (ran,) = _ledger(root)
@@ -461,12 +473,14 @@ def test_the_ledger_line_carries_a_step_trace(root):
     assert steps["action"]["ok"] and "duration_s" in steps["action"]
 
 
+@pytest.mark.ros2
 def test_a_trial_that_ran_gets_no_failure_report(root):
     _run(root, "off", Hooks())
     assert not list((root / "expE" / "runs").glob("*.failure.md"))
     assert tr.failure_report({"status": "ran", "aborted": False}) is None
 
 
+@pytest.mark.ros2
 def test_a_failed_action_gets_a_report_that_names_it_first(root):
     result = _run(root, "off", FailingAction())
     assert result.status == "failed"
@@ -483,6 +497,7 @@ def test_a_failed_action_gets_a_report_that_names_it_first(root):
     assert f"runs/{row['trial_label']}.log" in text and "## Findings" in text
 
 
+@pytest.mark.ros2
 def test_a_blocked_attempt_gets_a_report_that_names_the_gate(root):
     result = _run(root, "on", Hooks())
     assert result.status == "blocked"

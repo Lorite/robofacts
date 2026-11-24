@@ -576,7 +576,8 @@ def rsync_back(
     return results
 
 
-def package_module_command(project_root: Path, module: str, args: list) -> list:
+def package_module_command(project_root: Path, module: str, args: list,
+                           package: str = "robofacts") -> list:
     """A command that runs one package module on another host.
 
     The project's shim ``experiments/common/scripts/<module>.py`` when the checkout has one
@@ -586,4 +587,4 @@ def package_module_command(project_root: Path, module: str, args: list) -> list:
     shim = shlex.quote(str(Path(project_root) / "experiments" / "common" / "scripts" / f"{module}.py"))
     rest = " ".join(shlex.quote(a) for a in args)
     return ["sh", "-c", f"if [ -f {shim} ]; then exec python3 {shim} {rest}; "
-                        f"else exec python3 -m robofacts.{module} {rest}; fi"]
+                        f"else exec python3 -m {package}.{module} {rest}; fi"]

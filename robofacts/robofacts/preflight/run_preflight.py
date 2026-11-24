@@ -110,6 +110,19 @@ def _adapters():
         return None
 
 
+def _backend():
+    """The backend of the project in the working directory, or None when the package is
+    not importable (see _roots) or the project names a backend that does not load."""
+    try:
+        if __package__:
+            from .. import backend
+        else:  # pragma: no cover - python3 path/to/run_preflight.py
+            from robofacts import backend  # type: ignore[no-redef]
+        return backend.active()
+    except Exception:  # noqa: BLE001 - the gate then knows only the core's checks
+        return None
+
+
 def adapter_checks_dirs() -> List[Path]:
     """The checks of the robot adapters the project enables (trials.yaml ``adapters:``)."""
     adapters = _adapters()
@@ -120,6 +133,9 @@ def parallel_safe_checks() -> frozenset:
     """The core's read-only probes, the enabled adapters' ones, and the project's own
     (trials.yaml ``parallel_safe_checks:``, for checks in its common/preflight/checks/)."""
     out = set(PARALLEL_SAFE_CHECKS)
+    backend = _backend()
+    if backend is not None:
+        out |= set(backend.parallel_safe_checks)
     adapters = _adapters()
     if adapters is not None:
         out |= adapters.merged_set("PARALLEL_SAFE_CHECKS")
@@ -132,6 +148,9 @@ def parallel_safe_checks() -> frozenset:
 def sequential_checks() -> Dict[str, str]:
     """The checks that must run alone, with the reason: the core's and the enabled adapters'."""
     out = dict(SEQUENTIAL_CHECKS)
+    backend = _backend()
+    if backend is not None:
+        out.update(backend.sequential_checks)
     adapters = _adapters()
     if adapters is not None:
         out.update(adapters.merged_dict("SEQUENTIAL_CHECKS"))
@@ -161,7 +180,9 @@ def check_dirs(experiments_root: Optional[Path] = None) -> List[Path]:
     """Where a check script may live, in lookup order: the project, the enabled adapters,
     the core."""
     project = project_checks_dir(experiments_root)
-    return [d for d in (project, *adapter_checks_dirs(), CHECKS_DIR) if d is not None]
+    backend = _backend()
+    backend_dir = backend.checks_dir if backend is not None else None
+    return [d for d in (project, *adapter_checks_dirs(), backend_dir, CHECKS_DIR) if d is not None]
 
 
 def find_check(name: str, experiments_root: Optional[Path] = None) -> Optional[Path]:
@@ -176,7 +197,11 @@ def find_check(name: str, experiments_root: Optional[Path] = None) -> Optional[P
 def check_env() -> Dict[str, str]:
     """The environment a check script runs with: the caller's plus ``PF_LIB``."""
     env = dict(os.environ)
-    env.setdefault("PF_LIB", str(LIB_SH))
+    backend = _backend()
+    lib = backend.checks_lib if backend is not None and backend.checks_lib else LIB_SH
+    env.setdefault("PF_LIB", str(lib))
+    # The core's own helpers, which a backend's helper file sources first.
+    env.setdefault("PF_CORE_LIB", str(LIB_SH))
     return env
 
 # Exit codes used by the check scripts (see lib/common.sh).
@@ -202,32 +227,15 @@ DEFAULT_JOBS = 8
 #: bag_dir_writable writes and removes a probe file whose name carries its own
 #: PID, so two instances cannot collide.
 PARALLEL_SAFE_CHECKS = frozenset({
-    "address_on_interface", "bag_dir_writable", "camera_frames",
-    "dds_socket_buffer", "disk_space",
-    "estop_reachable", "file_exists", "gpu_memory",
-    "gz_world_matches", "host_reachable", "mocap_stream",
-    "node_present", "ros_param_equals", "rosout_report",
-    "stop_latch", "topic_rate", "topic_value",
+    "address_on_interface", "bag_dir_writable", "disk_space", "file_exists", "gpu_memory",
+    "host_reachable", "stop_latch",
 })
 
 #: Checks that must run alone, and why (read from each script's code).
 SEQUENTIAL_CHECKS = {
-    "ros_clean_slate": (
-        "counts matching processes with pgrep and deliberately does not exclude its "
-        "siblings (lib/common.sh pf_count_processes), so a concurrent check whose "
-        "command line holds the pattern (a file_exists path that names the same binary) "
-        "would count as a leftover"),
-    "rigidbody_continuity": (
-        "its entries share one capture file per topic (/tmp/pf_rbc_<uid>_<topic>.cap, "
-        "2026-08-19): the first entry captures and its siblings reuse the frames, so two "
-        "entries at once would truncate each other's capture"),
     "mem_available": (
-        "measures MemAvailable, which the concurrent checks' own ros2 CLI processes "
-        "consume, so it reads a quiet machine only when it runs alone"),
-    "rigidbody_near": (
-        "one `ros2 topic echo --once` on the same NamedPoseArray topic that "
-        "rigidbody_continuity captures (2026-10-29): on the rig only the first echo on a "
-        "topic reliably attaches within the window, so it must not race that capture"),
+        "measures MemAvailable, which the concurrent checks' own processes consume, so it "
+        "reads a quiet machine only when it runs alone"),
 }
 
 
@@ -513,50 +521,13 @@ def append_timing_log(path: Path, record: Dict[str, Any]) -> None:
         pass
 
 
-DAEMON_STOP_TIMEOUT_S = 15.0
-DAEMON_START_TIMEOUT_S = 30.0
-
-
-def bounce_daemon() -> None:
-    """Restart the ros2 daemon.
-
-    A stale daemon reports an empty node/service list on a perfectly healthy
-    stack - four false FAILs were observed this way on 2026-07-22 - so every
-    gate run starts from a fresh one.
-    """
-    if shutil.which("ros2") is None:
-        print("  (ros2 not on PATH - skipping daemon bounce)")
-        return
-    # A WEDGED daemon makes `ros2 daemon stop` block forever (2026-10-06: a
-    # daemon caught by a SIGINT to a trial's process group hung the next T-0
-    # gate until the gate's own 300 s timeout, whose FAIL named no check).
-    # Bounded, and a wedged daemon of THIS domain is killed instead.
-    try:
-        subprocess.run(["ros2", "daemon", "stop"], capture_output=True, timeout=DAEMON_STOP_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        domain = os.environ.get("ROS_DOMAIN_ID", "0") or "0"
-        print(f"  (ros2 daemon stop hung for {DAEMON_STOP_TIMEOUT_S:.0f} s - killing the wedged "
-              f"daemon of domain {domain})")
-        subprocess.run(["pkill", "-KILL", "-f",
-                        f"[r]os2cli.daemon.daemonize.*--ros-domain-id {domain}( |$)"],
-                       capture_output=True)
-    try:
-        subprocess.run(["ros2", "daemon", "start"], capture_output=True, timeout=DAEMON_START_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        print(f"  (ros2 daemon start did not return in {DAEMON_START_TIMEOUT_S:.0f} s - "
-              f"checks will start their own discovery)")
-
-
 def prepare_gate() -> None:
     """What runs once before the machine checks: the backend of the project in the working
     directory decides (backend.Backend.gate_prepare). The ROS 2 backend restarts the ros2
-    daemon, a backend without such a daemon does nothing. A copy of this file that runs as
-    a plain script outside the package keeps the restart."""
-    if not __package__:
-        bounce_daemon()
-        return
-    from .. import backend
-    backend.active().gate_prepare()
+    daemon, a backend without such a daemon does nothing."""
+    backend = _backend()
+    if backend is not None:
+        backend.gate_prepare()
 
 
 # --------------------------------------------------------------------------- #

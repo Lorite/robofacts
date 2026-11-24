@@ -15,6 +15,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -142,24 +143,44 @@ def project(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # The interfaces
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("name", ["process", "ros2"])
-def test_every_shipped_backend_implements_both_interfaces(name):
-    found = backend.load(name)
-    assert found.name == name
+@pytest.fixture
+def other_backend(monkeypatch):
+    """A second backend, as another package would ship it: a module ``robofacts_other`` with
+    a BACKEND object. It reuses the process launcher and recorder and counts the calls of
+    its step before a gate."""
+    module = types.ModuleType("robofacts_other")
+    module.calls = []
+    module.BACKEND = backend.Backend(name="other", launcher=pb.ProcessLauncher(), recorder=pb.ProcessRecorder(),
+                                     gate_prepare=lambda: module.calls.append("prepare"))
+    monkeypatch.setitem(sys.modules, "robofacts_other", module)
+    monkeypatch.delitem(backend._LOADED, "other", raising=False)
+    yield module
+    backend._LOADED.pop("other", None)
+
+
+def test_the_shipped_backend_implements_both_interfaces():
+    found = backend.load("process")
+    assert found.name == "process"
     assert isinstance(found.launcher, backend.Launcher)
     assert isinstance(found.recorder, backend.Recorder)
-    assert found.recorder.noun
+    assert found.recorder.noun == "recording"
 
 
-def test_the_project_file_names_the_backend_and_the_environment_overrides_it(project, monkeypatch):
+def test_a_project_without_a_backend_key_runs_on_the_process_backend(tmp_path):
+    (tmp_path / "trials.yaml").write_text("experiments_root: experiments\n", encoding="utf-8")
+    assert backend.configured_name(tmp_path) == "process"
+
+
+def test_a_name_loads_the_package_of_that_backend_and_the_environment_overrides_the_file(
+        project, monkeypatch, other_backend):
     assert backend.configured_name(project) == "process"
     assert backend.active(project).name == "process"
-    monkeypatch.setenv(backend.ENV_BACKEND, "ros2")
-    assert backend.active(project).name == "ros2"
+    monkeypatch.setenv(backend.ENV_BACKEND, "other")      # loads the module robofacts_other
+    assert backend.active(project).name == "other"
 
 
-def test_an_unknown_backend_is_refused_with_the_known_names():
-    with pytest.raises(backend.BackendError, match="process, ros2"):
+def test_an_unknown_backend_is_refused_with_the_names_that_were_tried():
+    with pytest.raises(backend.BackendError, match="robofacts_no_such_backend_anywhere"):
         backend.load("no_such_backend_anywhere")
 
 
@@ -305,16 +326,14 @@ def test_the_lint_passes_on_a_project_of_the_process_backend(project):
     assert out.returncode == 0, out.stdout[-3000:]
 
 
-def test_the_gate_restarts_the_daemon_only_for_the_ros2_backend(project, monkeypatch):
-    """The step before the machine checks is the backend's: the process backend has none."""
+def test_the_step_before_a_gate_is_the_backend_s(project, monkeypatch, other_backend):
+    """The process backend has no step before the machine checks, another backend may."""
     from robofacts.preflight import run_preflight as rp
-    calls = []
-    monkeypatch.setattr(rp, "bounce_daemon", lambda: calls.append("restart"))
     rp.prepare_gate()
-    assert calls == []
-    monkeypatch.setenv(backend.ENV_BACKEND, "ros2")
+    assert other_backend.calls == []
+    monkeypatch.setenv(backend.ENV_BACKEND, "other")
     rp.prepare_gate()
-    assert calls == ["restart"]
+    assert other_backend.calls == ["prepare"]
 
 
 def test_the_recording_directory_has_two_placeholder_names():

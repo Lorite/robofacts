@@ -30,17 +30,20 @@ def _root(tmp_path: Path, runner: str) -> Path:
     return tmp_path
 
 
+@pytest.mark.ros2
 def test_probes_load_from_runner_yaml(tmp_path):
     config = tr.RunnerConfig.load("expA", _root(tmp_path, RUNNER))
     assert [p["key"] for p in config.metadata_probes] == ["px4_version", "gz_version"]
 
 
+@pytest.mark.ros2
 def test_a_probe_needs_key_and_command(tmp_path):
     bad = "launch: {package: p, file: f}\nmetadata_probes:\n  - {key: x}\n"
     with pytest.raises(tr.RunnerError, match="needs a non-empty 'key' and 'command'"):
         tr.RunnerConfig.load("expA", _root(tmp_path, bad))
 
 
+@pytest.mark.ros2
 def test_underscore_keys_are_refused(tmp_path):
     """The contract validator ignores _keys, so a probe there would be invisible."""
     bad = "launch: {package: p, file: f}\nmetadata_probes:\n  - {key: _x, command: echo}\n"
@@ -55,6 +58,7 @@ def _local_hooks():
                            stop_process=None)
 
 
+@pytest.mark.ros2
 def test_first_stdout_line_lands_under_the_key(tmp_path):
     config = tr.RunnerConfig.load("expA", _root(tmp_path, RUNNER))
     out = tr.run_metadata_probes(config.metadata_probes, _local_hooks(), None, tmp_path)
@@ -77,6 +81,7 @@ def test_a_raising_hook_is_not_fatal(tmp_path):
     assert tr.run_metadata_probes([{"key": "a", "command": "echo"}], hooks, None, tmp_path) == {}
 
 
+@pytest.mark.ros2
 def test_a_json_probe_lands_as_a_list_and_bad_json_leaves_it_absent(tmp_path):
     """E2's `agents` list (2026-10-02): `json: true` keeps the structure."""
     import yaml
@@ -89,6 +94,7 @@ def test_a_json_probe_lands_as_a_list_and_bad_json_leaves_it_absent(tmp_path):
     assert out == {"agents": [{"instance": 0}], "plain": "3"}
 
 
+@pytest.mark.ros2
 def test_json_must_be_a_boolean(tmp_path):
     bad = "launch: {package: p, file: f}\nmetadata_probes:\n  - {key: a, command: echo, json: 'yes'}\n"
     with pytest.raises(tr.RunnerError, match="json must be true or false"):

@@ -3,6 +3,10 @@
 experiments_root: experiments
 project_root: .
 
+# How the stack starts and how a trial is recorded: ros2 launch, ros2 bag record, a recording
+# is a bag. The package robofacts_ros2 provides this backend.
+backend: ros2
+
 
 # Optional project settings (the package defaults apply when a key is absent):
 # stop_latch: /tmp/trial_stop_latch        # the file every stop command writes first; the gate refuses a fresh one
