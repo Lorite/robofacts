@@ -74,6 +74,15 @@ def test_verify_fails_a_recording_that_ends_in_the_air(tmp_path, capsys):
     assert "ends in the air" in capsys.readouterr().out
 
 
+def test_verify_fails_a_flight_that_ended_in_an_emergency_stop(tmp_path, capsys):
+    """Review finding (2026-11-25): a 5 s hover that ended in an emergency stop printed PASS, so
+    the trial counted, although an operator stop aborts the trial."""
+    events = ["takeoff", "land", "emergency_stop"]
+    assert run_verify(write_log(tmp_path / "r", flight(hover_s=5.0), events=events)) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("FAIL: the flight log holds an emergency stop") and "motors were cut" in out
+
+
 def test_verify_fails_without_a_log_or_without_samples(tmp_path):
     (tmp_path / "empty" / "data").mkdir(parents=True)
     assert run_verify(tmp_path / "empty") == 1
@@ -315,6 +324,21 @@ def test_an_estop_during_the_landing_cuts_the_motors(env):
     rc, drone, events, _ = hover(env, on_land=lambda d: env["latch"].write_text("estop crazyflie now\n"))
     assert drone.calls[-4:] == ["land", "emergency_stop", "disarm", "close"]
     assert "stop_commander" not in drone.calls and events[-2:] == ["emergency_stop", "end"]
+
+
+@pytest.mark.parametrize("line, after_land", [
+    ("soft_stop crazyflie now", ["land", "stop_commander", "disarm", "close"]),
+    ("estop crazyflie now", ["land", "emergency_stop", "disarm", "close"]),
+], ids=["soft_stop", "estop"])
+def test_a_stop_during_the_landing_aborts_the_trial(env, line, after_land):
+    """Review finding (2026-11-25): a latch line written at the land command of a finished hover
+    left the exit code at 0, so the trial counted. A soft stop keeps the landing as it is."""
+    rc, drone, _, log = hover(env, on_land=lambda d: env["latch"].write_text(line + "\n"))
+    assert rc == cf_hover.STOP_RC
+    assert drone.calls[-4:] == after_land
+    end = [e for e in log if e.get("event") == "end"][0]
+    assert end["rc"] == cf_hover.STOP_RC
+    assert end["reason"] == f"hover of 0 s done, then operator stop latch: {line}"
 
 
 def test_an_estop_after_ctrl_c_is_not_hidden_by_the_signal(env):

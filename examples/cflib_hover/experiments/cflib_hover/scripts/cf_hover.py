@@ -14,12 +14,15 @@ In order:
    flow back on once the estimate passes ``flow_on_m`` (or at the end of the stage), then
    the climb to ``height_m``.
 3. Holds for ``--hover-s`` and LANDS (``land_m`` in ``land_s``) on SIGINT, SIGTERM, SIGHUP or
-   SIGQUIT or a fresh stop latch (exit 5), when the estimate leaves the geofence (exit 6), when no state
-   sample has arrived for ``stale_s`` (exit 7, the radio link is probably lost: the land
-   command is still sent, and the operator is told to use the physical stop if the drone keeps
-   hovering), at the end of the hover, and on any error (a ``finally``).
+   SIGQUIT or a fresh stop latch (exit 5), when the estimate leaves the geofence (exit 6), when
+   no state sample has arrived for ``stale_s`` (exit 7, the radio link is probably lost: the
+   land command is still sent, and the operator is told to use the physical stop if the drone
+   keeps hovering), at the end of the hover, and on any error (a ``finally``).
 4. A latch whose last line starts with ``estop`` cuts the motors instead, at any time: in the
    air, after a signal, and during the landing.
+5. Any latch line written during the flight makes the exit code 5, also a line that arrives
+   during the landing: an operator stop aborts the trial. A soft stop during the landing does
+   not change the landing.
 
 The flight log (``--log``, JSON lines) holds the estimate, the range, the battery and the flow
 quality at 20 Hz, and the events (takeoff, land with its reason). The runner records it.
@@ -84,6 +87,11 @@ class Stop:
             return f"operator stop latch: {line}"
         if self.signal:
             return f"signal {self.signal}"
+        return f"operator stop latch: {line}" if line else ""
+
+    def latched(self) -> str:
+        """Why the latch stops this run, for any latch line written since the start, else ''."""
+        line = latch_since(self.latch, self.since)
         return f"operator stop latch: {line}" if line else ""
 
 
@@ -213,6 +221,12 @@ def fly(drone, cfg: Dict, hover_s: float, stop: Stop, log: JsonlLog) -> tuple:
         if armed:
             come_down(drone, cfg, stop, log, reason or "error")
             attempt(log, "disarm", drone.arm, False)
+    # An operator stop aborts the trial, also when the latch line came during the landing. Before
+    # 2026-11-25 such a line cut the motors or was ignored, and the run still exited 0, so the
+    # trial counted.
+    latched = stop.latched()
+    if latched and rc != STOP_RC:
+        reason, rc = f"{reason or 'error'}, then {latched}", STOP_RC
     return rc, reason
 
 

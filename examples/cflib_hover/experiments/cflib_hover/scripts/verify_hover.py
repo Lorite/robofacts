@@ -7,6 +7,9 @@ It reads the recording's copy of the flight log (data/flight.jsonl). The action'
 cannot show a flight: a refusal before arming is a clean exit of the script, and only the
 recorded heights show that the drone flew. The height is the downward range sensor, else
 the estimate. A non-zero exit marks the trial aborted, and it does not count.
+
+A log with an ``emergency_stop`` event fails: the action cut the motors instead of landing, and
+an operator stop aborts the trial (2026-11-25).
 """
 from __future__ import annotations
 
@@ -31,6 +34,19 @@ def heights(log: Path) -> List[Tuple[float, float]]:
     return out
 
 
+def emergency_stops(log: Path) -> List[str]:
+    """The reasons of the ``emergency_stop`` events in the log, in order."""
+    out = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("kind") == "event" and row.get("event") == "emergency_stop":
+            out.append(str(row.get("reason") or "no reason logged"))
+    return out
+
+
 def airborne_s(samples: List[Tuple[float, float]], above_m: float) -> float:
     """The longest stretch of time with the height above ``above_m``."""
     best, start = 0.0, None
@@ -46,6 +62,10 @@ def airborne_s(samples: List[Tuple[float, float]], above_m: float) -> float:
 def judge(log: Path, min_airborne_s: float, airborne_m: float, landed_m: float) -> Tuple[bool, str]:
     if not log.is_file():
         return False, f"no flight log at {log}"
+    cut = emergency_stops(log)
+    if cut:
+        return False, (f"the flight log holds an emergency stop ({cut[0]}): the motors were cut, "
+                       f"so the trial does not count")
     samples = heights(log)
     if not samples:
         return False, f"no state sample in {log}"
