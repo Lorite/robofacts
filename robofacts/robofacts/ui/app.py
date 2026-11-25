@@ -2030,6 +2030,26 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
     # Exit hard, but say what that means if a run is in flight.
     runs_mgr = app.config.get("RUNS")
     if runs_mgr is not None and runs_mgr.busy():
+        # The trial runs in a worker thread that gets no signal, and its action leads its own
+        # process group, so the Ctrl-C reached neither. End the trial the way the CLI's
+        # Ctrl-C ends it: the action lands, then the worker's teardown stops the recorder and
+        # the stack, and no further trial starts. Before the second review of 2026-11-25 the
+        # server exited here with the action still flying.
+        run = runs_mgr.current()
+        print("\nCtrl-C with a campaign run ACTIVE: no further trial starts, the action in "
+              "flight lands first, then the recorder and the stack stop. Ctrl-C again exits "
+              "at once.", file=sys.stderr)
+        try:
+            if run is not None:
+                runs_mgr.abort(run.run_id)
+            from robofacts.remote_exec_utils import LAND_WAIT_S, end_current_action
+            end_current_action(KeyboardInterrupt())
+            deadline = time.monotonic() + LAND_WAIT_S + 120
+            while runs_mgr.busy() and time.monotonic() < deadline:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
+    if runs_mgr is not None and runs_mgr.busy():
         print("\nWARNING: a campaign run was ACTIVE. Its remote processes may have "
               "been orphaned or cut mid-trial by this exit.\n"
               "  - if a drone is airborne: scripts/estop.sh\n"

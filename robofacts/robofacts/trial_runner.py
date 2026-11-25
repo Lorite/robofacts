@@ -1698,7 +1698,13 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             # (and recorder, if enabled) stay up for a bounded time. With
             # nothing up there is nothing to hold open — skip straight through.
             print(f"[runner] action disabled - holding the stack for {hold_s:.0f}s")
-            time.sleep(hold_s)
+            _t_hold = time.monotonic()
+            if hold_window(hold_s):
+                # A stop (the web interface's stop or e-stop) ended the window: the work the
+                # window was for did not finish, so the trial is aborted like a stopped action.
+                detail = (f"{MANUAL_WINDOW_STOPPED} after "
+                          f"{time.monotonic() - _t_hold:.0f} s of {hold_s:.0f} s")
+                print(f"[runner] {detail}")
     except Exception as exc:  # noqa: BLE001
         detail = f"execution error: {exc}"
         trace_step("execution error", "error", ok=False, output=str(exc),
@@ -1890,6 +1896,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # trial was written with aborted false and counted as coverage).
     action_failed = (detail.startswith("action returned rc=")
                      or detail.startswith("execution error")
+                     or detail.startswith(MANUAL_WINDOW_STOPPED)
                      or "verify step" in detail)
     if action_failed:
         # The trajectory never ran (or died part-way), so this is NOT a flight.
@@ -1915,6 +1922,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         elif detail.startswith("execution error"):
             print("[runner] TRIAL FAILED - the runner could not run the action as planned; "
                   "recorded as aborted, so it cannot count as coverage")
+        elif detail.startswith(MANUAL_WINDOW_STOPPED):
+            print("[runner] TRIAL STOPPED - a stop ended the manual window early; recorded as "
+                  "aborted, so it cannot count as coverage")
         else:
             print("[runner] TRIAL FAILED - a verify step rejected the recorded trial; recorded "
                   "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")
@@ -1954,8 +1964,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 
 
 from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
-from .remote_exec_utils import (deferred_interrupt, interrupt_signal_name,  # noqa: E402
-                                interrupts_held, stop_signals_interrupt)
+from .remote_exec_utils import (deferred_interrupt, hold_window,  # noqa: E402
+                                interrupt_signal_name, interrupts_held,
+                                output_survives_hangup, stop_signals_interrupt)
 
 
 #: The attempt ledger's file name, under experiments/<name>/runs/.
@@ -2155,6 +2166,25 @@ def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config
                                       scratch=kwargs.get("scratch_label") is not None,
                                       signal_name=interrupt_signal_name(interrupt))
         raise
+    except Exception as error:
+        # An error that escapes the trial after the recording started (a verify step whose
+        # command cannot be rendered, a full disk) lost the trial until the second review of
+        # 2026-11-25: a recording without trial_metadata.json and no ledger line, although
+        # this function promises a line for every executed attempt. It is written as aborted,
+        # with the error as the reason, before the error goes on.
+        if ledger and not kwargs.get("dry_run", True):
+            marks = {k: v for k, v in (ctx.get("marks") or {}).items()
+                     if not k.startswith("teardown")}
+            stage = max(marks, key=marks.get) if marks else "before any stage"
+            with interrupts_held("the failed trial is written as aborted"):
+                _finalize_interrupted(trial, factors, config, bags_dir, ctx, started=started,
+                                      campaign_name=campaign_name, session_id=session_id,
+                                      scratch=kwargs.get("scratch_label") is not None,
+                                      reason=(f"execution error after stage {stage!r}: "
+                                              f"{type(error).__name__}: {error}; the trial "
+                                              f"did not finish, so it cannot count as coverage"),
+                                      status="failed")
+        raise
     finally:
         if "post_log" in ctx:
             saved, post_log = ctx.pop("post_log")
@@ -2207,6 +2237,10 @@ def _note_gate_refusal(bag_dir: Path, gate: Optional[Dict[str, Any]], detail: st
         print(f"[runner] gate_refusal.json not written ({exc})")
 
 
+#: The detail of a trial whose manual window (the action step disabled) a stop ended early.
+MANUAL_WINDOW_STOPPED = "manual window stopped by the operator"
+
+
 def action_signal_phrase(rc: int) -> Optional[str]:
     """How a signal ended the action, for a negative return code (``subprocess`` reports a
     process killed by signal N as -N), else None. "interrupted (SIGINT)" for Ctrl-C,
@@ -2228,7 +2262,8 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                           started: str, campaign_name: Optional[str],
                           session_id: Optional[str], scratch: bool,
                           reason: str = "", recovered: Optional[Dict[str, Any]] = None,
-                          signal_name: str = "SIGINT") -> Optional[Path]:
+                          signal_name: str = "SIGINT",
+                          status: str = "interrupted") -> Optional[Path]:
     """Write ABORTED metadata into an interrupted trial's bag, and its ledger line.
 
     Only when the bag directory holds a recording and no trial_metadata.json:
@@ -2266,7 +2301,7 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
             written = path
             ctx["metadata"] = {"aborted": True, "abort_reason": reason}
             print(f"[runner] INTERRUPTED - {path} written as aborted: {reason}")
-        result = TrialResult(trial, Path(bag_dir) if bag_dir else None, "interrupted", reason, [])
+        result = TrialResult(trial, Path(bag_dir) if bag_dir else None, status, reason, [])
         record = attempt_record(trial, factors, config, result, ctx, started=started,
                                 campaign_name=campaign_name, session_id=session_id,
                                 scratch=scratch)
@@ -2694,7 +2729,8 @@ def main(argv=None) -> int:
     # Every setting the run reads (the backend, the adapters, the record profiles, the stop
     # patterns) and every process it starts (the gate) belongs to the project of this
     # experiments root, also when the working directory lies in another project.
-    with roots.exported_experiments_root(args.experiments_root), stop_signals_interrupt():
+    with roots.exported_experiments_root(args.experiments_root), stop_signals_interrupt(), \
+            output_survives_hangup():
         try:
             return _main(ap, args)
         except KeyboardInterrupt as exc:

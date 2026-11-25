@@ -22,6 +22,7 @@ import shlex
 import signal
 import threading
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -192,11 +193,16 @@ _CURRENT_FOREGROUND: list = []
 #: The pids of those processes that lead their own process group (a local action).
 _OWN_GROUP: set = set()
 
-#: How long an interrupted action may take to end (a flight lands) before the runner kills
-#: it and stops the stack. The same bound as an exploration's stop.
+#: How long an interrupted action may take to end (a flight lands) before the runner sends
+#: SIGTERM, then SIGKILL. The same bound as an exploration's stop. No other signal reaches the
+#: action before it: an action that lands in its Ctrl-C handler keeps the whole bound (until
+#: the second review of 2026-11-25, SIGTERM followed after 5 s and cut such a landing short).
 LAND_WAIT_S = 90.0
-#: How long an action may take to end after the forwarded Ctrl-C before it gets SIGTERM.
-SIGINT_GRACE_S = 5.0
+#: How long a process may take to end after SIGTERM before it gets SIGKILL.
+TERM_GRACE_S = 5.0
+#: The manual windows in progress (the action step disabled: the stack stays up for a
+#: bounded time). A stop ends them like it ends an action (see hold_window).
+_HOLDS: list = []
 
 
 class RunnerSignal(KeyboardInterrupt):
@@ -207,6 +213,64 @@ class RunnerSignal(KeyboardInterrupt):
     def __init__(self, signum: int):
         super().__init__(signal.Signals(signum).name)
         self.signum = signum
+
+
+class _HangupTolerant:
+    """A standard stream whose writes never raise once its terminal is gone.
+
+    After a hangup (the terminal closed) every write to it fails with EIO. Before the second
+    review of 2026-11-25 an unguarded print then broke the interrupt path: the forwarded
+    stop raised before the runner waited for the landing, each teardown step raised before
+    it signalled its process, and the "teardown done" line raised out of the finally, so the
+    stack and the recorder ran on and the trial got no metadata. The first failed write marks
+    the stream gone, and later writes are dropped. The run log (a separate file) keeps them.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self.gone = False
+
+    def write(self, text):
+        if not self.gone:
+            try:
+                return self._stream.write(text)
+            except (OSError, ValueError):
+                self.gone = True
+        return len(text)
+
+    def flush(self):
+        if not self.gone:
+            try:
+                self._stream.flush()
+            except (OSError, ValueError):
+                self.gone = True
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+@contextlib.contextmanager
+def output_survives_hangup() -> Iterator[None]:
+    """While the block runs, a write to stdout or stderr never raises (see _HangupTolerant).
+    A stream that failed is left as os.devnull afterwards: flushing it again at interpreter
+    exit would replace the runner's exit code with 120."""
+    saved = (sys.stdout, sys.stderr)
+    wrapped = (_HangupTolerant(sys.stdout), _HangupTolerant(sys.stderr))
+    sys.stdout, sys.stderr = wrapped
+    try:
+        yield
+    finally:
+        restored = []
+        for original, wrapper in zip(saved, wrapped):
+            if wrapper.gone:
+                try:
+                    original.flush()
+                except (OSError, ValueError):
+                    pass
+                restored.append(open(os.devnull, "w", encoding="utf-8"))
+            else:
+                restored.append(original)
+        sys.stdout, sys.stderr = restored
 
 
 def interrupt_signal_name(exc: BaseException) -> str:
@@ -274,7 +338,8 @@ def deferred_interrupt(signum: int) -> KeyboardInterrupt:
 
 
 def _signal_process(proc: subprocess.Popen, sig: int) -> None:
-    """``sig`` to the process, or to its whole group when it leads one of its own."""
+    """``sig`` to the process, or to its whole group when it leads one of its own. The group
+    gets the signal also after its leader has exited, while members remain."""
     try:
         if proc.pid in _OWN_GROUP:
             os.killpg(proc.pid, sig)
@@ -284,8 +349,29 @@ def _signal_process(proc: subprocess.Popen, sig: int) -> None:
         pass
 
 
+def _group_alive(pgid: int) -> bool:
+    """Whether process group ``pgid`` still has a live member (zombies do not count).
+    Without /proc (not Linux), whether the group can still be signalled."""
+    if os.path.isdir("/proc"):
+        return bool(_group_members(pgid))
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _running(proc: subprocess.Popen) -> bool:
+    """The process runs, or, for an action that leads its own group, any process of that
+    group runs: a wrapper that started the flight in the background and exited still has a
+    flight to stop (found by the second review of 2026-11-25: the stop and the action timeout
+    looked only at the wrapper and missed the flight)."""
+    return proc.poll() is None or (proc.pid in _OWN_GROUP and _group_alive(proc.pid))
+
+
 def terminate_current_foreground() -> bool:
-    """End the running action, if any. Returns True if something was signalled.
+    """End the running action, or the manual window, if any. Returns True if something was
+    signalled.
 
     Deliberately a TERMINATE of the action rather than a kill of the stack:
     run_trial's finally then stops the recorder first and the stack after, so
@@ -293,13 +379,49 @@ def terminate_current_foreground() -> bool:
     would truncate the recording, the failure the teardown order exists to
     avoid. A local action leads its own process group, and the whole group gets
     the signal: a wrapper (a shell script, a launcher) does not pass SIGTERM on
-    to the flight it started (found 2026-11-25).
+    to the flight it started (found 2026-11-25), and a flight it started in the
+    background outlives the wrapper. A manual window (see hold_window) ends too.
     """
+    for event in list(_HOLDS):
+        event.set()
+        return True
     for proc in list(_CURRENT_FOREGROUND):
-        if proc.poll() is None:
+        if _running(proc):
             _signal_process(proc, signal.SIGTERM)
             return True
     return False
+
+
+def end_current_action(reason: BaseException) -> bool:
+    """From another thread, end the action in flight the way an interrupt of the runner ends
+    it (see _end_interrupted: the signal, the wait for the landing, then SIGTERM and SIGKILL),
+    and end a manual window. Returns True if there was one. The web interface calls it when
+    its server is stopped with Ctrl-C: the worker thread that runs the trial gets no signal,
+    and before the second review of 2026-11-25 the server exited with the action still
+    flying."""
+    found = False
+    for event in list(_HOLDS):
+        event.set()
+        found = True
+    for proc in list(_CURRENT_FOREGROUND):
+        if _running(proc):
+            found = True
+            _end_interrupted(proc, reason, action=getattr(proc, "_robofacts_action", False))
+    return found
+
+
+def hold_window(seconds: float) -> bool:
+    """Wait ``seconds`` while the stack stays up (the manual window of a trial whose action
+    step is disabled). Returns True when a stop (terminate_current_foreground) ended the
+    window early. A Ctrl-C interrupts the wait as before. Before the second review of
+    2026-11-25 the window was a plain sleep: the web interface's stop did not end it, and the
+    trial was written as a complete one."""
+    event = threading.Event()
+    _HOLDS.append(event)
+    try:
+        return event.wait(max(0.0, seconds))
+    finally:
+        _HOLDS.remove(event)
 
 
 def _drain(proc: subprocess.Popen, captured: list) -> threading.Thread:
@@ -323,13 +445,17 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
     An action must END before the runner's teardown stops the recorder and the stack: a
     flight still landing needs its stack up, and a live action must never be left behind
     (found 2026-11-25: on Ctrl-C the stack went down during the landing, and after a
-    decoding error the action kept flying into the next trial). So: the signal that
+    decoding error the action kept flying into the next trial). So the signal that
     interrupted the runner goes on to the action (a Ctrl-C at the terminal no longer
-    reaches an action that leads its own group, and any other cause becomes SIGTERM),
-    SIGTERM follows after SIGINT_GRACE_S, the
-    runner waits up to LAND_WAIT_S, and SIGKILL ends it last. A second Ctrl-C kills it at
-    once. Any other command gets SIGTERM, 5 s, then SIGKILL."""
-    if proc.poll() is not None:
+    reaches an action that leads its own group, and any other cause becomes SIGTERM), the
+    runner waits up to LAND_WAIT_S for the whole group to end, then sends SIGTERM, and
+    SIGKILL after TERM_GRACE_S. A second Ctrl-C kills it at once. Any other command gets
+    the same sequence with a 5 s wait instead of LAND_WAIT_S.
+
+    The signals go to the action's process group as long as any member lives, also after
+    the group leader has exited: a wrapper that starts the flight in the background and
+    exits leaves the flight in the group (second review of 2026-11-25)."""
+    if not _running(proc):
         return
     # A Ctrl-C goes on as SIGINT, which the action got from the terminal before it led its own
     # group. Any other cause gets SIGTERM, the signal an action lands on (a closed terminal's
@@ -342,24 +468,39 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
         print(f"[runner] waiting up to {wait_s:.0f} s for the action to end (a flight lands) "
               f"before the stack stops; Ctrl-C again kills it now", flush=True)
     t0 = time.monotonic()
-    termed = first == signal.SIGTERM
     try:
-        while proc.poll() is None and time.monotonic() - t0 < wait_s:
-            if not termed and time.monotonic() - t0 >= SIGINT_GRACE_S:
-                _signal_process(proc, signal.SIGTERM)
-                termed = True
+        while _running(proc) and time.monotonic() - t0 < wait_s:
             time.sleep(0.1)
+        if _running(proc) and first != signal.SIGTERM:
+            print(f"[runner] the action did not end within {time.monotonic() - t0:.0f} s: "
+                  f"SIGTERM", flush=True)
+            _signal_process(proc, signal.SIGTERM)
+            t1 = time.monotonic()
+            while _running(proc) and time.monotonic() - t1 < TERM_GRACE_S:
+                time.sleep(0.1)
     except KeyboardInterrupt:
         print("[runner] second interrupt: the action is killed now", flush=True)
-    if proc.poll() is None:
-        if action:
-            print(f"[runner] the action did not end within {time.monotonic() - t0:.0f} s: SIGKILL",
-                  flush=True)
+    if _running(proc):
+        print(f"[runner] the action did not end within {time.monotonic() - t0:.0f} s: SIGKILL",
+              flush=True)
         _signal_process(proc, signal.SIGKILL)
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+        if proc.pid in _OWN_GROUP:
+            _await_group(proc.pid, 2.0)
+
+
+def _end_leftovers(proc: subprocess.Popen) -> None:
+    """The action's leader has exited but members of its group still run: a flight that a
+    wrapper started in the background. They end before the runner goes on to the teardown,
+    the same way an interrupted action ends (signal, landing time, SIGTERM, SIGKILL)."""
+    members = _group_members(proc.pid)
+    print(f"[runner] the action exited but left {len(members) or 'some'} process(es) of its "
+          f"group running{': ' + _describe(members) if members else ''}. They end now, "
+          f"before the stack stops", flush=True)
+    _end_interrupted(proc, RunnerSignal(signal.SIGTERM), action=True)
 
 
 def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, check: bool,
@@ -375,6 +516,7 @@ def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, che
                             text=True, errors="replace", bufsize=1, **kwargs)
     if own_group:
         _OWN_GROUP.add(proc.pid)
+    proc._robofacts_action = action
     _CURRENT_FOREGROUND.append(proc)
     captured: list[str] = []
     assert proc.stdout is not None
@@ -384,6 +526,11 @@ def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, che
                 print(line, end="", flush=True)
                 captured.append(line)
             rc = proc.wait()
+            if own_group and _group_alive(proc.pid):
+                _end_leftovers(proc)
+                # Part of the action was still running and had to be stopped, so the action
+                # did not complete, whatever its leader returned.
+                rc = rc or -signal.SIGTERM
         except BaseException as exc:
             drain = _drain(proc, captured)
             _end_interrupted(proc, exc, action=action)
@@ -694,8 +841,9 @@ def stop_remote_process(
         # once they terminate (TTY close propagates back via -tt).
         print(f'[{name}] SIGINT -> remote processes via pkill (kind={kind})')
         pkill_workspace_launches(target, workspace, 'INT', kind=kind, extra=extra)
-    print(f'[{name}] SIGINT -> local process group {pgid}')
+    # Signal first, then say so: after a hangup a print could fail before the signal left.
     os.killpg(pgid, signal.SIGINT)
+    print(f'[{name}] SIGINT -> local process group {pgid}')
     try:
         proc.wait(timeout=t_int)
         _stop_group_survivors(pgid, name, f'stopped gracefully rc={proc.returncode}', _t0,
