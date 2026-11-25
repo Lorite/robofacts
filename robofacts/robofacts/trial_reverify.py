@@ -9,7 +9,8 @@ an experiment that flies a drone: the receive-rate rule of the mocap
 flights failed a Flow-deck-only hover whose every block arrived at its rate.
 
 ``trials reverify <exp> <trial> --reason "..."`` finds the trial's campaign and
-factor values in ``runs/attempts.jsonl``, renders the CURRENT verify steps
+factor values in ``runs/attempts.jsonl`` (with the corrections of ``trials amend`` on
+top, as the index counts the trial), renders the CURRENT verify steps
 (``config/runner.yaml`` plus the campaign's own) exactly as the runner does
 (``{bag}``, ``{<factor>}``, ``{arg_<launch argument>}``), runs every step (not
 only up to the first failure) from the project root on the bag, and writes
@@ -90,6 +91,46 @@ def placeholders(values: Dict[str, Any], launch_args: Any, bag: Path) -> Dict[st
     out["bag"] = str(bag)
     out.setdefault("recording", str(bag))   # the same directory, under the general name
     return out
+
+
+def corrected_inputs(experiments_root: Path, experiment: str, values: Dict[str, Any],
+                     launch_args: Any, corrections: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], Any]:
+    """The factor values and launch arguments of a trial as a person corrected them.
+
+    ``trials amend`` writes corrections.json, and the index counts the trial in the corrected
+    cell. A re-verify that rendered the ledger's values instead checked a trial amended from
+    ``slow`` to ``fast`` with ``--rate slow``, and a pass then counted it in the ``fast`` cell
+    (2026-11-25). The newest correction of each factor wins, as in
+    ``trial_decisions.apply_corrections``. A recorded launch argument that a corrected level
+    drives takes the corrected level's value, the other ones stay as recorded.
+    """
+    if not corrections:
+        return values, launch_args
+    from . import campaign_spec as cs
+    try:
+        factors = cs.load_factors(experiment, experiments_root)
+    except cs.SpecError as exc:
+        raise td.DecisionError(f"the factors of {experiment} do not load, so its corrections "
+                               f"cannot be applied: {exc}") from exc
+    by_key = {f.metadata_key: name for name, f in factors.items() if f.metadata_key}
+    corrected = dict(values)
+    for entry in corrections:
+        name = entry.get("factor") if entry.get("factor") in factors else by_key.get(str(entry["field"]))
+        if name is not None:
+            corrected[name] = entry["corrected"]
+    if not isinstance(launch_args, dict):
+        return corrected, launch_args
+    before = cs.TrialSpec(experiment, dict(values), []).launch_args(factors)
+    after = cs.TrialSpec(experiment, corrected, []).launch_args(factors)
+    args = dict(launch_args)
+    for arg in set(before) | set(after):
+        if before.get(arg) == after.get(arg):
+            continue
+        if arg in after:
+            args[arg] = after[arg]
+        else:
+            args.pop(arg, None)
+    return corrected, args
 
 
 def render_steps(steps: Sequence[Dict[str, Any]], values: Dict[str, Any]) -> List[Tuple[str, str]]:
@@ -190,8 +231,11 @@ def reverify(experiments_root: Path, experiment: str, trial: str, *, reason: str
         raise td.DecisionError(f"{dirs.name}: the ledger holds no factor values for it, so its "
                                f"verify steps cannot be rendered as the runner rendered them")
     bag = storage_dir(dirs)
+    corrections = max((td.read_corrections(d) for d in dirs.dirs), key=len)
+    values, launch_args = corrected_inputs(root, experiment, values, recorded.get("launch_args"),
+                                           corrections)
     rendered = render_steps(current_steps(root, experiment, campaign),
-                            placeholders(values, recorded.get("launch_args"), bag.resolve()))
+                            placeholders(values, launch_args, bag.resolve()))
     if not rendered:
         raise td.DecisionError(f"campaign {campaign} of {experiment} declares no verify steps")
     if dry_run:
