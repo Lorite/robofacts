@@ -84,6 +84,18 @@ def _in_process(main: Callable[[List[str]], int], argv: List[str]) -> tuple:
     return rc, buffer.getvalue()
 
 
+def lint_isolation() -> List[str]:
+    """Pytest arguments that keep the lint independent of the project it checks.
+
+    Pytest reads its configuration and its conftest.py files from the folders above the
+    test file. When the package is installed in a virtual environment inside the project,
+    those folders include the project's own. An empty configuration file (-c), the lint's
+    folder as the root and as the limit for conftest.py files keep the project's pytest
+    settings and code out of the lint."""
+    here = Path(__file__).resolve().parent
+    return ["-c", str(here / "lint_pytest.ini"), "--rootdir", str(here), "--confcutdir", str(here)]
+
+
 def _pytest(paths: Sequence[str], experiments_root: Path, extra_env: Optional[dict] = None) -> tuple:
     env = {k: v for k, v in os.environ.items() if k not in _GIT_HOOK_VARS}
     package_parent = str(Path(__file__).resolve().parents[1])
@@ -92,7 +104,8 @@ def _pytest(paths: Sequence[str], experiments_root: Path, extra_env: Optional[di
     # A middleware installation may add pytest plugins that cost seconds to load and that no lint needs.
     env.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     env.update(extra_env or {})
-    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *paths],
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           *lint_isolation(), *paths],
                           capture_output=True, text=True, env=env)
     output = proc.stdout + proc.stderr
     summary = next((line.strip("= ") for line in reversed(output.splitlines())

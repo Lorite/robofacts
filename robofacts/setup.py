@@ -32,7 +32,7 @@ setup(
     # the web interface's pages.
     package_data={
         package_name: [
-            "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md", "tools/*.sh",
+            "lint_pytest.ini", "preflight/checks/*.sh", "preflight/lib/*.sh", "preflight/README.md", "tools/*.sh",
             "ui/templates/*.html", "ui/static/*",
             *files_under("skeleton"),
         ],

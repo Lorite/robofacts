@@ -190,10 +190,10 @@ def _lint(argv):
         os.environ["TRIALS_LINT_EXPERIMENT"] = args.experiment
     import pytest
 
-    from . import backend, lint
+    from . import backend, lint, validate
     # The core's rules, then the rules of the project's backend.
     files = [lint.__file__, *[str(f) for f in backend.active(args.experiments_root).lint_files]]
-    return int(pytest.main(["-q", "-p", "no:cacheprovider", *files, *passthrough, *args.pytest_args]))
+    return int(pytest.main(["-q", "-p", "no:cacheprovider", *validate.lint_isolation(), *files, *passthrough, *args.pytest_args]))
 
 
 def _roots(argv):
