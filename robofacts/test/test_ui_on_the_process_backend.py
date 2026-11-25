@@ -469,3 +469,100 @@ def test_a_stop_during_the_settle_time_is_not_lost(bare, tmp_path, monkeypatch, 
     assert result["status"] == "blocked", result
     assert "nothing was recorded or flown" in result["detail"], result
     assert not ti.load_trials(bare.root, "demo_log_recorder"), "the stopped trial was recorded"
+
+
+def _free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.mark.real_sleep
+@pytest.mark.parametrize("sig", ["SIGTERM", "SIGHUP", "SIGINT"])
+def test_the_server_shuts_down_the_same_way_on_sigterm_sighup_and_ctrl_c(tmp_path, sig):
+    """A3-3: SIGTERM (its own advice was `pkill -f 'trials ui'`) and SIGHUP (a closed
+    terminal) ended the server at once, without the shutdown that lands an action in flight
+    and stops its stack. A real server on a free port of 127.0.0.1, stopped by its pid."""
+    import signal
+    import socket
+    import subprocess
+    pytest.importorskip("flask")
+    project = tmp_path / "example_project"
+    shutil.copytree(EXAMPLE, project)
+    port = _free_port()
+    env = dict(os.environ, PYTHONPATH=str(PACKAGE) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+               TRIALS_VOICE="off", TRIALS_EXPERIMENTS_ROOT=str(project / "experiments"),
+               TRIALS_PROJECT_ROOT=str(project))
+    server = subprocess.Popen(
+        [sys.executable, "-m", "robofacts.cli", "ui", "--no-auth", "--host", "127.0.0.1",
+         "--port", str(port), "--experiments-root", str(project / "experiments")],
+        cwd=project, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            assert server.poll() is None, server.communicate()
+            time.sleep(0.2)
+        else:
+            raise AssertionError("the server never listened")
+        server.send_signal(getattr(signal, sig))
+        out, err = server.communicate(timeout=30)
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait()
+    assert server.returncode == 0, (server.returncode, err[-2000:])
+    assert f"UI shut down cleanly ({sig})" in err, err[-2000:]
+
+
+@pytest.mark.real_sleep
+def test_the_shutdown_on_sigterm_lands_the_action_with_sigterm(tmp_path):
+    """A3-3: the shutdown that SIGTERM now takes aborts the run and passes the signal itself to
+    the action in flight (a Ctrl-C would pass SIGINT), which lands before the server exits."""
+    import signal
+    import threading
+    from types import SimpleNamespace
+    pytest.importorskip("flask")
+    from robofacts import remote_exec_utils as rex
+    from robofacts.ui import app as ui
+    mark = tmp_path / "lander.txt"
+    script = tmp_path / "lander.py"
+    script.write_text(f"""\
+import signal, sys, time
+from pathlib import Path
+mark = Path({str(mark)!r})
+def land(signum, frame):
+    time.sleep(0.5)
+    mark.write_text(f"landed on {{signal.Signals(signum).name}}\\n")
+    sys.exit(3)
+signal.signal(signal.SIGINT, land)
+signal.signal(signal.SIGTERM, land)
+mark.write_text("started\\n")
+time.sleep(30)
+""", encoding="utf-8")
+    worker = threading.Thread(target=lambda: rex.run_action([sys.executable, str(script)], None,
+                                                            cwd=tmp_path), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 20
+    while not (mark.is_file() and "started" in mark.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    class Runs:
+        aborted: list = []
+
+        def busy(self):
+            return worker.is_alive()
+
+        def current(self):
+            return SimpleNamespace(run_id="r1")
+
+        def abort(self, run_id):
+            self.aborted.append(run_id)
+
+    runs = Runs()
+    assert ui.shut_down(runs, rex.RunnerSignal(signal.SIGTERM)) == 0
+    assert mark.read_text(encoding="utf-8") == "landed on SIGTERM\n"
+    assert runs.aborted == ["r1"]

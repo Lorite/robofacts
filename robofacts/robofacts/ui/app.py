@@ -35,12 +35,14 @@ Deliberate design constraints
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import math
 import re
 import os
 import secrets
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -2202,6 +2204,68 @@ def load_robot_actions(app) -> Dict[str, List[Dict[str, str]]]:
 
 
 # --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def _stop_signals_noted(received: List[int]):
+    """While the block runs, Ctrl-C, SIGTERM and SIGHUP raise a KeyboardInterrupt in the main
+    thread (a RunnerSignal for the last two, as in the runner) and are noted in ``received``.
+
+    werkzeug's server swallows the KeyboardInterrupt and returns, so the shutdown learns from
+    the list which stop it was. Before the third review of 2026-11-25 SIGTERM and SIGHUP (a
+    `pkill`, a service manager, a closed terminal) ended the server at once: the action flew
+    on, the stack and the recorder were orphaned, and the trial got no metadata.
+    """
+    from robofacts.remote_exec_utils import _restore_handlers, deferred_interrupt
+
+    def on_stop(signum, frame):
+        received.append(signum)
+        raise deferred_interrupt(signum)
+
+    old = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    for s in old:
+        signal.signal(s, on_stop)
+    try:
+        yield
+    finally:
+        _restore_handlers(old)
+
+
+def shut_down(runs_mgr: Optional["RunManager"], cause: BaseException) -> int:
+    """What the server does once it is stopped (Ctrl-C, SIGTERM or SIGHUP, named by
+    ``cause``): end a trial in flight the way the runner's own interrupt ends it, then say
+    what was left. Returns the exit code: 0 when no run is active any more, 1 otherwise."""
+    from robofacts.remote_exec_utils import interrupt_signal_name
+    name = interrupt_signal_name(cause)
+    if runs_mgr is not None and runs_mgr.busy():
+        # The trial runs in a worker thread that gets no signal, and its action leads its own
+        # process group, so the stop reached neither. End the trial the way the CLI's Ctrl-C
+        # ends it: the action lands, then the worker's teardown stops the recorder and the
+        # stack, and no further trial starts. Before the second review of 2026-11-25 the
+        # server exited here with the action still flying.
+        try:
+            run = runs_mgr.current()
+            if run is not None:
+                runs_mgr.abort(run.run_id)
+            print(f"\n{name} with a campaign run ACTIVE: no further trial starts, the action in "
+                  f"flight lands first, then the recorder and the stack stop. Ctrl-C again exits "
+                  f"at once.", file=sys.stderr)
+            from robofacts.remote_exec_utils import LAND_WAIT_S, end_current_action
+            end_current_action(cause)
+            deadline = time.monotonic() + LAND_WAIT_S + 120
+            while runs_mgr.busy() and time.monotonic() < deadline:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
+    if runs_mgr is not None and runs_mgr.busy():
+        print("\nWARNING: a campaign run was ACTIVE. Its remote processes may have "
+              "been orphaned or cut mid-trial by this exit.\n"
+              "  - if a drone is airborne: scripts/estop.sh\n"
+              "  - before the next trial:  the runner's kill_stale_rig step will "
+              "clean the rig, or run ./scripts/kill_ros.sh yourself", file=sys.stderr)
+        return 1
+    print(f"\nUI shut down cleanly ({name}), port released.", file=sys.stderr)
+    return 0
+
+
 def main(argv=None) -> int:
     from robofacts.ui.arguments import build_parser  # the parser lives apart, so the help needs no Flask
     args = build_parser().parse_args(argv)
@@ -2240,7 +2304,8 @@ ERROR: port {args.port} is already in use — almost certainly an earlier instan
 of this UI still running (it survives a closed terminal or a dropped ssh).
 
   See who owns it:      ss -ltnp | grep :{args.port}
-  If it is this UI:     pkill -f 'trials ui'
+  If it is this UI:     pkill -INT -f 'trials ui'
+                        (a run in flight lands and stops before the UI exits)
                         …then re-run the exact command you just ran.
   Or use another port:  add  --port {args.port + 1}
                         (if you reach the UI over an ssh tunnel, forward the
@@ -2261,43 +2326,25 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
     if view_only:
         print("view-only: no route that runs, stops or moves anything is registered",
               file=sys.stderr)
-    try:
-        app.run(host=args.host, port=args.port, threaded=True)
-    except KeyboardInterrupt:
-        pass
-    # A plain return can leave the interpreter waiting on lingering threads
-    # with the socket half-held — the "port blocked after Ctrl-C" report.
-    # Exit hard, but say what that means if a run is in flight.
-    runs_mgr = app.config.get("RUNS")
-    if runs_mgr is not None and runs_mgr.busy():
-        # The trial runs in a worker thread that gets no signal, and its action leads its own
-        # process group, so the Ctrl-C reached neither. End the trial the way the CLI's
-        # Ctrl-C ends it: the action lands, then the worker's teardown stops the recorder and
-        # the stack, and no further trial starts. Before the second review of 2026-11-25 the
-        # server exited here with the action still flying.
-        run = runs_mgr.current()
-        print("\nCtrl-C with a campaign run ACTIVE: no further trial starts, the action in "
-              "flight lands first, then the recorder and the stack stop. Ctrl-C again exits "
-              "at once.", file=sys.stderr)
+    # Ctrl-C, SIGTERM and SIGHUP all take the shutdown path below (third review of
+    # 2026-11-25), and a terminal that closed (SIGHUP) cannot break it with a failed print.
+    from robofacts.remote_exec_utils import deferred_interrupt, output_survives_hangup
+    received: List[int] = []
+    with output_survives_hangup(), _stop_signals_noted(received):
         try:
-            if run is not None:
-                runs_mgr.abort(run.run_id)
-            from robofacts.remote_exec_utils import LAND_WAIT_S, end_current_action
-            end_current_action(KeyboardInterrupt())
-            deadline = time.monotonic() + LAND_WAIT_S + 120
-            while runs_mgr.busy() and time.monotonic() < deadline:
-                time.sleep(0.2)
+            app.run(host=args.host, port=args.port, threaded=True)
         except KeyboardInterrupt:
             pass
-    if runs_mgr is not None and runs_mgr.busy():
-        print("\nWARNING: a campaign run was ACTIVE. Its remote processes may have "
-              "been orphaned or cut mid-trial by this exit.\n"
-              "  - if a drone is airborne: scripts/estop.sh\n"
-              "  - before the next trial:  the runner's kill_stale_rig step will "
-              "clean the rig, or run ./scripts/kill_ros.sh yourself", file=sys.stderr)
-        os._exit(1)
-    print("\nUI shut down cleanly, port released.", file=sys.stderr)
-    os._exit(0)
+        # A plain return can leave the interpreter waiting on lingering threads
+        # with the socket half-held — the "port blocked after Ctrl-C" report.
+        # Exit hard, but say what that means if a run is in flight.
+        code = shut_down(app.config.get("RUNS"),
+                         deferred_interrupt(received[0]) if received else KeyboardInterrupt())
+        # Still inside the block, so a late signal cannot raise past the exit. os._exit
+        # flushes nothing: the streams are flushed first (a gone terminal is tolerated).
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
 
 
 if __name__ == "__main__":
