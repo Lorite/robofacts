@@ -373,8 +373,15 @@ class RunManager:
             until the operator clicks the confirm button on the run page —
             the run's state says so in the meantime, so the page never just
             looks hung. Waking because of an abort refuses the trial.
+
+            An abort that came earlier (a stop during the settle time or the gate) refuses it
+            at once: abort() sets ``_abort`` before it wakes ``_go``, so a wake-up that the
+            clear below erases is always seen here. Before the third review of 2026-11-25 the
+            clear erased it, and the run hung in "aborting" at the pose prompt.
             """
             run._go.clear()
+            if run._abort:
+                return False
             run.awaiting_kind, run.awaiting_what = kind, what
             run.append_log(log_line)
             run._go.wait()
@@ -471,6 +478,8 @@ class RunManager:
 
         def confirm_steps(trial, steps_list) -> bool:
             run._go.clear()
+            if run._abort:   # an abort's wake-up, erased by the clear (see wait_in_browser)
+                return False
             run.awaiting_kind, run.awaiting_what = "steps", trial.describe()
             run.append_log("[explore] waiting for the operator steps to be confirmed in the "
                            "browser - nothing has launched")
@@ -1969,8 +1978,13 @@ def create_app(experiments_root: Optional[Path] = None,
                          "runner is now closing the bag first and then the stack, in that order. "
                          "No further trials will start.")
             else:
-                extra = ("\n\nThe campaign was told to stop after this trial; no further trials "
-                         "will start.")
+                # Noted for the trial in progress (third review of 2026-11-25): one still in its
+                # settle time, gate or pose pause stops before its recorder, action or manual
+                # window starts. Before, such a stop was lost and the trial flew.
+                extra = ("\n\nThe campaign was told to stop; no further trials will start. A "
+                         "trial that has not started its recorder, action or manual window yet "
+                         "stops before them, and its stack stops. A trial whose action has "
+                         "ended finishes normally.")
         journal.add("stop", f"{action} {robot or 'ALL'}: {'OK' if ok else 'FAILED'}"
                             f"{' + trial ended' if extra else ''}",
                     (completed.stdout or "") + (completed.stderr or ""))

@@ -1736,6 +1736,19 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                                            "not confirmed at the pose pause (no 'fly' typed) — "
                                            "nothing was recorded or flown", commands)
 
+        # A STOP THAT FOUND NOTHING TO END (third review of 2026-11-25): the web interface's
+        # stop arrived during the settle time, the gate or the pose pause, when no action and
+        # no manual window ran. It was lost: the recorder started, the action flew, and the
+        # trial was written as complete. Nothing is recorded or flown now, and the finally
+        # below tears the stack down.
+        window = not steps["action"] and (steps["launch"] or steps["record"])
+        if (record_cmd or action_cmd or window) and take_pending_stop():
+            stage = ("the recorder" if record_cmd else "the action" if action_cmd
+                     else "the manual window")
+            refusal = f"{STOPPED_BEFORE} {stage} started — nothing was recorded or flown"
+            print(_c("31;1", f"[runner] TRIAL STOPPED - {refusal}"))
+            trace_step("stop", "stop", ok=False, note=refusal)
+            return TrialResult(trial, None, "blocked", refusal, commands)
         if record_cmd and external_record:
             # A recorder creates its own output directory but not the parents of
             # one. On external storage the parents are <root>/<experiment>/bags,
@@ -1757,7 +1770,13 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # planned after the action ends is reported as not spoken.
         if vplan["cues"] and (action_cmd or record_cmd or launch_cmd):
             _ctx["voice_timeline"] = voice.CueTimeline(vplan["cues"]).start()
-        if action_cmd:
+        if (action_cmd or window) and take_pending_stop():
+            # The same stop, arrived while the recorder started: the recording exists, so the
+            # trial is written as aborted with the stage as its reason.
+            detail = f"{STOPPED_BEFORE} the {'action' if action_cmd else 'manual window'} started"
+            print(_c("31;1", f"[runner] {detail}: it does not start"))
+            trace_step("stop", "stop", ok=False, note=detail)
+        elif action_cmd:
             mark("action_start")
             _t_action = time.monotonic()
             timed_out = {"yes": False}
@@ -1767,7 +1786,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 from .remote_exec_utils import terminate_current_foreground
 
                 def _expire():
-                    timed_out["yes"] = terminate_current_foreground()
+                    # Never noted as a pending stop: the action may have just ended.
+                    timed_out["yes"] = terminate_current_foreground(note_pending=False)
                     if timed_out["yes"]:
                         print(_c("31;1", f"[runner] ACTION TIMEOUT after "
                                          f"{config.action_timeout_s:.0f} s - SIGTERM sent "
@@ -1803,7 +1823,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                  output=getattr(completed, "stdout", "") or "",
                  note=(f"action_timeout_s={config.action_timeout_s:.0f} expired"
                        if timed_out["yes"] else ""))
-        elif not steps["action"] and (steps["launch"] or steps["record"]):
+        elif window:
             # Manual window: the operator flies/works by hand while the stack
             # (and recorder, if enabled) stay up for a bounded time. With
             # nothing up there is nothing to hold open — skip straight through.
@@ -2016,6 +2036,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     action_failed = (detail.startswith("action returned rc=")
                      or detail.startswith("execution error")
                      or detail.startswith(MANUAL_WINDOW_STOPPED)
+                     or detail.startswith(STOPPED_BEFORE)
                      or "verify step" in detail)
     if action_failed:
         # The trajectory never ran (or died part-way), so this is NOT a flight.
@@ -2044,6 +2065,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         elif detail.startswith(MANUAL_WINDOW_STOPPED):
             print("[runner] TRIAL STOPPED - a stop ended the manual window early; recorded as "
                   "aborted, so it cannot count as coverage")
+        elif detail.startswith(STOPPED_BEFORE):
+            print("[runner] TRIAL STOPPED - a stop arrived before the trial's action or manual "
+                  "window started; recorded as aborted, so it cannot count as coverage")
         else:
             print("[runner] TRIAL FAILED - a verify step rejected the recorded trial; recorded "
                   "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")
@@ -2094,9 +2118,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 
 
 from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
-from .remote_exec_utils import (deferred_interrupt, hold_window,  # noqa: E402
-                                interrupt_signal_name, interrupts_held,
-                                output_survives_hangup, stop_signals_interrupt)
+from .remote_exec_utils import (clear_pending_stop, deferred_interrupt,  # noqa: E402
+                                hold_window, interrupt_signal_name, interrupts_held,
+                                output_survives_hangup, stop_signals_interrupt,
+                                take_pending_stop)
 
 
 #: The attempt ledger's file name, under experiments/<name>/runs/.
@@ -2518,6 +2543,9 @@ def _note_gate_refusal(bag_dir: Path, gate: Optional[Dict[str, Any]], detail: st
 
 #: The detail of a trial whose manual window (the action step disabled) a stop ended early.
 MANUAL_WINDOW_STOPPED = "manual window stopped by the operator"
+#: The start of the reason of a trial that a stop ended before its recorder, its action or
+#: its manual window started (remote_exec_utils._STOP_PENDING).
+STOPPED_BEFORE = "stopped by the operator before"
 
 
 def action_signal_phrase(rc: int) -> Optional[str]:
@@ -2772,6 +2800,10 @@ def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
         if gate_named:
             print("[runner] the campaign names a gate factor: a blocked attempt is an "
                   "outcome, so the campaign continues past it")
+    if not dry_run:
+        # A stop noted for an earlier run (remote_exec_utils._STOP_PENDING) must not end the
+        # first trial of this one. A dry run leaves it: it never reaches a stage that reads it.
+        clear_pending_stop()
     session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     # One shared stack for the whole batch when asked (never in a dry run —
     # there is nothing running to share). The finally below is what guarantees
@@ -2912,6 +2944,8 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
     print(f"[runner]   shape: {spec.describe()}")
     print("[runner]   recorded for the operator's own question. It can never "
           "count as coverage.")
+    if not dry_run:
+        clear_pending_stop()   # a stop of an earlier run never ends this one (see run_plan)
     result = run_trial(spec, campaign.factors, config, bags_dir, gate=gate,
                        dry_run=dry_run, hooks=hooks, slim=slim,
                        quiet_children=quiet_children,

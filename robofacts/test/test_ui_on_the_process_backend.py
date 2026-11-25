@@ -431,3 +431,41 @@ def test_the_back_field_only_ever_leads_back_into_the_interface(bare, monkeypatc
         page = bare.c.post("/preflight/demo_log_recorder", data={"back": back},
                            headers=auth()).get_data(as_text=True)
         assert f'<a href="{expected}">' in page.replace("&amp;", "&"), back
+
+
+# --------------------------------------------------------------------------- #
+# Review round 3 (2026-11-25)
+# --------------------------------------------------------------------------- #
+@pytest.mark.real_sleep
+@pytest.mark.parametrize("mode", ["action", "window", "pose"])
+def test_a_stop_during_the_settle_time_is_not_lost(bare, tmp_path, monkeypatch, mode):
+    """A3-1: the stop arrives while the stack settles, when no action and no manual window
+    runs. It used to be lost: the recorder started, the action ran (or the window was held)
+    and the trial was written as complete. With the pose pause on, the run hung in "aborting"
+    at the pose prompt, because the browser wait cleared the abort's wake-up."""
+    from robofacts import trial_index as ti
+    runner = bare.root / "demo_log_recorder" / "config" / "runner.yaml"
+    text = runner.read_text(encoding="utf-8")
+    runner.unlink()
+    runner.write_text(text.replace("settle_s: 0.5", "settle_s: 3"), encoding="utf-8")
+    estop = tmp_path / "estop.sh"
+    estop.write_text("#!/bin/sh\necho stub estop\n", encoding="utf-8")
+    estop.chmod(0o755)
+    real_path = bare.ui.tools.path
+    monkeypatch.setattr(bare.ui.tools, "path", lambda name: estop if name == "estop.sh" else real_path(name))
+    form = dict(EXECUTE)
+    if mode == "window":
+        form.update(steps_present="1", step_setup="1", step_launch="1", step_record="1",
+                    step_action="", hold_s="15")
+    if mode == "pose":
+        form["pose_pause"] = "1"
+    run = bare.runs.get(run_id_of(bare.c.post("/run", data=form, headers=auth())))
+    time.sleep(1.0)
+    page = bare.c.post("/stop", data={"action": "estop"}, headers=auth()).get_data(as_text=True)
+    assert "no further trials will start" in page
+    wait_until_ended(run, timeout=30)
+    assert run.state == "aborted", (run.state, run.awaiting_kind, run.results)
+    (result,) = run.results
+    assert result["status"] == "blocked", result
+    assert "nothing was recorded or flown" in result["detail"], result
+    assert not ti.load_trials(bare.root, "demo_log_recorder"), "the stopped trial was recorded"

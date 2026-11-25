@@ -203,6 +203,16 @@ TERM_GRACE_S = 5.0
 #: The manual windows in progress (the action step disabled: the stack stays up for a
 #: bounded time). A stop ends them like it ends an action (see hold_window).
 _HOLDS: list = []
+#: A stop that found no action and no manual window to end: it arrived while the trial was
+#: still in its settle time, its gate or its pose pause. The runner takes it before it starts
+#: the recorder, the action and the manual window (take_pending_stop), and run_plan clears it
+#: when an executed run starts. Before the third review of 2026-11-25 such a stop was lost:
+#: the recorder started, the action flew, and the trial was written as complete.
+_STOP_PENDING = threading.Event()
+#: Held while a stop looks for something to end, and while an action or a manual window
+#: registers: a stop that arrives in between is then either seen by the stop or taken by
+#: the action or the window that starts.
+_STOP_LOCK = threading.Lock()
 
 
 class RunnerSignal(KeyboardInterrupt):
@@ -380,9 +390,24 @@ def _running(proc: subprocess.Popen) -> bool:
     return proc.poll() is None or (proc.pid in _OWN_GROUP and _group_alive(proc.pid))
 
 
-def terminate_current_foreground() -> bool:
+def take_pending_stop() -> bool:
+    """Whether a stop arrived while nothing of the trial could be ended, and forget it."""
+    with _STOP_LOCK:
+        pending = _STOP_PENDING.is_set()
+        _STOP_PENDING.clear()
+    return pending
+
+
+def clear_pending_stop() -> None:
+    """Forget a stop of an earlier run (run_plan calls it when an executed run starts)."""
+    _STOP_PENDING.clear()
+
+
+def terminate_current_foreground(note_pending: bool = True) -> bool:
     """End the running action, or the manual window, if any. Returns True if something was
-    signalled.
+    signalled. When nothing runs, the stop is noted for the trial in progress (see
+    _STOP_PENDING), unless ``note_pending`` is False (the action timeout, whose action has
+    already ended then).
 
     Deliberately a TERMINATE of the action rather than a kill of the stack:
     run_trial's finally then stops the recorder first and the stack after, so
@@ -393,17 +418,21 @@ def terminate_current_foreground() -> bool:
     to the flight it started (found 2026-11-25), and a flight it started in the
     background outlives the wrapper. A manual window (see hold_window) ends too.
     """
-    for event in list(_HOLDS):
-        event.set()
-        return True
-    for proc in list(_CURRENT_FOREGROUND):
-        if _running(proc):
-            # Marked first, so the action's own end sees it: members of the group that
-            # outlive the leader are then awaited and ended (_run_streamed), not left.
-            proc._robofacts_stopped = True
-            _signal_process(proc, signal.SIGTERM)
+    with _STOP_LOCK:
+        for event in list(_HOLDS):
+            event.set()
             return True
-    return False
+        for proc in list(_CURRENT_FOREGROUND):
+            if _running(proc):
+                # Marked first, so the action's own end sees it: the action did not complete
+                # whatever it returns, and members of its group that outlive the leader are
+                # awaited and ended (_run_streamed), not left.
+                proc._robofacts_stopped = True
+                _signal_process(proc, signal.SIGTERM)
+                return True
+        if note_pending:
+            _STOP_PENDING.set()
+        return False
 
 
 def end_current_action(reason: BaseException) -> bool:
@@ -412,16 +441,18 @@ def end_current_action(reason: BaseException) -> bool:
     and end a manual window. Returns True if there was one. The web interface calls it when
     its server is stopped with Ctrl-C: the worker thread that runs the trial gets no signal,
     and before the second review of 2026-11-25 the server exited with the action still
-    flying."""
-    found = False
-    for event in list(_HOLDS):
+    flying. When nothing runs yet (the settle time, the gate), the stop is noted for the
+    trial in progress like the web interface's stop (see _STOP_PENDING)."""
+    with _STOP_LOCK:
+        holds = list(_HOLDS)
+        running = [p for p in _CURRENT_FOREGROUND if _running(p)]
+        if not holds and not running:
+            _STOP_PENDING.set()
+    for event in holds:
         event.set()
-        found = True
-    for proc in list(_CURRENT_FOREGROUND):
-        if _running(proc):
-            found = True
-            _end_interrupted(proc, reason, action=getattr(proc, "_robofacts_action", False))
-    return found
+    for proc in running:
+        _end_interrupted(proc, reason, action=getattr(proc, "_robofacts_action", False))
+    return bool(holds or running)
 
 
 def hold_window(seconds: float) -> bool:
@@ -429,9 +460,14 @@ def hold_window(seconds: float) -> bool:
     step is disabled). Returns True when a stop (terminate_current_foreground) ended the
     window early. A Ctrl-C interrupts the wait as before. Before the second review of
     2026-11-25 the window was a plain sleep: the web interface's stop did not end it, and the
-    trial was written as a complete one."""
+    trial was written as a complete one. A stop that arrived just before the window started
+    (see _STOP_PENDING) ends it at once."""
     event = threading.Event()
-    _HOLDS.append(event)
+    with _STOP_LOCK:
+        if _STOP_PENDING.is_set():
+            _STOP_PENDING.clear()
+            return True
+        _HOLDS.append(event)
     try:
         return event.wait(max(0.0, seconds))
     finally:
@@ -550,14 +586,24 @@ def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, che
     own_group = action and target is None
     if own_group:
         kwargs["start_new_session"] = True
-    # errors="replace": one byte that is not UTF-8 in the output must not end the reading
-    # and abandon a running action (found 2026-11-25).
-    proc = subprocess.Popen(final, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace", bufsize=1, **kwargs)
-    if own_group:
-        _OWN_GROUP.add(proc.pid)
-    proc._robofacts_action = action
-    _CURRENT_FOREGROUND.append(proc)
+    with _STOP_LOCK:
+        if action and _STOP_PENDING.is_set():
+            # A stop arrived after the runner's last look and before the action could be
+            # signalled: the action does not start at all.
+            _STOP_PENDING.clear()
+            line = "[runner] a stop arrived as the action was starting: it does not start\n"
+            print(line, end="", flush=True)
+            if check:
+                raise subprocess.CalledProcessError(-signal.SIGTERM, final, output=line)
+            return subprocess.CompletedProcess(final, -signal.SIGTERM, stdout=line, stderr="")
+        # errors="replace": one byte that is not UTF-8 in the output must not end the
+        # reading and abandon a running action (found 2026-11-25).
+        proc = subprocess.Popen(final, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors="replace", bufsize=1, **kwargs)
+        if own_group:
+            _OWN_GROUP.add(proc.pid)
+        proc._robofacts_action = action
+        _CURRENT_FOREGROUND.append(proc)
     captured: list[str] = []
     assert proc.stdout is not None
     try:
@@ -566,14 +612,16 @@ def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, che
                 print(line, end="", flush=True)
                 captured.append(line)
             rc = proc.wait()
+            stopped = getattr(proc, "_robofacts_stopped", False)
             if own_group and _group_alive(proc.pid):
-                if getattr(proc, "_robofacts_stopped", False):
+                if stopped:
                     _end_stopped_leftovers(proc)
-                    # A stop ended the action, so it did not complete, whatever its leader
-                    # returned.
-                    rc = rc or -signal.SIGTERM
                 else:
                     _report_leftovers(proc, rc)
+            if stopped:
+                # A stop ended the action, so it did not complete, whatever it returned (an
+                # action that lands on SIGTERM and exits 0 was counted as a finished trial).
+                rc = rc or -signal.SIGTERM
         except BaseException as exc:
             drain = _drain(proc, captured)
             _end_interrupted(proc, exc, action=action)

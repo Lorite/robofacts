@@ -65,6 +65,18 @@ def _runner_sleeps_cost_nothing(request, monkeypatch):
     monkeypatch.setattr(trial_runner, "time", _TimeWithoutSleep())
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_left_by_another_test():
+    """A stop that found nothing to end waits for the trial in progress until a run takes or
+    clears it (remote_exec_utils._STOP_PENDING). A test that posts the web interface's stop
+    with no trial running leaves one behind, and a later test that calls run_trial directly
+    would stop before its recorder."""
+    from robofacts import remote_exec_utils
+    remote_exec_utils.clear_pending_stop()
+    yield
+    remote_exec_utils.clear_pending_stop()
+
+
 @pytest.fixture
 def enable_adapters(monkeypatch):
     """Enable robot adapters for one test, as `adapters: [...]` in trials.yaml would."""

@@ -605,3 +605,146 @@ time.sleep(30)
     worker.join(timeout=20)
     assert mark.read_text(encoding="utf-8") == "landed on SIGINT\n"
     assert results[0].returncode == 3
+
+
+# --------------------------------------------------------------------------- #
+# Round 3 (A3-1): a stop that arrives before the action or the manual window starts
+# --------------------------------------------------------------------------- #
+def _plan_in_thread(experiments: Path, results: list, **kwargs) -> threading.Thread:
+    campaign = cs.load_campaign(experiments / "plant" / "campaigns" / "rates.yaml", experiments, [])
+    plan = cp.build_plan(campaign, ti.load_trials(experiments, "plant"), False)
+    config = tr.RunnerConfig.load("plant", experiments)
+    bags_dir = experiments / "plant" / backends.record_dirs(experiments)["recordings"]
+    worker = threading.Thread(target=lambda: results.extend(tr.run_plan(
+        plan, config, bags_dir, dry_run=False, limit=1, pause_before_action=False, **kwargs)),
+        daemon=True)
+    worker.start()
+    return worker
+
+
+@pytest.mark.real_sleep
+@pytest.mark.parametrize("window", [False, True], ids=["action", "manual-window"])
+def test_a_stop_during_the_settle_time_ends_the_trial_before_the_recorder(tmp_path, monkeypatch, window):
+    """The web interface's stop arrives while the stack settles: nothing runs that it could
+    signal. Until round 3 it was lost, the recorder started, the action flew (or the window
+    was held), and the trial was written as complete."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    _runner_yaml(experiments, "settle_s: 0.3", "settle_s: 3")
+    flown = experiments / "plant" / "runs" / "flown.txt"
+    _action(experiments, f"from pathlib import Path\nPath({str(flown)!r}).write_text('flew')\n")
+    monkeypatch.chdir(root)
+    results: list = []
+    worker = _plan_in_thread(experiments, results, **({"steps": {"action": False}, "hold_s": 20}
+                                                      if window else {}))
+    try:
+        time.sleep(1.0)
+        assert rex.terminate_current_foreground() is False, "nothing runs during the settle time"
+        t_stop = time.monotonic()
+        worker.join(timeout=30)
+        assert not worker.is_alive()
+        assert time.monotonic() - t_stop < 10, "the trial ran on after the stop"
+    finally:
+        rex.clear_pending_stop()
+    (result,) = results
+    assert result.status == "blocked", result.detail
+    assert result.detail.startswith(f"{tr.STOPPED_BEFORE} the recorder started"), result.detail
+    assert not flown.exists(), "the action flew after the stop"
+    assert ti.load_trials(experiments, "plant") == [], "a stopped trial left a trial record"
+    assert processes_in(root) == ""
+    ti._recorder_at.cache_clear()
+
+
+@pytest.mark.real_sleep
+@pytest.mark.parametrize("window", [False, True], ids=["action", "manual-window"])
+def test_a_stop_while_the_recorder_starts_ends_the_trial_before_the_action(tmp_path, monkeypatch, window):
+    """The stop arrives in the second the recorder gets to start: the recording exists, the
+    action (or the manual window) does not start, and the trial is written as aborted with the
+    stage as its reason."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    flown = experiments / "plant" / "runs" / "flown.txt"
+    _action(experiments, f"from pathlib import Path\nPath({str(flown)!r}).write_text('flew')\n")
+    base = tr.ProcessHooks.default()
+
+    def start_background(cmd, target, **kw):
+        proc = base.start_background(cmd, target, **kw)
+        if kw.get("label") == "recorder":
+            assert rex.terminate_current_foreground() is False
+        return proc
+    hooks = tr.ProcessHooks(start_background=start_background, run_foreground=base.run_foreground,
+                            stop_process=base.stop_process, run_action=base.run_action)
+    monkeypatch.chdir(root)
+    results: list = []
+    worker = _plan_in_thread(experiments, results, hooks=hooks,
+                             **({"steps": {"action": False}, "hold_s": 20} if window else {}))
+    try:
+        worker.join(timeout=40)
+        assert not worker.is_alive(), "the manual window ran on after the stop"
+    finally:
+        rex.clear_pending_stop()
+    stage = "manual window" if window else "action"
+    (result,) = results
+    assert result.status == "failed", result.detail
+    assert result.detail.startswith(f"{tr.STOPPED_BEFORE} the {stage} started"), result.detail
+    assert not flown.exists(), "the action flew after the stop"
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert trial.metadata["aborted"] is True and trial.status != "usable"
+    assert trial.metadata["abort_reason"].startswith(f"{tr.STOPPED_BEFORE} the {stage} started")
+    assert processes_in(root) == ""
+    ti._recorder_at.cache_clear()
+
+
+def test_a_stop_noted_just_before_the_action_or_the_window_starts_is_honored(tmp_path):
+    """The stop arrives after the runner's last look and before the action or the window has
+    registered: run_action does not start the action, hold_window ends at once."""
+    mark = tmp_path / "flew.txt"
+    try:
+        assert rex.terminate_current_foreground() is False
+        done = rex.run_action([sys.executable, "-c", f"open({str(mark)!r}, 'w')"], None, cwd=tmp_path)
+        assert done.returncode == -signal.SIGTERM and "does not start" in done.stdout
+        assert not mark.exists()
+        assert rex.terminate_current_foreground() is False
+        t0 = time.monotonic()
+        assert rex.hold_window(20) is True and time.monotonic() - t0 < 1
+        assert rex.take_pending_stop() is False, "each stop is taken once"
+    finally:
+        rex.clear_pending_stop()
+
+
+@pytest.mark.real_sleep
+def test_a_stop_of_an_earlier_run_does_not_end_the_next_run(tmp_path, monkeypatch):
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    monkeypatch.chdir(root)
+    assert rex.terminate_current_foreground() is False   # noted, and nobody took it
+    results: list = []
+    _plan_in_thread(experiments, results).join(timeout=40)
+    (result,) = results
+    assert result.status == "ran", result.detail
+    ti._recorder_at.cache_clear()
+
+
+def test_a_stopped_action_that_exits_0_did_not_complete(tmp_path):
+    """An action that lands on SIGTERM and exits 0: the stop ended it, so it never reads as a
+    finished trial (the web interface's stop has no timeout flag to say so)."""
+    mark = tmp_path / "started.txt"
+    script = tmp_path / "lands.py"
+    script.write_text(f"""\
+import signal, sys, time
+from pathlib import Path
+signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+Path({str(mark)!r}).write_text("started")
+time.sleep(30)
+""", encoding="utf-8")
+    results: list = []
+    worker = threading.Thread(target=lambda: results.append(
+        rex.run_action([sys.executable, str(script)], None, cwd=tmp_path)), daemon=True)
+    worker.start()
+    _wait_for(mark, "started")
+    assert rex.terminate_current_foreground() is True
+    worker.join(timeout=20)
+    assert results[0].returncode == -signal.SIGTERM
