@@ -54,10 +54,11 @@ def test_trials_validate_fails_the_dry_run_on_a_verify_step_typo(project):
     assert "verify step rate_matches references unknown factor 'rates'" in dry_run.output
 
 
-def test_an_executed_campaign_with_the_typo_runs_and_records_nothing(project):
+def test_an_executed_campaign_with_the_typo_runs_and_records_nothing(project, capsys):
     campaign = project / EXPERIMENT / "campaigns" / "grid.yaml"
-    with pytest.raises(tr.RunnerError, match="unknown factor 'rates'"):
-        tr.main([str(campaign), "--experiments-root", str(project), "--no-pause", "--execute"])
+    # `trials run` ends the refusal with its message and exit code 1, not a traceback.
+    rc = tr.main([str(campaign), "--experiments-root", str(project), "--no-pause", "--execute"])
+    assert rc == 1 and "unknown factor 'rates'" in capsys.readouterr().out
     recordings = project / EXPERIMENT / "recordings"
     assert not [d for d in recordings.iterdir() if d.is_dir()]
     assert not (project / EXPERIMENT / "runs" / tr.ATTEMPT_LEDGER_NAME).exists()
