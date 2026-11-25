@@ -2537,7 +2537,9 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
             if recovered:
                 metadata["_recovered"] = recovered
             path = Path(bag_dir) / "trial_metadata.json"
-            path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+            # Whole or not at all (review B2-5): a half-written file would hide the trial.
+            from .remote_exec_utils import write_trial_file
+            write_trial_file(None, path, json.dumps(metadata, indent=2) + "\n")
             written = path
             ctx["metadata"] = {"aborted": True, "abort_reason": reason}
             print(f"[runner] INTERRUPTED - {path} written as aborted: {reason}")
