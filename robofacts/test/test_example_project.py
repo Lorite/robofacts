@@ -87,5 +87,5 @@ def test_the_quickstart_runs_the_example_from_plan_to_coverage_index(tmp_path):
         assert len(lines) >= 3 and all(f"rate={trial.metadata['rate']}" in line for line in lines)
         assert trial.metadata["domain"] == "simulation"
     ti._recorder_at.cache_clear()
-    from test_process_backend import leftover_processes
-    assert leftover_processes(str(tmp_path) + ".*system.py") == ""
+    from test_process_backend import processes_in
+    assert processes_in(tmp_path, "system.py") == ""

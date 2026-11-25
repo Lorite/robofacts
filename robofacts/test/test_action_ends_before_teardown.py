@@ -21,7 +21,7 @@ import pytest
 
 from robofacts import campaign_plan as cp, campaign_spec as cs, trial_index as ti
 
-from test_process_backend import PACKAGE, _run, use_project, write_project
+from test_process_backend import PACKAGE, _run, processes_in, use_project, write_project
 
 #: The action of these tests: it waits for a signal, then "lands" for 1.5 s and writes
 #: whether the stack (the plant, which writes a log line every 50 ms) was still up then.
@@ -44,25 +44,6 @@ signal.signal(signal.SIGTERM, land)
 mark.write_text("started\\n")
 time.sleep(30)
 '''
-
-
-def processes_in(root: Path, pattern: str = "") -> str:
-    """Command lines of the live processes whose working directory lies under ``root`` (the
-    stack, the recorder and the action run with relative paths, so a match on the command
-    line alone would never find them)."""
-    found = []
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit() or int(entry.name) == os.getpid():
-            continue
-        try:
-            cwd = os.readlink(entry / "cwd")
-            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
-            state = next((l for l in (entry / "status").read_text().splitlines() if l.startswith("State:")), "")
-        except OSError:
-            continue
-        if cwd.startswith(str(root)) and pattern in command and "zombie" not in state:
-            found.append(command.strip())
-    return "\n".join(found)
 
 
 def _action(experiments: Path, body: str, name: str = "observe.py") -> None:
