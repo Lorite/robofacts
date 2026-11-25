@@ -531,6 +531,20 @@ def test_index_renders_the_declared_actions(client):
     assert "Robot actions" in body and "ready" in body and "lease" in body
 
 
+def test_kill_ros_is_refused_while_a_trial_runs(client, monkeypatch):
+    """C2-9: /kill_ros raised NameError (500) whenever a run was busy, because the module
+    used `request` without importing it. It must refuse with 409 and start no process."""
+    monkeypatch.setattr(ui_ext.subprocess, "run",
+                        lambda cmd, **kw: (_ for _ in ()).throw(AssertionError(f"spawned {cmd}")))
+    runs = client.application.config["RUNS"]
+    runs._runs["r1"] = ui.ActiveRun(run_id="r1", experiment="expA", campaign="c",
+                                    campaign_file="c", wanted=1, executed=True)
+    runs._current = "r1"
+    response = client.post("/kill_ros", headers=auth())
+    assert response.status_code == 409
+    assert "E-STOP" in response.get_data(as_text=True)
+
+
 def test_the_stop_endpoint_cannot_run_arbitrary_commands(client, monkeypatch):
     """The robot name is passed as an argv element to estop.sh, which validates
     it against robots.yaml — it is never interpolated into a shell string."""
