@@ -1,60 +1,70 @@
 # RoboFACTS
 
-**RoboFACTS** stands for Factors, A Contract, and checked Trials in Simulation and on hardware, for robot teams. This repository holds two packages. `robofacts` is the general one: Python only, no ROS. `robofacts_ros2` is its ROS 2 backend and depends on it. Until 2026-10-16 the package was called `declarative_robot_trials`, and until 2026-11-24 the two packages were one ROS 2 package: same command.
+RoboFACTS is a framework for experiments with robots, in simulation and on hardware. You declare an experiment once (its factors, the metadata every trial must record, the checks before each trial, how to run and verify one trial), and the framework plans the trials, runs them, checks each recording, and counts only the trials that satisfy the declaration. The same declaration drives one robot or a team, on one computer or several.
 
-Declarative experiment design for robot trials. An experiment declares five files (the factors, the metadata contract, the T-0 gate, the runner and the analyses), a campaign declares what set of trials under what conditions, and one command runs the loop: a linter refuses a declaration that cannot be measured, a planner lists the cells still missing, a gate of machine checks and operator confirmations runs seconds before every trial, a runner brings the stack up, records the trial and verifies the recording, a coverage index counts only the trials whose metadata satisfies the contract, and named analyses run over chosen cohorts. The same declaration drives one robot or a team, in simulation or on hardware, on one machine or across several.
+The name stands for Factors, A Contract, and checked Trials in Simulation and on hardware. The framework is described in a SAC 2027 paper (see [Cite](#cite)).
+
+## Two packages
 
 | Package | Holds | Needs |
 |---|---|---|
-| `robofacts/` | the declarations (factors, contract, campaigns), the planner, the linter, the coverage index, the trial loop of the runner, the gate protocol with 8 general checks, the web interface, the launcher and recorder interfaces, and a built-in backend without any middleware | Python 3.10 and PyYAML. Installs with `pip`. The web interface needs Flask: `pip install './robofacts[ui]'` |
-| `robofacts_ros2/` | the ROS 2 backend: `ros2 launch`, `ros2 bag record`, the bag readers and the slim copy, 13 ROS 2 gate checks, the robot adapters, Explore, and the ROS 2 part of the web interface (Foxglove replay and layouts, the bag download, the clean slate of the rig hosts) | `robofacts` and ROS 2 Humble. An `ament_python` package, built with colcon |
+| `robofacts/` | the declarations (factors, contract, campaigns), the planner, the linter, the coverage index, the runner, the gate with 8 general checks, the web interface, and a built-in backend without any middleware (`process`) | Python 3.10 and PyYAML. The web interface also needs Flask |
+| `robofacts_ros2/` | the ROS 2 backend: `ros2 launch`, `ros2 bag record`, the bag readers, 13 ROS 2 gate checks, the robot adapters, and the ROS 2 part of the web interface | `robofacts` and ROS 2 Humble |
 
-The dependency goes one way. `robofacts/test/test_core_is_free_of_ros.py` fails the build when the general package imports a ROS module or names ROS in any file.
+The dependency goes one way. A test fails the build when `robofacts` imports a ROS module or names ROS in any file.
 
-## Quickstart: the whole loop in one command
+## Install
 
-Without ROS, with Python 3.10 or newer:
+The general package, with pip, into any Python 3.10 or newer environment:
 
 ```bash
-pip install ./robofacts
+git clone https://github.com/Lorite/robofacts.git && cd robofacts
+pip install ./robofacts               # add [ui] for the web interface: pip install './robofacts[ui]'
+trials --help
+```
+
+Both packages, with colcon, into a ROS 2 Humble workspace:
+
+```bash
+cd ~/ros2_ws/src && git clone https://github.com/Lorite/robofacts.git
+cd ~/ros2_ws && colcon build --packages-select robofacts robofacts_ros2 && source install/setup.bash
+trials --help                         # or: ros2 run robofacts_ros2 trials --help
+```
+
+colcon builds `robofacts` as a plain Python package and before `robofacts_ros2`. A project names its backend in `trials.yaml`: `backend: process` without ROS, `backend: ros2` with it.
+
+## Quickstart
+
+Without ROS (needs only `pip install ./robofacts`):
+
+```bash
 ./robofacts/quickstart.sh
 ```
 
-`robofacts/quickstart.sh` runs, on the example project `robofacts/example_project`, the linter, the planner, a dry run, the four trials of a campaign that sweeps two factors (gate, trial, recording, verify step, metadata) and the coverage index, which then lists the four cells with one usable trial each. The example's "system under test" is a script that appends lines to a log file, the recorder stores what it writes during a trial, and nothing needs a robot or a middleware.
-
-A real robot without ROS 2: `examples/cflib_hover` flies one Crazyflie on its Flow deck with cflib, on the same `process` backend (a gate over the radio, a flight log as the recording, a verify step on the recorded height). Its tests run without a drone, see its README for the operator procedure.
-
-With ROS 2 and Docker, from this directory:
+With ROS 2, in Docker:
 
 ```bash
 docker build -t trials-quickstart -f docker/Dockerfile .
 docker run --rm trials-quickstart
 ```
 
-The image is the official ROS 2 Humble image plus the packages of the example. `quickstart.sh` runs, on the example project, the linter, the planner, a dry run, the four trials of the example campaign (gate, trial, recording, verify steps, metadata) and the coverage index, which then lists the four new usable trials. The example's "robot" is `demo_nodes_cpp talker`, so it runs on any machine with ROS 2 Humble.
+Each runs the whole loop on an example project: the linter, the planner, a dry run, four trials (gate, trial, recording, verify step, metadata) and the coverage index, which then lists four usable trials.
 
-## Install
+## Three examples
 
-Into a colcon workspace:
+| Example | Backend | What it does | Status |
+|---|---|---|---|
+| `robofacts/example_project`, experiment `demo_log_recorder` | `process`, no ROS | a small script stands in for the system and writes a log file, the recorder stores what it writes during a trial, a verify step reads the recording | runs in CI |
+| `robofacts_ros2/example_project`, experiment `demo_talker_listener` | `ros2` | the ROS 2 demo talker is the "robot", the trial records its topic into a bag | runs in CI and in the Docker image |
+| `examples/cflib_hover` | `process`, no ROS | one Crazyflie hovers on its Flow deck, commanded with cflib: a gate over the radio (battery, Flow deck), the flight log as the recording, a verify step on the recorded height | its tests run in CI without a drone. Flown once on hardware on 2026-11-25 (one 10 s hover, gate GO, verify PASS). The soft stop and the emergency stop are not yet tested on the drone |
 
-```bash
-cd ~/ros2_ws/src && git clone <this repository> robofacts
-cd ~/ros2_ws && colcon build --packages-select robofacts robofacts_ros2 && source install/setup.bash
-trials --help                          # or: ros2 run robofacts_ros2 trials --help
-```
+## Cite
 
-colcon builds `robofacts` as a plain Python package (it has no `package.xml`) and orders it before `robofacts_ros2`. After sourcing the workspace, `trials` is on the PATH, and `ros2 run robofacts_ros2 trials` starts the same command.
+If you use RoboFACTS, please cite the paper:
 
-Without ROS, the general package alone, into any Python 3.10+ environment:
+> Alejandro Lorite-Mora. RoboFACTS: A Declarative Experiment Design Framework for Multi-Robot Trials in Simulation and on Hardware. In Proceedings of the 42nd ACM/SIGAPP Symposium on Applied Computing (SAC '27), Gwangju, South Korea, April 5 to 9, 2027. DOI to come.
 
-```bash
-pip install ./robofacts                # from a clone
-trials --help
-```
-
-With pip and ROS 2 (an environment that can see your ROS 2 installation): `pip install ./robofacts ./robofacts_ros2`.
-
-A project names its backend in `trials.yaml` (`backend: ros2`). Everything works without ROS on the built-in `process` backend. The ROS 2 launcher, the ROS 2 checks and the bag tools need a sourced ROS 2 Humble (`ros2`, `rosbag2`).
+`CITATION.cff` holds the same reference. The pre-registered predictions of the paper's studies are in `studies/sac2027/`.
 
 ## Your own project in five steps
 
@@ -242,7 +252,7 @@ python3 -m pytest -q robofacts_ros2/test robofacts/test        # both packages, 
 ./quickstart.sh                                                # with ROS 2 Humble sourced and both packages installed
 ```
 
-`robofacts/test` runs with the general package alone. Its tests that exercise the core together with the ROS 2 backend are marked `ros2` and are skipped where `robofacts_ros2` is not installed. `robofacts/test` runs against `robofacts/example_project/`, and `robofacts_ros2/test` against `robofacts_ros2/example_project/`. `.github/workflows/ci.yaml` has three jobs: `core-no-ros` installs only `robofacts` on a plain Python image (`python:3.10-slim`, where the tests that need git are skipped), runs its tests, runs the example with `robofacts/quickstart.sh` from plan to coverage index, and does the same with a generated project. `colcon-humble` builds both packages on `ros:humble`, runs both test suites and the example campaign. `docker-image` builds the quickstart image.
+`robofacts/test` runs with the general package alone. Its tests that exercise the core together with the ROS 2 backend are marked `ros2` and are skipped where `robofacts_ros2` is not installed. `robofacts/test` runs against `robofacts/example_project/`, and `robofacts_ros2/test` against `robofacts_ros2/example_project/`. `.github/workflows/ci.yaml` has three jobs: `core-no-ros` installs only `robofacts` on a plain Python image (`python:3.10-slim`, where the tests that need git are skipped), runs its tests, runs the example with `robofacts/quickstart.sh` from plan to coverage index, runs the tests of `examples/cflib_hover` without a drone, and does the same with a generated project. `colcon-humble` builds both packages on `ros:humble`, runs both test suites and the example campaign. `docker-image` builds the quickstart image.
 
 ## License
 

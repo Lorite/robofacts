@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use RoboFACTS, please cite the paper below."
+title: "RoboFACTS"
+abstract: "A declarative experiment design framework for multi-robot trials in simulation and on hardware."
+type: software
+version: 0.1.0
+license: Apache-2.0
+repository-code: "https://github.com/Lorite/robofacts"
+authors:
+  - family-names: Lorite-Mora
+    given-names: Alejandro
+    orcid: "https://orcid.org/0000-0002-8704-1248"
+    affiliation: "IT University of Copenhagen"
+preferred-citation:
+  type: conference-paper
+  title: "RoboFACTS: A Declarative Experiment Design Framework for Multi-Robot Trials in Simulation and on Hardware"
+  authors:
+    - family-names: Lorite-Mora
+      given-names: Alejandro
+      orcid: "https://orcid.org/0000-0002-8704-1248"
+      affiliation: "IT University of Copenhagen"
+  collection-title: "Proceedings of the 42nd ACM/SIGAPP Symposium on Applied Computing (SAC '27)"
+  conference:
+    name: "SAC '27: The 42nd ACM/SIGAPP Symposium on Applied Computing"
+    city: Gwangju
+    country: KR
+    date-start: 2027-04-05
+    date-end: 2027-04-09
+  publisher:
+    name: ACM
+  year: 2027
+  # The DOI follows from the ACM rights form: add `doi:` here when it is known.
