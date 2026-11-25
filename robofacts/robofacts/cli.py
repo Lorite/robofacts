@@ -243,7 +243,7 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
                   "runs a trial (needs pip install 'robofacts[mcp]')"),
     "new": (_new, "a new experiment from the template, or --from a similar one"),
     "init": (_init, "a new project: the experiments root with its shared config"),
-    "tool": (_tool, "run a packaged shell tool (kill_ros.sh, estop.sh, robot_action.sh)"),
+    "tool": (_tool, "run a packaged shell tool (estop.sh, robot_action.sh, and the tools a backend adds)"),
     "roots": (_roots, "show how the experiments root and the project root resolve"),
 }
 
