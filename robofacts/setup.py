@@ -41,8 +41,11 @@ setup(
     # pytest: the linter's rules are pytest tests (robofacts/lint.py), and trials lint and
     # trials validate run them. Without it a plain pip install fails at the first lint.
     install_requires=["pyyaml", "pytest"],
-    # The web interface (trials ui) needs Flask. Everything else runs without it.
-    extras_require={"ui": ["flask"], "test": ["pytest", "flask"]},
+    # The web interface (trials ui) needs Flask, the MCP server (trials mcp) the MCP Python
+    # SDK, version 2 (its server class changed name from version 1). Everything else runs
+    # without them.
+    extras_require={"ui": ["flask"], "mcp": ["mcp>=2.3,<3"],
+                    "test": ["pytest", "flask", "mcp>=2.3,<3"]},
     python_requires=">=3.10",
     zip_safe=False,
     maintainer="Alejandro Lorite Mora",

@@ -118,7 +118,8 @@ def test_every_module_of_the_core_imports_in_a_process_without_ros():
         "    try:\n"
         "        importlib.import_module(name)\n"
         "    except ModuleNotFoundError as exc:\n"
-        "        if exc.name != 'flask':   # the web interface's optional dependency\n"
+        "        # the optional dependencies: the web interface's Flask, the MCP server's SDK\n"
+        "        if (exc.name or '').split('.')[0] not in ('flask', 'mcp'):\n"
         "            raise\n"
         "loaded = sorted(m for m in sys.modules if pattern.match(m.split('.')[0]))\n"
         "print('LOADED:' + ','.join(loaded))\n")

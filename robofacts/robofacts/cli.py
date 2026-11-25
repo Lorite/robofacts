@@ -14,6 +14,7 @@
     trials new     <name> [--from <exp>]                   a new experiment from the template or a similar one
     trials init    <dir>                                   a new project (experiments root)
     trials ui                                              the web interface
+    trials mcp                                             an MCP server for agents, read-only
 
 Every subcommand takes ``--experiments-root`` (see ``trials roots``). The same
 commands work wherever the package is installed. A backend may add commands of its own.
@@ -121,6 +122,19 @@ def _ui(argv):
     return app.main(argv)
 
 
+def _mcp(argv):
+    # The parser lives in the server module, so the help needs the SDK too. Say how to get it.
+    try:
+        from .mcp import server
+    except ImportError as exc:
+        if getattr(exc, "name", "") and exc.name.split(".")[0] in ("mcp", "mcp_types", "pydantic"):
+            print("trials mcp: the MCP server needs the MCP Python SDK (pip install 'robofacts[mcp]'). "
+                  "The other commands do not need it.", file=sys.stderr)
+            return 2
+        raise
+    return server.main(argv)
+
+
 def _validate(argv):
     from . import validate
     return validate.main(argv)
@@ -225,6 +239,8 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "profiles": (_profiles, "the record profiles in force (--list), or one profile's topics or record command"),
     "version": (_version_probe, "the code version stamped into trials"),
     "ui": (_ui, "the web interface (needs Flask: pip install 'robofacts[ui]')"),
+    "mcp": (_mcp, "an MCP server over stdio for agents: validate, plan, dry run, coverage, never "
+                  "runs a trial (needs pip install 'robofacts[mcp]')"),
     "new": (_new, "a new experiment from the template, or --from a similar one"),
     "init": (_init, "a new project: the experiments root with its shared config"),
     "tool": (_tool, "run a packaged shell tool (kill_ros.sh, estop.sh, robot_action.sh)"),

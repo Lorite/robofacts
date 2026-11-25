@@ -26,7 +26,7 @@ Or from a clone, which also holds the examples and the quickstart:
 
 ```bash
 git clone https://github.com/Lorite/robofacts.git && cd robofacts
-pip install ./robofacts
+pip install ./robofacts               # add [ui] for the web interface, [mcp] for the MCP server: pip install './robofacts[ui,mcp]'
 ```
 
 Both packages, with colcon, into a ROS 2 Humble workspace:
@@ -206,6 +206,50 @@ A trial picks its profile with a factor whose `maps_to` has `kind: record_profil
 | `trials ui --view-only` | the same interface as an archive viewer: the routes that run a trial, stop a robot, kill ROS, or exclude or restore a trial are not registered (they answer 404) and the pages show no control for them. `--cache-dir` keeps the poster stills out of a read-only experiments tree. A `.archive_status.json` at the top of the experiments root, when present, fills the banner with the time of the last merge and of each host's last sync. Also `TRIALS_UI_VIEW_ONLY=1`. A password is still required |
 | `trials new`, `trials init` | the scaffolding, `trials new <name> --from <exp>` copies a similar experiment |
 | `trials tool <name>` | the shell tools: `kill_ros.sh` (clean slate), `estop.sh`, `robot_action.sh` |
+| `trials mcp` | an MCP server over stdio for agents, with read-only tools (see the next section). `--list-tools` prints the tools and the project the server sees |
+
+## An MCP server for agents
+
+`trials mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio. An agent such as Claude Code then validates, plans and dry-runs campaigns and reads the coverage index through typed tools with JSON results, instead of running `trials` and parsing its text. The server needs the optional extra `pip install './robofacts[mcp]'` (the MCP Python SDK, version 2).
+
+The server only reads and plans. No tool runs a trial, runs a gate check against a robot, writes the stop latch or changes a file. The dry run returns the exact `trials run … --execute` command, and the operator decides whether to run it at the command line. The server's instructions tell the agent the same. `robofacts/test/test_mcp_read_only.py` holds this boundary: it calls every tool on a copy of the example with recorded trials and fails when a file changed, a process other than the lint's pytest started, a socket opened or the stop latch was written. A static check of the server's code fails when it names an execution path (`dry_run=False`, a gate, the commands that move trials, file writes).
+
+| tool | answers |
+|---|---|
+| `list_experiments` | the project in force (roots, backend) and its experiments, with their campaigns and their trials per class |
+| `list_campaigns` | per campaign of an experiment: the sweep, the fixed levels, the repetitions, and the trials wanted, covered and still needed |
+| `validate_experiment` | the stages of `trials validate` (check, plan, gate, lint, dry run) and one verdict. The experiment's own test files are project code, so the server does not run them: `trials validate` does |
+| `lint` | the declaration rules over the project or one experiment, each failure with its rule and subject |
+| `plan_campaign` | the cells of a campaign with the trials wanted, usable and still missing, and the order the runner would run them in. `factor_levels` replaces levels like `--set` |
+| `dry_run_campaign` | the exact commands of the next trials (stack, recorder, action), with nothing executed, and the command the operator runs to execute them |
+| `coverage_index` | the usable, unverified and excluded trials per cell, the missing combinations, the trials that break the metadata contract and the reasons of the excluded ones |
+| `list_trials` | the trials of an experiment, newest first, with class, reason, campaign, levels and gate verdict |
+| `explain_trial` | why one trial counts or not: its metadata, the contract problems, the gate verdict and the gate log, the verify steps, the attempt ledger and a person's decisions |
+
+Arguments are names, never paths: the experiment's folder, the campaign's file name without `.yaml`, the trial's recording folder. So every read stays inside the experiments root. An argument that a tool does not declare is refused: `dry_run_campaign` with `execute: true` fails with the reason instead of returning a dry run that could be taken for a run.
+
+The server finds the project as every `trials` command does (see "Where the experiments are"), from the directory where the client starts it. To add it to Claude Code from the project directory:
+
+```bash
+claude mcp add robofacts -- trials mcp
+```
+
+`claude mcp add -s project` writes the same server into the project's `.mcp.json`, to share it with everyone who works in the repository. With an explicit experiments root it reads:
+
+```json
+{
+  "mcpServers": {
+    "robofacts": {
+      "type": "stdio",
+      "command": "trials",
+      "args": ["mcp", "--experiments-root", "/path/to/project/experiments"],
+      "env": {}
+    }
+  }
+}
+```
+
+`trials mcp --list-tools` prints the tools and the experiments root the server resolves, which is the quickest check of a configuration. On a ROS 2 project the server must import `robofacts_ros2` like every other command, so the client starts it from an environment where the workspace is sourced.
 
 ## The words
 
