@@ -859,3 +859,76 @@ def test_keep_it_writes_proposed_changes_md_and_works_after_stop(tmp_path):
     text = (out_dir / "proposed_changes.md").read_text()
     assert text.startswith("# Proposed changes: expA") and text.count("## /stack.kp: 1.0 -> 2.5") == 2
     assert "Nothing was applied" in text
+
+
+# --------------------------------------------------------------------------- #
+# A flight that the action's wrapper leaves running (third review of 2026-11-25)
+# --------------------------------------------------------------------------- #
+def _wrapper_controls(tmp_path, land_wait_s=3.0):
+    """Controls bound to a real local start_background, as run_explore binds them locally."""
+    from robofacts import remote_exec_utils as rx
+    settings = SimpleNamespace(actions=[{"name": "fly", "command": "x"}], jog={}, simulation=True)
+    controls = ex.ExploreControls(land_wait_s=land_wait_s)
+    controls.bind(hooks=SimpleNamespace(start_background=rx.start_background), target=None,
+                  cwd=tmp_path, out_dir=tmp_path, settings=settings)
+    return controls
+
+
+def _start_wrapper(controls, tmp_path, flight: str):
+    """Start a wrapper that runs ``flight`` in the background, writes its pid and exits."""
+    pidfile = tmp_path / "flight.pid"
+    ok, msg = controls._start_in_slot("fly", ["sh", "-c", f"{flight} & echo $! > {pidfile}; exit 0"])
+    assert ok, msg
+    proc = controls._action["proc"]
+    wait_for(lambda: proc.poll() is not None and pidfile.exists() and pidfile.read_text().strip())
+    return proc, int(pidfile.read_text())
+
+
+def _alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+            return fh.read().rsplit(")", 1)[-1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+def _kill(group: int) -> None:
+    """Clean up: the action's whole group, which this test started."""
+    import os
+    import signal
+    try:
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def test_a_flight_the_wrapper_left_keeps_the_slot_and_stop_reaches_it(tmp_path):
+    controls = _wrapper_controls(tmp_path)
+    proc, flight = _start_wrapper(controls, tmp_path, "sleep 300")
+    try:
+        time.sleep(0.5)   # the watch thread has seen the wrapper exit
+        assert proc.returncode == 0 and _alive(flight)
+        assert controls.status()["action"]["name"] == "fly", "the slot freed under a running flight"
+        ok, msg = controls._start_in_slot("fly", ["true"])
+        assert not ok and "still running" in msg
+        ok, msg = controls.stop_action()
+        assert ok, msg
+        wait_for(lambda: not _alive(flight))
+        wait_for(lambda: controls.status()["action"] is None)
+        assert controls.status()["last_action"]["stopping"]
+    finally:
+        _kill(proc.pid)
+
+
+def test_shutdown_ends_the_whole_group_before_the_stack_stops(tmp_path):
+    """A flight that ignores SIGTERM is killed at the end of the landing time, before shutdown
+    returns (run_explore stops the stack after it)."""
+    controls = _wrapper_controls(tmp_path, land_wait_s=1.0)
+    proc, flight = _start_wrapper(controls, tmp_path, "sh -c 'trap \"\" TERM; sleep 300; :'")
+    try:
+        assert _alive(flight)
+        controls.shutdown()
+        assert not _alive(flight), "the flight outlived the exploration's shutdown"
+        assert not controls.live
+    finally:
+        _kill(proc.pid)

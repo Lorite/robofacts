@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shlex
 import signal
@@ -68,6 +67,7 @@ import yaml
 
 from robofacts_ros2.recorder import export_rosout
 from robofacts import campaign_spec as cs
+from robofacts import remote_exec_utils as rx
 from robofacts import roots
 from robofacts import trial_runner as tr
 
@@ -305,6 +305,19 @@ def _exited(proc) -> Optional[int]:
     return poll() if callable(poll) else None
 
 
+def _action_running(proc, own_group: bool) -> bool:
+    """Whether an action still runs: its command runs, or, for a local action (it leads its own
+    process group, see start_background), any process of that group lives, also after the
+    command itself has exited. The rule of the runner (remote_exec_utils._running): a wrapper
+    that starts the flight in the background and exits still has a flight to stop. Before the
+    third review of 2026-11-25 Explore looked only at the wrapper: the slot freed under a
+    flying robot, Stop answered that no action ran, and the stack stopped under the flight."""
+    if _exited(proc) is None:
+        return True
+    pid = getattr(proc, "pid", None)
+    return own_group and isinstance(pid, int) and pid > 0 and rx._group_alive(pid)
+
+
 def _out_dir(experiments_root: Path, experiment: str, stamp: str, label: str) -> Path:
     base = f"{stamp}_explore" + (f"_{label}" if label else "")
     parent = experiments_root / experiment / EXPLORE_DIR
@@ -365,30 +378,25 @@ def terminate_action(proc, target, cmd: List[str]) -> None:
     """SIGTERM, never SIGINT: the flight scripts land on SIGTERM (rclpy keeps SIGINT).
 
     Locally the action has its own process group (start_background), so the
-    group gets the signal. Remotely the local process is only the ssh tunnel,
-    and closing it would hang up the script without a landing, so the script
-    itself is signalled in the container by its command line.
+    group gets the signal, also after the command that leads it has exited and
+    been reaped (os.getpgid fails then, and before the third review of
+    2026-11-25 nothing was signalled). Remotely the local process is only the
+    ssh tunnel, and closing it would hang up the script without a landing, so
+    the script itself is signalled in the container by its command line.
     """
     if target is None:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        rx._killpg(rx._process_group(proc), signal.SIGTERM)
         return
-    from robofacts.remote_exec_utils import _pkill_remote
-    _pkill_remote(target, re.escape(" ".join(cmd)), "TERM")
+    rx._pkill_remote(target, re.escape(" ".join(cmd)), "TERM")
 
 
 def kill_action(proc, target, cmd: List[str]) -> None:
-    """The last resort when an action ignores SIGTERM for too long."""
+    """The last resort when an action ignores SIGTERM for too long. Locally to the whole
+    group, as terminate_action."""
     if target is None:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+        rx._killpg(rx._process_group(proc), signal.SIGKILL)
         return
-    from robofacts.remote_exec_utils import _pkill_remote
-    _pkill_remote(target, re.escape(" ".join(cmd)), "KILL")
+    rx._pkill_remote(target, re.escape(" ".join(cmd)), "KILL")
 
 
 class ExploreControls:
@@ -475,6 +483,7 @@ class ExploreControls:
             if a:
                 a.pop("proc", None)
                 a.pop("cmd", None)
+                a.pop("own_group", None)
         if record:
             # The parameter snapshot is for the metadata, not for a page that polls
             # every 1.5 s (249 values in the Gazebo stand-in, 2026-10-17).
@@ -553,7 +562,10 @@ class ExploreControls:
             print(f"[explore] {'action ' if not label else ''}{name}: $ {shlex.join(cmd)}")
             tag = f"action:{label or name}"
             proc = ctx["hooks"].start_background(cmd, ctx["target"], cwd=ctx["cwd"], label=tag)
+            # A local action leads its own process group (start_background), and it runs
+            # while any process of that group lives (see _action_running).
             self._action = {"name": name, "tag": tag, "proc": proc, "cmd": cmd,
+                            "own_group": ctx["target"] is None,
                             "started": self._now(), "rc": None, "stopping": False}
             entry = self._action
         t = threading.Thread(target=self._watch_action, args=(entry,),
@@ -565,11 +577,22 @@ class ExploreControls:
     def _watch_action(self, entry: Dict[str, Any]) -> None:
         proc = entry["proc"]
         tick = threading.Event()
-        while True:
-            rc = _exited(proc)
-            if rc is not None:
-                break
+        rc, told = None, False
+        while _action_running(proc, entry["own_group"]):
+            if rc is None:
+                rc = _exited(proc)
+            if rc is not None and not told:
+                # The command exited, its group did not: the slot stays taken, Stop reaches
+                # the rest, and the stack stays up for it.
+                told = True
+                members = rx._group_members(proc.pid)
+                print(f"[explore] {entry['name']}: its command exited rc={rc}, but "
+                      f"{len(members) or 'some'} process(es) of its group still run"
+                      f"{': ' + rx._describe(members) if members else ''}. It counts as "
+                      f"running until they end, and Stop reaches them")
             tick.wait(0.2)
+        if rc is None:
+            rc = _exited(proc)
         entry["rc"] = rc
         entry["seconds"] = round(self._now() - entry["started"], 1)
         print(f"[explore] {entry['name'] if entry['tag'] == 'action:jog' else 'action ' + entry['name']}"
@@ -592,20 +615,29 @@ class ExploreControls:
         return True, f"SIGTERM sent to {entry['name']}"
 
     def _end_action(self) -> None:
-        """At stop: SIGTERM the running action, wait for its landing, kill it if it hangs."""
+        """At stop: SIGTERM the running action, wait for its landing, kill it if it hangs.
+        A local action is all of its process group (see _action_running), so the wait and
+        the kill cover a flight that its wrapper left running, before the stack stops."""
         entry = self._action
         if entry is None:
             return
         self.stop_action()
+        proc, own_group = entry["proc"], entry["own_group"]
         t0 = time.monotonic()
         while self._action is entry and time.monotonic() - t0 < self._land_wait_s:
-            if _exited(entry["proc"]) is not None:
+            if not _action_running(proc, own_group):
                 break
             time.sleep(0.2)
-        if _exited(entry["proc"]) is None:
+        if _action_running(proc, own_group):
             print(f"[explore] action {entry['name']} still running after "
                   f"{self._land_wait_s:.0f} s: SIGKILL")
-            self._kill(entry["proc"], (self._ctx or {}).get("target"), entry["cmd"])
+            self._kill(proc, (self._ctx or {}).get("target"), entry["cmd"])
+            pid = getattr(proc, "pid", None)
+            if own_group and isinstance(pid, int) and pid > 0:
+                survivors = rx._await_group(pid, 2.0)
+                if survivors:
+                    print(f"[explore] WARNING: {len(survivors)} process(es) of the action "
+                          f"{entry['name']} still alive after SIGKILL: {rx._describe(survivors)}")
 
     # ------------------------------------------------------------------ set back
     def set_back(self, node: str, parameter: str) -> tuple:
