@@ -232,11 +232,19 @@ build_command() {
     #      another container the ssh path below is taken (the container has the
     #      host's ssh config, the runner uses the same path).
     #   2. On a host where THIS ROBOT'S container is running (docker inspect
-    #      succeeds): we ARE the rig host, so docker exec locally and skip ssh.
+    #      succeeds, and the container's hostname is the target's
+    #      container_hostname, or the target names no container_hostname): we
+    #      ARE the rig host, so docker exec locally and skip ssh.
     #
-    # Case 2 cannot false-positive on the laptop: its devcontainer is
-    # ros2_humble_dev, not ros2_jetson_dev, so inspect fails and the ssh path
-    # is taken. RIG_HOST keeps overriding the remote alias for the
+    # Case 2 used to trust the container's name alone. The documented examples
+    # give the robot's container the same name as a common local dev container,
+    # so on a laptop with that container a stop for the robot computer went
+    # into the laptop's own container (2026-11-25). Now a container of that
+    # name whose hostname differs from the declared container_hostname is
+    # another machine's twin, and the stop goes over ssh to the declared host.
+    # RIG_CONTAINER names a container on purpose, so it skips that check. A
+    # target without container_hostname keeps the old rule, so declare it.
+    # RIG_HOST keeps overriding the remote alias for the
     # laptop-side cases (rig router vs VPN vs old lab LAN).
     if [ -n "$container" ] && [ -f "$DOCKERENV" ] \
         && { [ "$chost" = "-" ] || [ "$(hostname)" = "$chost" ]; }; then
@@ -256,7 +264,9 @@ build_command() {
         # still exits with 124 and the FAIL line keeps its explanation. `-k 2`
         # sends SIGKILL to a command that ignores SIGTERM.
         wrapped="docker exec $container timeout -k 2 $INNER_TIMEOUT $shell -lc $(quote "$inner")"
-        if docker container inspect "$container" >/dev/null 2>&1; then
+        if docker container inspect "$container" >/dev/null 2>&1 \
+            && { [ "$chost" = "-" ] || [ -n "${RIG_CONTAINER:-}" ] \
+                 || [ "$(docker container inspect -f '{{.Config.Hostname}}' "$container" 2>/dev/null)" = "$chost" ]; }; then
             printf '%s' "$wrapped"
             return
         fi
