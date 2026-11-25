@@ -4,6 +4,7 @@ name: release
 # Authentication is PyPI trusted publishing (OpenID Connect): no token or password is stored in
 # this repository. PyPI trusts exactly this file name (release.yaml), this repository and the
 # environment `pypi`, so renaming the file or the environment needs the same change on pypi.org.
+# The job `test` runs the core test suite, and `publish` waits for it, so a tag on a red commit is not published.
 # A manual run (workflow_dispatch) builds and checks the distributions and never publishes.
 # The ROS 2 package robofacts_ros2 is not published here: it needs rclpy, which is not on PyPI.
 
@@ -57,10 +58,29 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  test:
+    name: the core test suite, so that a tag on a red commit is never published
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: python:3.10-slim
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: pip install robofacts with the test extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install "./robofacts[test]"
+      - name: The core's tests, with the test that keeps the core free of ROS
+        run: cd robofacts && python -m pytest -q -p no:cacheprovider test
+      - name: The Crazyflie example without a drone
+        run: cd examples/cflib_hover && python -m pytest -q -p no:cacheprovider test
+
   publish:
     name: publish to PyPI
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
