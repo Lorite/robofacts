@@ -68,29 +68,30 @@ class ProfileError(ValueError):
     """A record-profile file is malformed, or a profile names something that does not exist."""
 
 
-def names() -> Dict[str, str]:
-    """The names in force: the enabled adapters' defaults under the project's ``record_profiles``."""
+def names(experiments_root: Optional[Path] = None) -> Dict[str, str]:
+    """The names in force: the enabled adapters' defaults under the project's ``record_profiles``.
+    The project is the one of ``experiments_root``, default the working directory's."""
     from . import adapters
 
     merged = dict(DEFAULT_NAMES)
-    merged.update({str(k): str(v) for k, v in adapters.merged_dict("NAMES").items()})
-    project = roots.setting("record_profiles") or {}
+    merged.update({str(k): str(v) for k, v in adapters.merged_dict("NAMES", experiments_root).items()})
+    project = roots.setting("record_profiles", start=experiments_root) or {}
     if not isinstance(project, dict):
         raise ValueError(f"trials.yaml: record_profiles must be a mapping, got {project!r}")
     merged.update({str(k): str(v) for k, v in project.items()})
     return merged
 
 
-def default_cf_name() -> Optional[str]:
+def default_cf_name(experiments_root: Optional[Path] = None) -> Optional[str]:
     """The drone the profiles name their topics after, unless runner.yaml says ``cf_name:``.
     None when neither the project nor an enabled adapter names one."""
-    return names().get("cf_name")
+    return names(experiments_root).get("cf_name")
 
 
-def default_record_profile() -> Optional[str]:
+def default_record_profile(experiments_root: Optional[Path] = None) -> Optional[str]:
     """The profile of a trial that has no record_profile factor: ``trials.yaml``'s
     ``default_record_profile``, else None (the runner then refuses to guess)."""
-    value = roots.setting("default_record_profile")
+    value = roots.setting("default_record_profile", start=experiments_root)
     return None if value in (None, "") else str(value)
 
 
@@ -105,13 +106,13 @@ def project_profiles_file(experiments_root: Optional[Path] = None) -> Optional[P
         return None
 
 
-def adapter_profile_files() -> List[Path]:
+def adapter_profile_files(experiments_root: Optional[Path] = None) -> List[Path]:
     """The ``record_profiles.yaml`` of each enabled robot adapter (none before adapters exist)."""
     try:
         from . import adapters  # noqa: WPS433 (optional until the adapters land)
     except ImportError:
         return []
-    return [p for p in adapters.enabled_files("record_profiles.yaml") if p.is_file()]
+    return [p for p in adapters.enabled_files("record_profiles.yaml", experiments_root) if p.is_file()]
 
 
 def profile_files(experiments_root: Optional[Path] = None) -> List[Path]:
@@ -119,7 +120,7 @@ def profile_files(experiments_root: Optional[Path] = None) -> List[Path]:
     files: List[Path] = []
     if PACKAGE_PROFILES_FILE.is_file():
         files.append(PACKAGE_PROFILES_FILE)
-    files += adapter_profile_files()
+    files += adapter_profile_files(experiments_root)
     project = project_profiles_file(experiments_root)
     if project is not None and project.is_file():
         files.append(project)
@@ -231,7 +232,7 @@ def build_topics(profile: str, cf_name: str = None, *,
     if profile not in data["profiles"]:
         raise ValueError(f"unknown record profile {profile!r}; "
                          f"expected one of {sorted(data['profiles'])}")
-    values = names()
+    values = names(experiments_root)
     overrides = {"cf_name": cf_name, **name_overrides}
     values.update({k: str(v) for k, v in overrides.items() if v is not None})
     spec = data["profiles"][profile]

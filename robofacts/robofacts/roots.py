@@ -23,9 +23,10 @@ code-version probe stamps into every trial.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Iterator, Optional, Union
 
 ENV_EXPERIMENTS_ROOT = "TRIALS_EXPERIMENTS_ROOT"
 ENV_PROJECT_ROOT = "TRIALS_PROJECT_ROOT"
@@ -68,10 +69,20 @@ def _read_project_file(path: Path) -> dict:
 def _project_file_in_force(start: Optional[PathLike]) -> Optional[Path]:
     """The project file the settings come from: the one at ``$TRIALS_PROJECT_ROOT`` when
     that is set and holds one (an explicit root beats the layout), else the nearest one
-    at or above ``start``."""
+    at or above ``start``. Without ``start``, the nearest one at or above
+    ``$TRIALS_EXPERIMENTS_ROOT`` when that is set and has one, else at or above the working
+    directory: the settings belong to the project whose experiments are in force, not to
+    the project around the working directory (found 2026-11-25: a gate started from inside
+    another project read that project's ``adapters:``)."""
     env_root = os.environ.get(ENV_PROJECT_ROOT)
     if env_root and (Path(env_root).expanduser() / PROJECT_FILE).is_file():
         return (Path(env_root).expanduser() / PROJECT_FILE).resolve()
+    if start is None:
+        env_experiments = os.environ.get(ENV_EXPERIMENTS_ROOT)
+        if env_experiments:
+            found = find_project_file(Path(env_experiments).expanduser())
+            if found is not None:
+                return found
     return find_project_file(start)
 
 
@@ -148,6 +159,22 @@ def setting(key: str, default=None, start: Optional[PathLike] = None):
     """One project setting, or ``default`` when the project file does not set it."""
     value = project_settings(start).get(key)
     return default if value is None else value
+
+
+@contextlib.contextmanager
+def exported_experiments_root(path: PathLike) -> Iterator[None]:
+    """``$TRIALS_EXPERIMENTS_ROOT`` set to ``path`` while the block runs, and restored
+    afterwards. Inside it, a setting read without a ``start`` comes from the project of
+    ``path`` (see _project_file_in_force), and the processes started inherit the root."""
+    old = os.environ.get(ENV_EXPERIMENTS_ROOT)
+    os.environ[ENV_EXPERIMENTS_ROOT] = str(Path(path).expanduser().resolve())
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(ENV_EXPERIMENTS_ROOT, None)
+        else:
+            os.environ[ENV_EXPERIMENTS_ROOT] = old
 
 
 def add_root_arguments(parser, *, project: bool = False) -> None:

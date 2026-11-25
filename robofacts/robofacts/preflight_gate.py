@@ -232,6 +232,10 @@ class PreflightGate:
     #: The project root of THIS checkout, to find the package's source tree on
     #: the target, whose checkout sits at target.workspace.
     project_root: Optional[Path] = None
+    #: The experiments root of the campaign. A local check runner gets it as
+    #: $TRIALS_EXPERIMENTS_ROOT, so it reads the checks, the adapters and the settings of
+    #: this project, not of the project around the working directory.
+    experiments_root: Optional[Path] = None
 
     _last_pass_monotonic: Optional[float] = field(default=None, init=False, repr=False)
     _last_result: Optional[GateResult] = field(default=None, init=False, repr=False)
@@ -492,8 +496,12 @@ class PreflightGate:
              checklist: Optional[Path] = None) -> tuple[int, str]:
         cmd = self.command(values, checklist)
         try:
+            env = runner_env()
+            if self.experiments_root is not None:
+                from .roots import ENV_EXPERIMENTS_ROOT
+                env[ENV_EXPERIMENTS_ROOT] = str(Path(self.experiments_root).resolve())
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout_s,
-                                  env=runner_env(), stdin=subprocess.DEVNULL)
+                                  env=env, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return RC_FAIL, f"gate timed out after {self.timeout_s:.0f}s (treated as FAIL)"
         except OSError as exc:

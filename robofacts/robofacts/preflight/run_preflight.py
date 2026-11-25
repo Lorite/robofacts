@@ -110,23 +110,24 @@ def _adapters():
         return None
 
 
-def _backend():
-    """The backend of the project in the working directory, or None when the package is
-    not importable (see _roots) or the project names a backend that does not load."""
+def _backend(experiments_root: Optional[Path] = None):
+    """The backend of the project of ``experiments_root`` (default the working directory's),
+    or None when the package is not importable (see _roots) or the project names a backend
+    that does not load."""
     try:
         if __package__:
             from .. import backend
         else:  # pragma: no cover - python3 path/to/run_preflight.py
             from robofacts import backend  # type: ignore[no-redef]
-        return backend.active()
+        return backend.active(experiments_root)
     except Exception:  # noqa: BLE001 - the gate then knows only the core's checks
         return None
 
 
-def adapter_checks_dirs() -> List[Path]:
+def adapter_checks_dirs(experiments_root: Optional[Path] = None) -> List[Path]:
     """The checks of the robot adapters the project enables (trials.yaml ``adapters:``)."""
     adapters = _adapters()
-    return adapters.checks_dirs() if adapters is not None else []
+    return adapters.checks_dirs(experiments_root) if adapters is not None else []
 
 
 def parallel_safe_checks() -> frozenset:
@@ -180,9 +181,10 @@ def check_dirs(experiments_root: Optional[Path] = None) -> List[Path]:
     """Where a check script may live, in lookup order: the project, the enabled adapters,
     the core."""
     project = project_checks_dir(experiments_root)
-    backend = _backend()
+    backend = _backend(experiments_root)
     backend_dir = backend.checks_dir if backend is not None else None
-    return [d for d in (project, *adapter_checks_dirs(), backend_dir, CHECKS_DIR) if d is not None]
+    return [d for d in (project, *adapter_checks_dirs(experiments_root), backend_dir, CHECKS_DIR)
+            if d is not None]
 
 
 #: Second names of checks, for a project whose recordings are not called bags. The old

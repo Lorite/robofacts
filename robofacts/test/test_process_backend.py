@@ -375,6 +375,59 @@ def test_a_stack_that_writes_nothing_leaves_no_trial(tmp_path, monkeypatch, caps
     ti._recorder_at.cache_clear()
 
 
+def _foreign_project(tmp_path: Path) -> Path:
+    """A directory inside ANOTHER project whose trials.yaml would break the run: an adapter
+    the process backend does not ship, and its own record-profile names."""
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "trials.yaml").write_text(
+        "experiments_root: nowhere\nbackend: process\nadapters: [crazyflie]\n"
+        "default_record_profile: from_the_other_project\nrecord_profiles: {cf_name: other_drone}\n",
+        encoding="utf-8")
+    return other
+
+
+def test_the_settings_come_from_the_given_experiments_root_not_the_working_directory(
+        tmp_path, monkeypatch):
+    from robofacts import adapters, record_profiles, roots
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    with (root / "trials.yaml").open("a", encoding="utf-8") as f:
+        f.write("default_record_profile: custom\nrecord_profiles: {cf_name: my_drone}\n")
+    monkeypatch.chdir(_foreign_project(tmp_path))
+    for var in ("TRIALS_PROJECT_ROOT", "TRIALS_EXPERIMENTS_ROOT", backend.ENV_BACKEND):
+        monkeypatch.delenv(var, raising=False)
+    assert record_profiles.names(experiments) == {"cf_name": "my_drone"}
+    assert record_profiles.default_cf_name(experiments) == "my_drone"
+    assert record_profiles.default_record_profile(experiments) == "custom"
+    assert adapters.enabled(experiments) == []
+    # Without a root the working directory's project is read, as before.
+    assert record_profiles.default_record_profile() == "from_the_other_project"
+    # $TRIALS_EXPERIMENTS_ROOT names the project in force for a reader without a start.
+    with roots.exported_experiments_root(experiments):
+        assert roots.setting("default_record_profile") == "custom"
+        assert adapters.enabled() == []
+    assert "TRIALS_EXPERIMENTS_ROOT" not in os.environ, "the export is restored"
+
+
+@pytest.mark.real_sleep
+def test_a_run_started_inside_another_project_reads_its_own_project(tmp_path, monkeypatch, capsys):
+    """Found 2026-11-25: from a directory of another project, the gate of the given project
+    read the other project's adapters and blocked every trial."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    monkeypatch.delenv("TRIALS_PROJECT_ROOT")
+    monkeypatch.delenv("TRIALS_EXPERIMENTS_ROOT")
+    monkeypatch.chdir(_foreign_project(tmp_path))
+    rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+    assert rc == 0 and "1 trial(s): 1 OK" in out, out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert trial.status == "usable"
+    assert "TRIALS_EXPERIMENTS_ROOT" not in os.environ, "the run restores the environment"
+    ti._recorder_at.cache_clear()
+
+
 def test_the_lint_passes_on_a_project_of_the_process_backend(project):
     out = subprocess.run([sys.executable, "-m", "robofacts.cli", "lint", "--experiments-root", str(project)],
                          capture_output=True, text=True, cwd=project.parent)

@@ -676,7 +676,7 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
         if name in factors and factors[name].maps_to.get("kind") == "record_profile":
             profile = str(value)
     if profile is None:
-        profile = default_record_profile()
+        profile = default_record_profile(config.experiments_root)
     if profile is None:
         # The package used to fall back to a flight set of one lab here. A trial without a
         # declared topic set must not record a guess: it would look finished and hold nothing.
@@ -690,7 +690,7 @@ def record_command(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
     # exist — an empty bag that still looks like a finished trial.
     from .record_profiles import default_cf_name
 
-    cf_name = trial.launch_args(factors).get("cf_name") or config.cf_name or default_cf_name()
+    cf_name = trial.launch_args(factors).get("cf_name") or config.cf_name or default_cf_name(config.experiments_root)
     sources = build_topics(profile, cf_name=(str(cf_name) if cf_name else None),
                            experiments_root=config.experiments_root)
     return recorder.command(bag_dir, sources, options)
@@ -2562,7 +2562,8 @@ def build_gate(campaign: "cs.Campaign", experiments_root: Path, *,
                          log_path=experiments_root / campaign.experiment / "runs"
                          / "preflight_gate.jsonl",
                          experiment=str(campaign.experiment),
-                         campaign=getattr(campaign, "name", None))
+                         campaign=getattr(campaign, "name", None),
+                         experiments_root=Path(experiments_root))
     print(f"[runner] T-0 gate armed: {campaign.experiment}/{rel}"
           + (" (OVERRIDE SET — failures will not block)" if override_reason else ""))
     return gate
@@ -2651,6 +2652,14 @@ def main(argv=None) -> int:
                          "Automatic for a campaign that names a `gate` factor.")
     args = ap.parse_args(argv)
     roots.resolve_root_arguments(args)
+    # Every setting the run reads (the backend, the adapters, the record profiles, the stop
+    # patterns) and every process it starts (the gate) belongs to the project of this
+    # experiments root, also when the working directory lies in another project.
+    with roots.exported_experiments_root(args.experiments_root):
+        return _main(ap, args)
+
+
+def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if not args.scratch and (args.action or args.label or args.slim):
         ap.error("--action, --label and --slim are --scratch options")
 
