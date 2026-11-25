@@ -141,6 +141,7 @@ def test_no_query_changes_a_file_starts_a_process_or_opens_a_socket(project, mon
     before = snapshot(project["root"])
     started = []
     real_popen = subprocess.Popen
+    real_posix_spawn = getattr(os, "posix_spawn", None)
 
     class GuardedPopen(real_popen):
         def __init__(self, args, *a, **kw):
@@ -150,7 +151,12 @@ def test_no_query_changes_a_file_starts_a_process_or_opens_a_socket(project, mon
             # framework's own rules, which read the declarations. Nothing else may start.
             if argv[:3] != [sys.executable, "-m", "pytest"]:
                 raise AssertionError(f"a query started a process: {argv}")
-            super().__init__(args, *a, **kw)
+            # Python 3.13 starts a child through os.posix_spawn, which this test refuses below.
+            # The one allowed process (the lint's pytest) may use it.
+            with pytest.MonkeyPatch.context() as allow:
+                if hasattr(os, "posix_spawn"):
+                    allow.setattr(os, "posix_spawn", real_posix_spawn)
+                super().__init__(args, *a, **kw)
 
     def refuse(name):
         def guard(*a, **kw):
