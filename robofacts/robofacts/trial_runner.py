@@ -2239,7 +2239,9 @@ def hold_run_marker(experiments_root: Path, **info: Any) -> contextlib.ExitStack
                                                **info))
     except run_marker.RunRefused as exc:
         print(_c("31;1", f"[runner] REFUSED - {exc}"), flush=True)
-        raise RunnerError(str(exc)) from None
+        refused = RunnerError(str(exc))
+        refused.printed = True
+        raise refused from None
     return stack
 
 
@@ -2986,6 +2988,12 @@ def main(argv=None) -> int:
                   f"is still missing.", flush=True)
             import signal as _signal
             return 128 + int(_signal.Signals[name])
+        except RunnerError as exc:
+            # A refusal (another run holds the project, a killed run's processes still run)
+            # ends the command with its message, not with a traceback.
+            if not getattr(exc, "printed", False):
+                print(_c("31;1", f"[runner] ERROR - {exc}"), flush=True)
+            return 1
 
 
 def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:

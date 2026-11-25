@@ -80,6 +80,21 @@ def test_a_run_is_refused_while_another_process_holds_the_marker(project):
         holder.wait()
 
 
+def test_trials_run_ends_a_refusal_with_its_message_not_a_traceback(project, capsys):
+    """The refusal reaches `trials run` as a RunnerError: it ends with exit code 1 and the
+    REFUSED line, once (merge of round 2: main did not catch it)."""
+    holder = _hold_marker(project)
+    try:
+        rc = tr.main([str(project / "plant" / "campaigns" / "rates.yaml"),
+                      "--experiments-root", str(project), "--no-pause", "--execute", "--limit", "1"])
+    finally:
+        holder.kill()
+        holder.wait()
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out.count("REFUSED") == 1 and "in progress" in out, out
+
+
 def test_a_runner_removes_only_its_own_marker(tmp_path):
     path = run_marker.marker_path(tmp_path)
     with run_marker.running(tmp_path, experiment="expA"):
