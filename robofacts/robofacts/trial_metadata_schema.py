@@ -211,23 +211,45 @@ def annotate(metadata: Dict[str, Any], experiment: Optional[str] = None,
 # Audit CLI
 # --------------------------------------------------------------------------- #
 def audit(experiments_root: Path, experiment: Optional[str] = None) -> Dict[str, List[str]]:
-    """Validate every recorded trial. Returns {bag path: problems}."""
-    results: Dict[str, List[str]] = {}
-    # "bags*" would also match bags_slim/, whose metadata is a copy.
-    prefix = f"{experiment}/" if experiment else "*/"
-    meta_paths = []
+    """Validate every recorded trial. Returns {trial directory: problems}.
+
+    The trials are the ones ``trial_index.load_trials`` reads, so this audit and the index,
+    the plan and the records judge the same set (2026-11-25). Before, it read only the full
+    recordings: on a laptop that holds only the slim copies (the view load_trials documents)
+    the index counted the trials and this audit said "No recorded trials found". A slim copy
+    is audited when its full recording is not here, as load_trials reads it. Each trial is
+    validated as the runner wrote it (corrections are not applied), and a metadata file that
+    cannot be read is reported as before.
+    """
     from . import backend
+    from . import trial_index as ti
+
+    def key(directory: Path):
+        name = directory.name
+        return directory.parents[1].name, name[:-len("_slim")] if name.endswith("_slim") else name
+
+    results: Dict[str, List[str]] = {}
+    loaded = set()
+    for trial in ti.load_trials(experiments_root, experiment, validate=False):
+        recorded = trial.recorded if trial.recorded is not None else trial.metadata
+        results[str(trial.bag_dir)] = validate(recorded, trial.experiment,
+                                               experiments_root=experiments_root)
+        loaded.add(key(trial.bag_dir))
+    # load_trials skips a file it cannot read: the audit names it, unless another copy of
+    # the same trial was read (a broken slim copy beside a good full recording).
+    prefix = f"{experiment}/" if experiment else "*/"
     rd = backend.record_dirs(experiments_root)
-    for record_dir in (rd["recordings"], rd["issues"]):
-        meta_paths.extend(experiments_root.glob(f"{prefix}{record_dir}/*/trial_metadata.json"))
-    for meta_path in sorted(meta_paths):
-        exp = meta_path.parents[2].name
-        try:
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            results[str(meta_path.parent)] = [f"unreadable: {exc}"]
-            continue
-        results[str(meta_path.parent)] = validate(metadata, exp, experiments_root=experiments_root)
+    for record_dir in (rd["recordings"], rd["issues"], rd["slim"], rd["issues_slim"]):
+        for meta_path in experiments_root.glob(f"{prefix}{record_dir}/*/trial_metadata.json"):
+            if str(meta_path.parent) in results or key(meta_path.parent) in loaded:
+                continue
+            try:
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                results[str(meta_path.parent)] = [f"unreadable: {exc}"]
+                continue
+            if not isinstance(metadata, dict):
+                results[str(meta_path.parent)] = ["unreadable: not a JSON object"]
     return results
 
 
