@@ -9,12 +9,15 @@ chips, the "Viewing" menu entry and the "Kill ROS" button come from there.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import shlex
 import subprocess
+from functools import wraps
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
-from flask import render_template, request, send_file
+from flask import current_app, render_template, request, send_file
 
 from robofacts import backend, tools
 from robofacts.ui.app import experiment_names, robot_hosts
@@ -40,19 +43,44 @@ def foxglove_layouts(experiments_root: Path) -> Dict[str, List[Path]]:
             out.setdefault(f.parents[1].name, []).append(f)
     return out
 
-def foxglove_link(base_url: str, experiment: str, bag_name: str) -> str:
+def bag_token(password: str, experiment: str, name: str) -> str:
+    """The token of one slim bag's URL when the interface has a password (2026-11-25).
+
+    Hex HMAC-SHA256 of ``<experiment>/<name>`` (the bag's name without .mcap), keyed
+    with the password. Foxglove fetches the bag itself and cannot send the Basic
+    credentials, so the link carries this token in its query parameter ``t``
+    instead. It opens that one bag only, and it reveals nothing about the password.
+    """
+    return hmac.new(password.encode("utf-8"), f"{experiment}/{name}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def bag_query(password: Optional[str], experiment: str, name: str) -> str:
+    """``?t=<token>`` for a bag URL when there is a password, else "" (the URL as before)."""
+    return f"?t={bag_token(password, experiment, name)}" if password else ""
+
+
+def bag_url(base_url: str, experiment: str, bag_name: str, password: Optional[str] = None) -> str:
+    """The URL of a slim bag served by /bag, with its token when the interface has a password."""
+    return f"{base_url}/bag/{experiment}/{bag_name}.mcap" + bag_query(password, experiment, bag_name)
+
+
+def foxglove_link(base_url: str, experiment: str, bag_name: str,
+                  password: Optional[str] = None) -> str:
     """Deep link that opens the laptop's Foxglove on a bag served by this UI.
 
     Clicked in the operator's browser, so it reaches the laptop's Foxglove even
-    though the UI is served from the rig. The URL must end in .mcap.
+    though the UI is served from the rig. The URL's path must end in .mcap:
+    Foxglove picks its reader from the path's extension, so the token in the
+    query does not change it.
     """
-    return (f"foxglove://open?ds=remote-file&ds.url="
-            f"{base_url}/bag/{experiment}/{bag_name}.mcap")
+    return "foxglove://open?ds=remote-file&ds.url=" + bag_url(base_url, experiment, bag_name, password)
 
-def foxglove_web_link(base_url: str, experiment: str, bag_name: str) -> str:
+def foxglove_web_link(base_url: str, experiment: str, bag_name: str,
+                      password: Optional[str] = None) -> str:
     """The same bag in Foxglove's web app (app.foxglove.dev, the default org)."""
-    return (f"https://app.foxglove.dev/~/view?ds=remote-file&ds.url="
-            f"{base_url}/bag/{experiment}/{bag_name}.mcap")
+    return ("https://app.foxglove.dev/~/view?ds=remote-file&ds.url="
+            + bag_url(base_url, experiment, bag_name, password))
 
 
 def layouts(root: Path, experiment: str) -> List[str]:
@@ -60,15 +88,59 @@ def layouts(root: Path, experiment: str) -> List[str]:
     return [f.name for f in foxglove_layouts(root).get(experiment, [])]
 
 
+def _password() -> Optional[str]:
+    """The password of the interface that renders the page, or None (``--no-auth``)."""
+    return current_app.config.get("PASSWORD") or None
+
+
 def template_globals() -> Dict[str, object]:
-    """What this package's templates need besides the general interface's globals."""
-    return {"fox_link": foxglove_link, "fox_web_link": foxglove_web_link}
+    """What this package's templates need besides the general interface's globals.
+
+    The bag links carry the token of the interface's password (see bag_token).
+    """
+    def fox_link(base_url: str, experiment: str, bag_name: str) -> str:
+        return foxglove_link(base_url, experiment, bag_name, _password())
+
+    def fox_web_link(base_url: str, experiment: str, bag_name: str) -> str:
+        return foxglove_web_link(base_url, experiment, bag_name, _password())
+
+    def slim_bag_url(base_url: str, experiment: str, bag_name: str) -> str:
+        return bag_url(base_url, experiment, bag_name, _password())
+
+    return {"fox_link": fox_link, "fox_web_link": fox_web_link, "bag_url": slim_bag_url}
+
+
+def add_bag_queries(run: Dict[str, Any], password: Optional[str]) -> Dict[str, Any]:
+    """A run's JSON with the query of each slim bag link the run and Explore pages build.
+
+    Those pages build the links in the browser, which cannot compute a token
+    without the password: each recorded result gets ``bag_query`` (for its
+    ``<bag>_slim``) and each exploration recording ``slim_query``.
+    """
+    experiment = run.get("experiment", "")
+    run["results"] = [dict(r, bag_query=bag_query(password, experiment, f"{r['bag']}_slim"))
+                      if r.get("bag") else r for r in run.get("results") or []]
+    live = (run.get("explore") or {}).get("live")
+    if isinstance(live, dict) and live.get("recordings"):
+        live["recordings"] = [dict(r, slim_query=bag_query(password, experiment, r["slim"]))
+                              if r.get("slim") else r for r in live["recordings"]]
+    return run
 
 
 def register(ui) -> None:
     """Add the ROS 2 routes to the general interface's app."""
     app, requires_auth, action, root = ui.app, ui.requires_auth, ui.action, ui.root
     error, cache, runs, journal = ui.error, ui.cache, ui.runs, ui.journal
+
+    api_run = app.view_functions.get("api_run")
+    if api_run is not None:
+        @wraps(api_run)
+        def api_run_with_bag_queries(*args, **kwargs):
+            """The general /api/run/<id>.json, plus the token of each slim bag link."""
+            out = api_run(*args, **kwargs)
+            return add_bag_queries(out, app.config.get("PASSWORD")) if isinstance(out, dict) else out
+
+        app.view_functions["api_run"] = api_run_with_bag_queries
 
     @app.route("/viewers")
     @requires_auth
@@ -157,9 +229,18 @@ def register(ui) -> None:
         Deliberately NOT behind requires_auth, with CORS and Range enabled:
         Foxglove (desktop or app.foxglove.dev) fetches this URL itself and
         cannot present the Basic credentials, so an authed route can never be
-        opened from the viewer. Read-only data on a localhost/tunnel service;
-        every state-changing route stays authed.
+        opened from the viewer. When the interface has a password, the URL
+        must carry the bag's token instead (``?t=``, see bag_token), which every
+        link of the interface adds: before 2026-11-25 anyone who reached the
+        port could download every slim bag, also of a password-protected
+        view-only archive. Without a password nothing changes.
         """
+        password = app.config.get("PASSWORD")
+        if password and not hmac.compare_digest(
+                request.args.get("t", "").encode("utf-8"),
+                bag_token(password, experiment, name).encode("utf-8")):
+            return {"error": "this bag link has no valid token: open the bag from a page of "
+                             "the interface, whose links carry one"}, 403
         for slim_root in (root() / experiment / "bags_slim",
                           root() / experiment / "bags_issues_slim",
                           root() / experiment / "bags_scratch",

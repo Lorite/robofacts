@@ -6,7 +6,7 @@
 {%- if r.slim_name -%}
 <a class="iconlink" title="open in Foxglove DESKTOP (installed on this laptop)" href="{{ fox_link(base_url, experiment, r.slim_name) }}">▶ Foxglove</a>
 <a class="iconlink" title="open in Foxglove WEB (app.foxglove.dev, your default org)" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener">🌐</a>
-<a class="iconlink" title="download the slim .mcap" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇</a>
+<a class="iconlink" title="download the slim .mcap" href="{{ bag_url(base_url, experiment, r.slim_name) }}">⬇</a>
 {%- for l in layouts %}<br><a class="chip" title="this experiment's Foxglove layout: download, then Layouts → Import from file (once)" href="{{ url_for('layout_file', experiment=experiment, name=l) }}">layout ⬇</a>{% endfor -%}
 {%- elif r.bag_dir -%}
 <span class="muted" title="no slim copy yet. Make one: trials slim --bag {{ r.bag_dir }}">no slim copy</span>
@@ -23,7 +23,7 @@
       <p class="cmdline" style="flex-wrap:wrap;align-items:center">
         <a class="button btn-primary" href="{{ fox_link(base_url, experiment, r.slim_name) }}" title="opens the Foxglove app installed on this laptop">▶ Open in Foxglove</a>
         <a class="button" href="{{ fox_web_link(base_url, experiment, r.slim_name) }}" target="_blank" rel="noopener" title="app.foxglove.dev, your default org">🌐 Foxglove web</a>
-        <a class="button" href="{{ base_url }}/bag/{{ experiment }}/{{ r.slim_name }}.mcap">⬇ slim .mcap</a>
+        <a class="button" href="{{ bag_url(base_url, experiment, r.slim_name) }}">⬇ slim .mcap</a>
         {% for l in data.layouts %}<a class="button" href="{{ url_for('layout_file', experiment=experiment, name=l) }}" title="{{ l }}">⬇ layout</a>{% endfor %}
       </p>
       {% if data.layouts %}
@@ -56,5 +56,5 @@
 {%- endmacro -%}
 
 {%- macro run_replay_js() -%}
-` · <a href="foxglove://open?ds=remote-file&ds.url=${base}/bag/${encodeURIComponent(d.experiment)}/${encodeURIComponent(t.bag)}_slim.mcap">▶ Foxglove</a>`
+` · <a href="foxglove://open?ds=remote-file&ds.url=${base}/bag/${encodeURIComponent(d.experiment)}/${encodeURIComponent(t.bag)}_slim.mcap${t.bag_query || ''}">▶ Foxglove</a>`
 {%- endmacro -%}

@@ -247,8 +247,8 @@ function recordingsList(recs, names) {
   if (!recs || !recs.length) return '';
   return '<ul class="small">' + recs.map(r => {
     const replay = r.slim_status === 'done'
-      ? ` <a class="iconlink" href="foxglove://open?ds=remote-file&ds.url=${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap" title="replay the slim copy in Foxglove desktop">▶ Foxglove</a>`
-        + ` <a class="iconlink" href="${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap">⬇</a>`
+      ? ` <a class="iconlink" href="foxglove://open?ds=remote-file&ds.url=${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap${r.slim_query || ''}" title="replay the slim copy in Foxglove desktop">▶ Foxglove</a>`
+        + ` <a class="iconlink" href="${location.origin}/bag/${encodeURIComponent(experiment)}/${encodeURIComponent(r.slim)}.mcap${r.slim_query || ''}">⬇</a>`
       : ` <span class="muted">slim copy: ${esc(r.slim_status)}</span>`;
     return `<li style="overflow-wrap:anywhere"><code>bags_scratch/${esc(r.name)}</code> ${r.seconds} s${replay}${analyzeControl(r, names)}</li>`;
   }).join('') + '</ul>';
