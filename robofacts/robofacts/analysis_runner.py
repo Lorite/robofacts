@@ -146,9 +146,12 @@ class AnalysisResult:
     detail: str = ""
 
 
-def _render(command: str, mapping: Dict[str, str], analysis_name: str) -> List[str]:
+def _render(command: str, mapping: Dict[str, Any], analysis_name: str) -> List[str]:
+    """The command's arguments, each placeholder filled inside its own argument
+    (``campaign_spec.render_argv``): a bag path with a space stays one argument."""
+    from .campaign_spec import render_argv
     try:
-        return shlex.split(command.format(**mapping))
+        return render_argv(command, mapping)
     except KeyError as exc:
         raise AnalysisError(
             f"analysis {analysis_name!r} references unknown placeholder {exc}; "
@@ -175,7 +178,8 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
     commands: List[List[str]] = []
     if analysis.per == "cohort":
         commands.append(_render(analysis.command, {
-            "bags": " ".join(str(t.bag_dir) for t in bags),
+            # A list: `{bags}` becomes one argument per bag, each one whole.
+            "bags": [str(t.bag_dir) for t in bags],
             "results": str(results_dir),
             "experiment": experiment,
         }, analysis.name))

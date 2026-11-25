@@ -55,8 +55,9 @@ class ProcessLauncher:
         if not template:
             return None
         placeholders = {**(values or {}), **{f"arg_{k}": v for k, v in (args or {}).items()}}
+        from ..campaign_spec import render_argv   # each value stays one argument
         try:
-            return shlex.split(str(template).format(**placeholders))
+            return render_argv(str(template), placeholders)
         except KeyError as exc:
             raise BackendError(f"launch command references unknown factor {exc}") from exc
 

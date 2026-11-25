@@ -93,11 +93,15 @@ def placeholders(values: Dict[str, Any], launch_args: Any, bag: Path) -> Dict[st
 
 
 def render_steps(steps: Sequence[Dict[str, Any]], values: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """``(name, command)`` per step, ``str.format`` as the runner's ``templated_command``."""
+    """``(name, command)`` per step, rendered as the runner's ``templated_command`` renders it
+    (``campaign_spec.render_argv``: every value stays inside its own argument, so a value read
+    back from the ledger cannot add arguments) and joined with ``shlex.join``, which
+    ``run_steps`` splits back into exactly those arguments."""
+    from .campaign_spec import render_argv
     out = []
     for step in steps:
         try:
-            out.append((step["name"], step["command"].format(**values)))
+            out.append((step["name"], shlex.join(render_argv(step["command"], values))))
         except KeyError as exc:
             raise td.DecisionError(f"verify step {step['name']!r} references {exc}, which the "
                                    f"trial's ledger values do not hold") from exc

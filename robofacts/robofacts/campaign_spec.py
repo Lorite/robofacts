@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -530,6 +531,28 @@ def _operator_steps(raw: Any) -> List[Dict[str, Any]]:
                         "run": str(entry.get("run", "")).strip(),
                         "when": str(entry.get("when") or "always")})
     return out
+
+
+def render_argv(template: str, values: Dict[str, Any]) -> List[str]:
+    """A command template as its argument list, every ``{placeholder}`` filled INSIDE the
+    argument it stands in.
+
+    The template is split first (``shlex``, as a shell splits it) and each argument is then
+    filled with ``str.format``. The other order, fill and then split, let a value reshape the
+    command (2026-11-25): a project folder with a space made ``{recording}`` two arguments, a
+    level with an apostrophe made the split raise, and a value read back from the ledger
+    could add options of its own. A value that is a list (``{bags}`` of a cohort analysis)
+    and is a whole argument becomes one argument per item, each one whole. An unknown
+    placeholder raises KeyError, as ``str.format`` does.
+    """
+    argv: List[str] = []
+    for token in shlex.split(str(template)):
+        name = token[1:-1] if len(token) > 2 and token[0] == "{" and token[-1] == "}" else None
+        if name is not None and isinstance(values.get(name), (list, tuple)):
+            argv.extend(str(item) for item in values[name])
+            continue
+        argv.append(token.format(**values))
+    return argv
 
 
 def substitute_known(template: str, values: Dict[str, Any]) -> str:

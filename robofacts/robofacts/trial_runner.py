@@ -640,10 +640,11 @@ def templated_command(template: str, trial: cs.TrialSpec, what: str,
     """Fill {factor} placeholders from the trial's values, as the action does.
 
     ``extra`` adds non-factor placeholders — ``{bag}`` for the verify steps,
-    which need to inspect what was just recorded.
+    which need to inspect what was just recorded. Each value stays inside the one argument
+    its placeholder sits in (``campaign_spec.render_argv``).
     """
     try:
-        return shlex.split(template.format(**trial.values, **extra))
+        return cs.render_argv(template, {**trial.values, **extra})
     except KeyError as exc:
         raise RunnerError(f"{what} references unknown factor {exc}") from exc
 
@@ -717,10 +718,9 @@ def action_command(trial: cs.TrialSpec, config: RunnerConfig,
     if not config.action:
         return []
     try:
-        rendered = config.action.format(**trial.values, **(extra or {}))
+        return cs.render_argv(config.action, {**trial.values, **(extra or {})})
     except KeyError as exc:
         raise RunnerError(f"action command references unknown factor {exc}") from exc
-    return shlex.split(rendered)
 
 
 #: Longest trial id we will emit. ext4 allows 255 BYTES per path component, and
