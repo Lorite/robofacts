@@ -28,6 +28,10 @@ trials run  experiments/my_experiment/campaigns/baseline.yaml --execute --no-pau
 
 The generated experiment works as it is: a small script stands in for the system and writes a log file, the recorder stores what it writes during a trial, and a verify step reads the recording. `trials index --experiment my_experiment --summary` then lists the usable trials. Edit the declarations in `experiments/my_experiment/config/` to describe your own system, and `trials validate experiments/my_experiment` says whether it is ready for a first trial.
 
+## An MCP server for agents
+
+`trials mcp` starts a Model Context Protocol server for agents such as Claude Code. Its tools only read and plan: they validate, plan, dry-run and read the coverage index, and they never run a trial. Install it with `pip install 'robofacts[mcp]'`. The tools are listed in [the repository README](https://github.com/Lorite/robofacts#an-mcp-server-for-agents).
+
 ## Documentation and examples
 
 - [README](https://github.com/Lorite/robofacts#readme): the packages, the backends, the commands, the record profiles and the robot adapters

@@ -212,7 +212,7 @@ A trial picks its profile with a factor whose `maps_to` has `kind: record_profil
 
 ## An MCP server for agents
 
-`trials mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio. An agent such as Claude Code then validates, plans and dry-runs campaigns and reads the coverage index through typed tools with JSON results, instead of running `trials` and parsing its text. The server needs the optional extra `pip install './robofacts[mcp]'` (the MCP Python SDK, version 2).
+`trials mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio. An agent such as Claude Code then validates, plans and dry-runs campaigns and reads the coverage index through typed tools with JSON results, instead of running `trials` and parsing its text. The server needs the optional extra `pip install 'robofacts[mcp]'` (the MCP Python SDK, version 2). From a clone, the same extra is `pip install './robofacts[mcp]'`.
 
 The server only reads and plans. No tool runs a trial, runs a gate check against a robot, writes the stop latch or changes a file. The dry run returns the exact `trials run … --execute` command, and the operator decides whether to run it at the command line. The server's instructions tell the agent the same. `robofacts/test/test_mcp_read_only.py` holds this boundary: it calls every tool on a copy of the example with recorded trials and fails when a file changed, a process other than the lint's pytest started, a socket opened or the stop latch was written. A static check of the server's code fails when it names an execution path (`dry_run=False`, a gate, the commands that move trials, file writes).
 
