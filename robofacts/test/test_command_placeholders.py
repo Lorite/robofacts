@@ -40,6 +40,24 @@ def test_a_list_value_that_is_a_whole_argument_becomes_one_argument_per_item():
         ["cohort.py", "/r/b 1", "/r/b2", "--out", "/o"]
 
 
+def test_a_list_value_inside_a_larger_argument_is_joined_with_spaces():
+    """A3-6 (round 3): inside a larger argument the list was written as a Python list
+    (``--bags=['/r/t1', '/r/t2']``). Before round 2 the bags were space-joined there."""
+    values = {"bags": ["/r/t1", "/r/t2"], "results": "/o"}
+    assert cs.render_argv('bash -c "python3 a.py {bags} | tee {results}/log"', values) == \
+        ["bash", "-c", "python3 a.py /r/t1 /r/t2 | tee /o/log"]
+    assert cs.render_argv("a.py --bags={bags}", values) == ["a.py", "--bags=/r/t1 /r/t2"]
+
+
+def test_a_cohort_analysis_in_a_shell_pipe_gets_every_bag(tmp_path):
+    bags = [ti.Trial(experiment=EXPERIMENT, bag_dir=tmp_path / name, metadata={})
+            for name in ("t1", "t2")]
+    cohort = ar.Analysis(name="c", command='bash -c "an.py {bags} | tee {results}/log"',
+                         per="cohort")
+    result = ar.run_analysis(cohort, bags, EXPERIMENT, tmp_path, dry_run=True)
+    assert result.commands[0][2].startswith(f"an.py {tmp_path / 't1'} {tmp_path / 't2'} | tee ")
+
+
 def test_an_unknown_placeholder_still_raises_key_error():
     with pytest.raises(KeyError):
         cs.render_argv("run.py {rates}", {"rate": "slow"})

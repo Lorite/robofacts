@@ -178,7 +178,8 @@ def run_analysis(analysis: Analysis, bags: List[ti.Trial], experiment: str,
     commands: List[List[str]] = []
     if analysis.per == "cohort":
         commands.append(_render(analysis.command, {
-            # A list: `{bags}` becomes one argument per bag, each one whole.
+            # A list: `{bags}` as a whole argument becomes one argument per bag, each one
+            # whole. Inside a larger argument the bags are joined with spaces (render_argv).
             "bags": [str(t.bag_dir) for t in bags],
             "results": str(results_dir),
             "experiment": experiment,

@@ -542,16 +542,21 @@ def render_argv(template: str, values: Dict[str, Any]) -> List[str]:
     command (2026-11-25): a project folder with a space made ``{recording}`` two arguments, a
     level with an apostrophe made the split raise, and a value read back from the ledger
     could add options of its own. A value that is a list (``{bags}`` of a cohort analysis)
-    and is a whole argument becomes one argument per item, each one whole. An unknown
-    placeholder raises KeyError, as ``str.format`` does.
+    and is a whole argument becomes one argument per item, each one whole. Inside a larger
+    argument (``bash -c "python3 a.py {bags} | tee log"``, ``--bags={bags}``) its items are
+    joined with spaces, as all bags were before the second review of 2026-11-25: until the
+    third review they were written as a Python list there (``['/r/t1', '/r/t2']``). An
+    unknown placeholder raises KeyError, as ``str.format`` does.
     """
+    joined = {k: " ".join(str(item) for item in v) if isinstance(v, (list, tuple)) else v
+              for k, v in values.items()}
     argv: List[str] = []
     for token in shlex.split(str(template)):
         name = token[1:-1] if len(token) > 2 and token[0] == "{" and token[-1] == "}" else None
         if name is not None and isinstance(values.get(name), (list, tuple)):
             argv.extend(str(item) for item in values[name])
             continue
-        argv.append(token.format(**values))
+        argv.append(token.format(**joined))
     return argv
 
 
