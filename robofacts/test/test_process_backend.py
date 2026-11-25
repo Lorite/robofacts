@@ -182,9 +182,24 @@ def test_the_shipped_backend_implements_both_interfaces():
     assert found.recorder.noun == "recording"
 
 
-def test_a_project_without_a_backend_key_runs_on_the_process_backend(tmp_path):
+def test_a_project_without_a_backend_key_is_refused_with_the_line_to_add(tmp_path, monkeypatch):
+    """There is no default backend (Alejandro, 2026-11-25): a guess could read a project with
+    the wrong recorder, and every recording would look empty."""
     (tmp_path / "trials.yaml").write_text("experiments_root: experiments\n", encoding="utf-8")
+    monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(tmp_path))
+    with pytest.raises(backend.BackendError, match="names no backend.*`backend: process`"):
+        backend.configured_name(tmp_path)
+    monkeypatch.setenv(backend.ENV_BACKEND, "process")
     assert backend.configured_name(tmp_path) == "process"
+
+
+def test_trials_init_writes_the_backend_line(tmp_path, monkeypatch):
+    from robofacts import scaffold
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRIALS_PROJECT_ROOT")
+    monkeypatch.delenv("TRIALS_EXPERIMENTS_ROOT")
+    assert scaffold.main_init([str(tmp_path / "p")]) == 0
+    assert "\nbackend: process\n" in (tmp_path / "p" / "trials.yaml").read_text(encoding="utf-8")
 
 
 def test_a_name_loads_the_package_of_that_backend_and_the_environment_overrides_the_file(

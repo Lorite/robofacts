@@ -29,8 +29,10 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Protocol, Tup
 
 ENV_BACKEND = "TRIALS_BACKEND"
 
-#: The backend of a project that names none: the one that ships with this package.
-DEFAULT_BACKEND = "process"
+#: There is no default backend (Alejandro, 2026-11-25): a project names its backend in
+#: trials.yaml, so a project is never read with the wrong recorder. ``trials init`` writes
+#: the line. The built-in backend is the one ``trials init`` chooses when asked for none.
+DEFAULT_INIT_BACKEND = "process"
 
 #: Backends that ship with this package, by the name a project writes. Any other name
 #: loads the module ``robofacts_<name>``.
@@ -183,17 +185,25 @@ _LOADED: Dict[str, Backend] = {}
 
 def configured_name(start: Optional[Any] = None) -> str:
     """The backend name in force: ``$TRIALS_BACKEND``, else ``backend:`` of the
-    ``trials.yaml`` at or above ``start`` (default the working directory), else
-    :data:`DEFAULT_BACKEND`."""
+    ``trials.yaml`` at or above ``start`` (default the working directory). Raises
+    :class:`BackendError` when neither names one."""
     from_env = os.environ.get(ENV_BACKEND, "").strip()
     if from_env:
         return from_env
     from . import roots
     try:
         value = roots.setting("backend", start=start)
+        project_file = roots._project_file_in_force(start)
     except Exception:  # noqa: BLE001 - an unreadable project file is reported by its own reader
-        value = None
-    return str(value).strip() if value else DEFAULT_BACKEND
+        value, project_file = None, None
+    if value:
+        return str(value).strip()
+    where = str(project_file) if project_file else "no trials.yaml above this directory"
+    raise BackendError(
+        f"the project names no backend ({where}). Add one line to trials.yaml: "
+        f"`backend: process` (built in: a command and a log recorder) or `backend: <name>` "
+        f"(the package robofacts_<name>). Or set "
+        f"${ENV_BACKEND} for one session")
 
 
 def load(name: str) -> Backend:

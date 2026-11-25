@@ -316,7 +316,12 @@ def init_project(directory: Path, backend_name: Optional[str] = None) -> List[Pa
     ``backend_name`` picks the backend the project runs on (default: the one in force, see
     robofacts.backend). A backend may replace template files with its own."""
     from . import backend
-    chosen = backend.load(backend_name or backend.configured_name(directory))
+    if not backend_name:
+        try:
+            backend_name = backend.configured_name(directory)
+        except backend.BackendError:
+            backend_name = backend.DEFAULT_INIT_BACKEND
+    chosen = backend.load(backend_name)
     source = SKELETON / "project"
     overlay = (chosen.skeleton_dir / "project") if chosen.skeleton_dir else None
     templates = {t.relative_to(source): t for t in _template_files(source)}
@@ -433,8 +438,8 @@ def main_init(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--experiment", metavar="NAME", help="also create a first experiment")
     ap.add_argument("--backend", metavar="NAME", default=None,
                     help="the backend the project runs on: process (built in), a name (the package "
-                         "robofacts_<name>), or a module (default: $TRIALS_BACKEND, else the one of "
-                         "the project above this directory, else process)")
+                         "robofacts_<name>), or a module (default: $TRIALS_BACKEND, else process). "
+                         "trials.yaml then names it, which every project must")
     args = ap.parse_args(argv)
     directory = args.directory.expanduser().resolve()
     try:
