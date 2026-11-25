@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import subprocess
+import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -180,6 +184,24 @@ def test_exclude_refuses_a_trial_of_the_run_in_progress(root):
         with pytest.raises(td.DecisionError, match="in progress"):
             td.exclude(root, "expA", "t1", reason="x", category="other")
     td.exclude(root, "expA", "t1", reason="x", category="other")
+
+
+def test_a_marker_of_a_killed_runner_does_not_block_a_decision(root):
+    """A run killed with kill -9 leaves its marker. Its runner is gone, so the trials it
+    finished can be decided at once, not only 12 hours later (review B2-11, 2026-11-25)."""
+    full = bag(root, "t1")
+    old = time.time() - 600
+    for p in [full, *full.rglob("*")] + [root / "expA" / rdir("bags_slim") / "t1_slim",
+                                          *(root / "expA" / rdir("bags_slim")).rglob("*")]:
+        os.utime(p, (old, old))
+    killed = subprocess.Popen([sys.executable, "-c", "pass"])
+    killed.wait()
+    run_marker.marker_path(root).write_text(json.dumps({
+        "host": socket.gethostname(), "pid": killed.pid, "experiment": "expA", "campaign": "c",
+        "label": "t3", "started": datetime.fromtimestamp(old - 3600, timezone.utc).isoformat()}),
+        encoding="utf-8")
+    td.exclude(root, "expA", "t1", reason="x", category="other")
+    assert (root / "expA" / rdir("bags_issues") / "t1").is_dir()
 
 
 @pytest.mark.ros2

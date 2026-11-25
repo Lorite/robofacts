@@ -267,7 +267,9 @@ def check_not_being_written(root: Path, experiment: str, dirs: TrialDirs, *,
             raise DecisionError(f"{d} changed {age:.0f} s ago: the runner may still be writing "
                                 f"it. Wait {WRITE_QUIET_S} s after the trial ends.")
     from . import run_marker
-    marker = run_marker.read(root, now=now)
+    # read_live, not read (2026-11-25, review B2-11): the marker of a runner killed with
+    # kill -9 refused every decision for 12 hours, although its process was gone.
+    marker = run_marker.read_live(root, now=now)
     if marker and marker.get("experiment") == experiment:
         try:
             started = datetime.fromisoformat(str(marker.get("started"))).timestamp()
