@@ -496,11 +496,18 @@ def render_report(trials: List[Trial], experiments_root: Path,
     out.append(f"**{len(trials)} recorded trials** — {counts['usable']} usable, "
                f"{counts['unverified']} unverified, {counts['excluded']} excluded.")
     out.append("")
+    # The backend's own folder and word, not those of one backend for all (2026-11-25).
+    from . import backend
+    issues = backend.record_dirs(experiments_root)["issues"]
+    try:
+        noun = backend.active(experiments_root).recorder.noun
+    except backend.BackendError:
+        noun = "recording"
     out.append("_**usable** = satisfies the metadata contract, not aborted, not excluded by a person "
-               "(`trials exclude`, `bags_issues/`). "
+               f"(`trials exclude`, `{issues}/`). "
                "**unverified** = the data may be fine but the metadata does not prove it (most of "
                "these simply predate the contract). **excluded** = aborted or already triaged into "
-               "`bags_issues/`. They are kept apart deliberately: a cell reading 22 bags that are "
+               f"`{issues}/`. They are kept apart deliberately: a cell reading 22 {noun}s that are "
                "all aborted is worse than one reading zero._")
     out.append("")
 

@@ -418,13 +418,18 @@ def _print_copy_report(args, report: CopyReport) -> None:
         for path in report.unreferenced_config:
             print(f"  {path}")
     first = f"campaigns/{report.campaigns[0]}.yaml" if report.campaigns else "campaigns/<c>.yaml"
+    # Only the files the copy has: a RUNBOOK.md is copied when the source has one, and the
+    # line used to name it for every copy (2026-11-25).
+    prose = ", ".join(["README.md (the design)"]
+                      + [name for name in ("RUNBOOK.md", "scripts/") if (target / name).exists()])
+    what = "the prose and the trial scripts" if (target / "scripts").is_dir() else "the prose"
     print(f"""
 Everything still describes {args.source}. Change, in this order, only what differs:
   1. config/factors.yaml, config/trial_metadata_schema.yaml   the factors and the contract
   2. config/runner.yaml                                       the launch, the action, the verify steps, the hosts
   3. config/preflight_checklist.json                          the T-0 gate
   4. {first:<52}  the claim, the sweep, the operator steps
-  5. README.md (the design), RUNBOOK.md, scripts/             the prose and the trial scripts
+  5. {prose:<52}  {what}
 
 Then one command answers "is it ready":
   trials validate experiments/{args.name}""")

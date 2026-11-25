@@ -229,8 +229,8 @@ COMMANDS: Dict[str, Tuple[Handler, str]] = {
     "run": (_run, "run the trials a campaign still needs (dry run without --execute)"),
     "index": (_index, "the coverage index over the recorded trials"),
     "records": (_records, "every trial of an experiment with its campaign, gate, slim bag, analyses, video"),
-    "exclude": (_exclude, "move a trial out of coverage into bags_issues, with exclusion.json "
-                          "(its reason)"),
+    "exclude": (_exclude, "move a trial out of coverage into the issues folder (bags_issues/ or "
+                          "recordings_issues/), with exclusion.json (its reason)"),
     "restore": (_restore, "move an excluded trial back into coverage, keeping its old reason"),
     "amend": (_amend, "correct a recorded factor level in corrections.json; "
                       "trial_metadata.json is never edited"),
@@ -300,11 +300,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"trials: unknown command {name!r}\n\n{_usage()}", file=sys.stderr)
         return 2
     from . import backend
+    # argparse names a parser without its own prog after sys.argv[0], so `trials index
+    # --help` printed "usage: trials [-h] ..." without the command (2026-11-25). The modules
+    # keep their own name when they run alone (a shim, python -m).
+    saved = list(sys.argv)
+    sys.argv[:1] = [f"trials {name}"]
     try:
         return int(table[name][0](rest) or 0)
     except (roots.RootNotFound, backend.BackendError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+    finally:
+        sys.argv[:] = saved
 
 
 if __name__ == "__main__":

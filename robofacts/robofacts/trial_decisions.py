@@ -514,8 +514,10 @@ def _run(fn, args) -> int:
 def main_exclude(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="trials exclude",
-        description="move a trial out of coverage (bags -> bags_issues, its slim copy too) and "
-                    "write exclusion.json beside each, with the reason; nothing is deleted")
+        description="move a trial out of coverage into the issues folder (bags/ -> bags_issues/ "
+                    "or recordings/ -> recordings_issues/, as the backend names them), its slim "
+                    "copy too, and write exclusion.json beside each, with the reason. Nothing is "
+                    "deleted.")
     _common(ap)
     ap.add_argument("--reason", required=True, help="why it must not count, one or two sentences")
     ap.add_argument("--category", required=True, choices=CATEGORIES,
@@ -530,7 +532,8 @@ def main_exclude(argv=None) -> int:
     def go(a):
         record = exclude(a.experiments_root, a.experiment, a.trial, reason=a.reason,
                          category=a.category, by=a.by, evidence=a.evidence)
-        for line in record["moved"] or ["already in bags_issues: only the reason was added"]:
+        issues = excluded_dirs(a.experiments_root)[0]
+        for line in record["moved"] or [f"already in {issues}/: only the reason was added"]:
             print(f"  {line}")
         print(f"excluded {record['trial']}: {describe_exclusion(record)}")
         return 0
@@ -540,7 +543,8 @@ def main_exclude(argv=None) -> int:
 def main_restore(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="trials restore",
-        description="move an excluded trial back into coverage (bags_issues -> bags); its "
+        description="move an excluded trial back into coverage (bags_issues/ -> bags/ or "
+                    "recordings_issues/ -> recordings/, as the backend names them). Its "
                     "exclusion.json stays beside it as exclusion_restored_<time>.json")
     _common(ap)
     ap.add_argument("--reason", default="", help="why it counts again")

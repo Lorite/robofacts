@@ -392,10 +392,15 @@ class PreflightGate:
         print(output)
         self._last_result = result
         self._log(trial_label, values, result, items)
+        # A failed [HARD] item is a condition the trial must not run under: the message does
+        # not suggest the override for it (2026-11-25). What the override does is unchanged.
+        hard = [i for i in items if i.get("result") in ("FAIL", "ERR") and i.get("hard")]
+        advice = (". A [HARD] item failed: fix the cause, then run again." if hard else
+                  ". Fix it, or set the gate's override flag with a reason to proceed anyway.")
         raise PreflightBlocked(
             f"T-0 gate {status.upper()}{label}: "
             + (", ".join(failed) if failed else "see output above")
-            + ". Fix it, or set the gate's override flag with a reason to proceed anyway."
+            + advice
         )
 
     # ------------------------------------------------------------------ #

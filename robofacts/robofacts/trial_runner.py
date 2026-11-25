@@ -3025,8 +3025,9 @@ def main(argv=None) -> int:
                     help="actually run. Without this the runner only prints commands.")
     ap.add_argument("--scratch", action="store_true",
                     help="run ONE ad-hoc diagnostic trial (a scratch recording) through the campaign's "
-                         "stack, T-0 gate and operator steps. Records to "
-                         "experiments/<name>/bags_scratch/ (never counted as "
+                         "stack, T-0 gate and operator steps. Records to the "
+                         "experiment's scratch folder (bags_scratch/ or "
+                         "recordings_scratch/, as the backend names it, never counted as "
                          "coverage), skips the verify steps, and takes the "
                          "campaign's own defaults for its shape (--set still pins "
                          "factors, --action overrides the command).")
@@ -3034,14 +3035,15 @@ def main(argv=None) -> int:
                     help="(--scratch only) run this command instead of runner.yaml's "
                          "action. {factor} placeholders are filled as usual.")
     ap.add_argument("--label", metavar="WORD", default="",
-                    help="(--scratch only) a word for the bag name, "
+                    help="(--scratch only) a word for the recording's name, "
                          "<stamp>_scratch_<label>. The stamp and de-collision are "
                          "the runner's own, generated at run time - never pre-type "
                          "a bag name.")
     ap.add_argument("--slim", action="store_true",
-                    help="(--scratch only) also leave a slim copy, in "
-                         "bags_scratch_slim/. Campaign trials always slim; scratch "
-                         "recordings default to not bothering.")
+                    help="(--scratch only) also leave a slim copy, in the scratch "
+                         "slim folder (bags_scratch_slim/ or recordings_scratch_slim/). "
+                         "Campaign trials always slim. Scratch recordings do not, "
+                         "unless asked.")
     ap.add_argument("--no-pause", action="store_true",
                     help="do not wait for Enter between the T-0 gate and the "
                          "recorder (the pause exists so the operator can pose "
