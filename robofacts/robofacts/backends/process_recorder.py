@@ -7,12 +7,14 @@ For every source file it stores, in ``<directory>/data/<file name>``, the bytes 
 appended while it ran. A file that exists at the start is followed from its end, so the
 recording holds this trial's part of a log and not the history before it. A file that
 appears later is taken from its first byte. On SIGINT or SIGTERM it copies what is left
-and writes ``<directory>/recording.json`` last, which marks the recording finalized.
+and writes ``<directory>/recording.json`` last, which marks the recording finalized. The
+manifest is written to a temporary file and renamed, so it is complete or absent.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import time
@@ -82,7 +84,18 @@ def record(out: Path, sources: List[str], poll_s: float = 0.2) -> int:
     manifest = {"started": started, "stopped": _now(),
                 "sources": [{"source": s, "file": f"{DATA_DIR}/{names[s]}", "bytes": counts[s]}
                             for s in sources]}
-    (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    # Whole or not at all (2026-11-25): a manifest cut by a full disk would mark a recording
+    # finalized that is not.
+    tmp = out / f"{MANIFEST}.tmp"
+    try:
+        tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        os.replace(tmp, out / MANIFEST)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     print(f"[recorder] finalized: {sum(counts.values())} bytes", flush=True)
     return 0
 

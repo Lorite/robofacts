@@ -2029,9 +2029,20 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     except Exception as exc:  # noqa: BLE001 - never lose a finished trial
         print(f"[runner] metadata validation unavailable ({exc}) - continuing")
 
-    # Next to the bag — which for a remote trial means on the rig, not here.
-    write_trial_file(target, bag_dir / "trial_metadata.json",
-                     json.dumps(metadata, indent=2))
+    # Next to the bag — which for a remote trial means on the rig, not here. Whole or not at
+    # all, and a write that fails (a full disk) fails the trial ON RECORD (2026-11-25, review
+    # B2-5): it used to end the campaign with a traceback, leave a 0-byte file and no ledger
+    # line. The ledger line follows the metadata, and says whether it was written.
+    try:
+        write_trial_file(target, bag_dir / "trial_metadata.json",
+                         json.dumps(metadata, indent=2))
+    except Exception as exc:  # noqa: BLE001
+        reason = (f"trial_metadata.json could not be written ({exc}): the {noun} is at "
+                  f"{bag_dir}, and the trial does not count")
+        detail = f"{detail} | {reason}".strip(" |") if detail else reason
+        trace_step("metadata", "metadata", ok=False, output=str(exc))
+        print(_c("31;1", f"[runner] TRIAL FAILED - {reason}"))
+        return TrialResult(trial, bag_dir, "failed", detail, commands)
     _ctx["metadata"] = {"aborted": metadata.get("aborted"),
                         "abort_reason": metadata.get("abort_reason")}
 

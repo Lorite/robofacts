@@ -619,15 +619,37 @@ def write_trial_file(target: RemoteTarget | None, path: Path, content: str) -> N
     directory on the laptop that is indistinguishable from a finished trial —
     which is exactly how a remote run that recorded nothing at all once
     reported itself as satisfied coverage.
+
+    The file is written whole or not at all (2026-11-25, review B2-5): into a temporary
+    file in the same directory, then renamed over the final name, on the rig in the
+    shell as well. A disk that filled during the write used to leave a 0-byte
+    trial_metadata.json, which hid the trial from the index and kept the runner from
+    ever repairing it. A failed write raises and leaves no file.
     """
     if target is None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding='utf-8')
+        tmp = path.with_name(f'{path.name}.tmp.{os.getpid()}')
+        try:
+            tmp.write_text(content, encoding='utf-8')
+            fd = os.open(tmp, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
         return
     # base64 so arbitrary JSON survives two levels of shell quoting intact.
     blob = base64.b64encode(content.encode('utf-8')).decode('ascii')
-    script = (f'mkdir -p {shlex.quote(str(path.parent))} && '
-              f'printf %s {shlex.quote(blob)} | base64 -d > {shlex.quote(str(path))}')
+    final = shlex.quote(str(path))
+    script = (f'mkdir -p {shlex.quote(str(path.parent))} && t={final}.tmp.$$ && '
+              f'printf %s {shlex.quote(blob)} | base64 -d > "$t" && mv -f "$t" {final} '
+              f'|| {{ rm -f "$t"; exit 1; }}')
     result = _remote_sh(target, script)
     if result.returncode != 0:
         raise RuntimeError(
