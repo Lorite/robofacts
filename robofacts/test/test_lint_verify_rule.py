@@ -102,3 +102,27 @@ def test_the_lint_fails_a_generated_experiment_that_loses_its_verify_steps(lint,
     raw[lint.NO_VERIFY_KEY] = "a recording of a parked robot, nothing can fail to happen"
     runner.write_text(yaml.safe_dump(raw), encoding="utf-8")
     assert _lint(project, "rover").returncode == 0
+
+
+def test_the_lint_fails_a_campaign_that_sweeps_an_unrecorded_factor(tmp_path):
+    """L10 and the metadata contract (Eq. 1 of the SAC paper): `trials plan` refuses a
+    campaign that sweeps a factor the contract does not record as a coverage axis, and the
+    lint must find it first. Until 2026-11-25 the lint passed it."""
+    project = tmp_path / "proj"
+    assert scaffold.main_init([str(project), "--experiment", "rover"]) == 0
+    factors = project / "experiments" / "rover" / "config" / "factors.yaml"
+
+    def lint_l10():
+        return subprocess.run(
+            [sys.executable, "-m", "robofacts.cli", "lint", "--experiments-root",
+             str(project / "experiments"), "--experiment", "rover", "-k",
+             "test_campaigns_load_or_only_ask_for_a_blocked_level"],
+            capture_output=True, text=True, cwd=project, env={**os.environ, "PYTHONPATH": str(PACKAGE)})
+
+    assert lint_l10().returncode == 0
+    raw = yaml.safe_load(factors.read_text(encoding="utf-8"))
+    swept = next(iter(raw["factors"]))
+    raw["factors"][swept].pop("metadata_key")
+    factors.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    out = lint_l10()
+    assert out.returncode != 0 and "REFUSED BY THE METADATA CONTRACT" in out.stdout, out.stdout[-2000:]

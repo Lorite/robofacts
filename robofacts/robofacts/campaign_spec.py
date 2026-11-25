@@ -800,6 +800,13 @@ def campaign_problems(path: Path, experiments_root: Optional[Path] = None,
     return validate(_build_campaign(path, experiments_root, overrides))
 
 
+def build_campaign(path: Path, experiments_root: Optional[Path] = None,
+                   overrides: Optional[List[str]] = None) -> Campaign:
+    """The campaign as declared, WITHOUT validating it (the lint checks a parked campaign's
+    contract too). Everything that runs or plans goes through load_campaign."""
+    return _build_campaign(path, experiments_root, overrides)
+
+
 def load_campaign(path: Path, experiments_root: Optional[Path] = None,
                   overrides: Optional[List[str]] = None) -> Campaign:
     campaign = _build_campaign(path, experiments_root, overrides)

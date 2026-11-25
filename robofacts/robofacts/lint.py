@@ -43,7 +43,8 @@ L9  every record profile (and every record_profile factor level) must be a legal
     have made every week-33 replay flight count as `unverified` rather than
     `usable` and had the campaign ask for flights that already happened.)
 L10 every campaign must LOAD — or be refused only because it asks for a level
-    the factor space declares `blocked:`. (`icra_budget_latency_ab` swept
+    the factor space declares `blocked:` — and must record every factor it sweeps
+    as a coverage axis of the metadata contract (the invariant plan and run enforce). (`icra_budget_latency_ab` swept
     `latency_stamping: [off, on]` on a rig whose mocap path yields an age of
     0.49 ms, which truncates to 0, so both arms were bit-identical firmware. The
     factor is operator-applied, so nothing at the rig could refuse the trial and
@@ -378,7 +379,8 @@ def test_campaign_preflight_checklists_exist_and_validate(experiment):
 
 @pytest.mark.parametrize("experiment", experiments_with_runner())
 def test_campaigns_load_or_only_ask_for_a_blocked_level(experiment):
-    """L10 - a campaign is either runnable or deliberately parked, never broken.
+    """L10 - a campaign is either runnable or deliberately parked, never broken, and it
+    records every factor it sweeps (the metadata contract's invariant).
 
     Two failures this separates, because they need opposite responses:
 
@@ -400,6 +402,12 @@ def test_campaigns_load_or_only_ask_for_a_blocked_level(experiment):
             f"campaign fails at the rig, not here. Fix it, or - if a level it needs is "
             f"genuinely unrunnable - declare that level `blocked:` in the factor space "
             f"with the reason, which refuses it at plan time and keeps this test green.")
+        # The invariant of the metadata contract (Eq. 1 of the SAC paper): every swept factor
+        # is recorded as a coverage axis. plan and run refuse a campaign that breaks it, and
+        # the paper says the linter checks it before any trial runs. It did not until
+        # 2026-11-25: a campaign that swept an unrecorded factor passed the lint.
+        refusal = cs.contract_refusal(cs.build_campaign(path, EXPERIMENTS_ROOT), EXPERIMENTS_ROOT)
+        assert refusal is None, f"{path.name}: {refusal}"
 
 
 def test_every_record_profile_is_a_legal_metadata_level():
