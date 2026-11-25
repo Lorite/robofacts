@@ -3,6 +3,12 @@ import os
 from setuptools import find_packages, setup
 
 package_name = "robofacts"
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# The PyPI page. It is this folder's README, not the repository's: the repository's README
+# also describes the middleware backend, which this package must not name.
+with open(os.path.join(HERE, "README.md"), encoding="utf-8") as readme:
+    long_description = readme.read()
 
 
 def files_under(subdir: str) -> list:
@@ -42,6 +48,25 @@ setup(
     description="RoboFACTS, declarative experiment design for robot trials: campaigns, a T-0 gate, "
                 "a runner, a coverage index, a linter and named analyses. Python only: a backend "
                 "package supplies how a stack starts and how a trial is recorded.",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/Lorite/robofacts",
+    project_urls={
+        "Source": "https://github.com/Lorite/robofacts",
+        "Changelog": "https://github.com/Lorite/robofacts/blob/main/CHANGELOG.md",
+        "Issues": "https://github.com/Lorite/robofacts/issues",
+    },
+    keywords=["robotics", "multi-robot systems", "design of experiments", "reproducibility",
+              "experiment management", "simulation", "hardware trials"],
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Science/Research",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
+        "Programming Language :: Python :: 3.10",
+        "Topic :: Scientific/Engineering",
+    ],
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
