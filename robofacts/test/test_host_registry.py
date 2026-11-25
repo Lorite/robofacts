@@ -373,7 +373,8 @@ def test_estop_in_another_container_goes_over_ssh(tmp_path):
 def test_estop_in_the_targets_own_container_runs_directly(tmp_path):
     project = _container_project(tmp_path, socket.gethostname())
     out = _estop_in_container(project, "--dry-run", "--robot", "drone")
-    assert "ssh" not in out and "[drone] echo ESTOP-DRONE" in out
+    # Still in the declared login shell (2026-11-25), see test_estop_runs_in_the_declared_shell.
+    assert "ssh" not in out and "[drone] timeout -k 2 13 zsh -lc echo\\ ESTOP-DRONE" in out
     assert "route:  runs directly here, in this container" in _estop_in_container(project, "--list")
 
 

@@ -246,9 +246,14 @@ build_command() {
     # target without container_hostname keeps the old rule, so declare it.
     # RIG_HOST keeps overriding the remote alias for the
     # laptop-side cases (rig router vs VPN vs old lab LAN).
+    #
+    # Case 1 still runs the command in the declared login shell, bounded by the inner limit, as
+    # robot_action.sh does. Before 2026-11-25 it ran in the `bash -c` of the caller below, so in
+    # a container that sets its middleware configuration only in /etc/zsh/zshenv (see the zsh
+    # note below) the stop ran without discovery: it reached nothing and could still exit 0.
     if [ -n "$container" ] && [ -f "$DOCKERENV" ] \
         && { [ "$chost" = "-" ] || [ "$(hostname)" = "$chost" ]; }; then
-        printf '%s' "$inner"
+        printf '%s' "timeout -k 2 $INNER_TIMEOUT $shell -lc $(quote "$inner")"
         return
     fi
     if [ -n "$container" ]; then
@@ -338,6 +343,7 @@ if [ "$LIST" -eq 1 ]; then
         probe="$(build_command "$host" "$container" "${SHELL_IN[$i]}" "PROBE" "${CHOST[$i]}")"
         case "$probe" in
             PROBE) route="runs directly here, in this container" ;;
+            timeout\ *) route="runs directly here, in this container (${SHELL_IN[$i]} -lc)" ;;
             docker\ exec*) route="docker exec $container on this machine" ;;
             ssh*) route="ssh $host, then docker exec $container" ;;
             *) route="$probe" ;;
