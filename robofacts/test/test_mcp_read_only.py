@@ -299,6 +299,13 @@ def test_plan_counts_only_usable_trials_and_takes_factor_levels(project):
     assert "--set rate=fast" in pinned["command"]
 
 
+def test_a_level_with_a_comma_is_refused_not_turned_into_a_sweep(project):
+    # `--set rate=fast,slow` is two levels in the CLI, so a comma inside one level must not pass.
+    for call in (q.plan_campaign, q.dry_run_campaign):
+        with pytest.raises(q.ToolInputError, match="comma"):
+            call(EXPERIMENT, CAMPAIGN, {"rate": ["fast,slow"]})
+
+
 def test_the_dry_run_shows_the_commands_and_the_operator_command(project):
     result = q.dry_run_campaign(EXPERIMENT, CAMPAIGN, limit=2)
     assert result["executed"] is False and len(result["trials"]) == 2

@@ -147,6 +147,11 @@ def _set_values(factor_levels: Optional[Dict[str, Sequence[Any]]]) -> List[str]:
         levels = [levels] if isinstance(levels, (str, int, float, bool)) else list(levels)
         if not levels:
             raise ToolInputError(f"factor_levels names no level for {name!r}")
+        for level in levels:
+            if "," in str(level):
+                raise ToolInputError(
+                    f"the level {str(level)!r} of {name!r} contains a comma, which the --set syntax "
+                    "reads as two levels. Give each level as its own list item")
         out.append(f"{name}={','.join(str(v) for v in levels)}")
     return out
 
