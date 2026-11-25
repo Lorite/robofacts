@@ -71,5 +71,6 @@ def enable_adapters(monkeypatch):
     from robofacts import adapters
 
     def enable(*names):
-        monkeypatch.setattr(adapters, "_setting", lambda: list(names))
+        # _setting takes the experiments root since 2026-11-25 (the settings follow it).
+        monkeypatch.setattr(adapters, "_setting", lambda start=None: list(names))
     return enable

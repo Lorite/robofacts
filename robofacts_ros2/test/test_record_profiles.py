@@ -141,7 +141,7 @@ def test_a_later_file_replaces_a_block_of_the_same_name(project, monkeypatch, tm
     adapter = tmp_path / "adapter_profiles.yaml"
     adapter.write_text(yaml.safe_dump({"blocks": {"drone": ["/adapter"], "extra": ["/x"]},
                                        "profiles": {"adapter_only": {"blocks": ["extra"]}}}))
-    monkeypatch.setattr(rp, "adapter_profile_files", lambda: [adapter])
+    monkeypatch.setattr(rp, "adapter_profile_files", lambda experiments_root=None: [adapter])
     assert rp.profile_files()[0] == adapter
     assert build_topics("flight") == ["/cf1/pose", "/cf1/battery", "/tf", "/rosout"]
     assert build_topics("adapter_only") == ["/x"]
