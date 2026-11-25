@@ -224,19 +224,49 @@ class ActiveRun:
                 "log": list(self.log), "error": self.error}
 
 
+#: What the routes answer (409) when the rig's single run slot is taken.
+SLOT_BUSY = ("A campaign or an exploration is already running. Two stacks sharing one rig "
+             "would fight over the radio, the recorder and the airspace — wait for it, "
+             "or stop it first.")
+
+
+class RunSlotBusy(RuntimeError):
+    """An executed run or an exploration was refused: another one holds the rig."""
+
+
 class RunManager:
     """Runs a campaign off the request thread so the page can show progress.
 
-    Only ONE run at a time, deliberately: two campaigns sharing one rig would
-    fight over the radio, the recorder and the airspace. The guard is here
-    rather than in the runner because it is a property of the lab, not of the
-    code.
+    Only ONE executed run or exploration at a time, deliberately: two campaigns
+    sharing one rig would fight over the radio, the recorder and the airspace.
+    The guard is here rather than in the runner because it is a property of the
+    lab, not of the code.
+
+    A dry run launches nothing, so it never takes that slot. Before 2026-11-25
+    every run took it: a dry run started during an executed campaign became the
+    "current" run, ``busy()`` turned False, a second EXECUTE was accepted (two
+    stacks on one rig), and the stop button aborted the dry run instead of the
+    flight. The check also lives inside ``start`` and ``start_explore``, under
+    the lock that claims the slot, so two EXECUTE posts at the same moment
+    cannot both pass it.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._runs: Dict[str, ActiveRun] = {}
+        #: The executed run or exploration that holds the rig, never a dry run.
         self._current: Optional[str] = None
+
+    def _claim(self, run: ActiveRun, after: Optional[ActiveRun] = None) -> None:
+        """Give the rig's slot to ``run``, or raise RunSlotBusy. The caller holds the lock.
+
+        ``after`` is an exploration that ``run`` replaces: it is being stopped,
+        and the new one waits for its stack to come down before it starts.
+        """
+        holder = self._runs.get(self._current) if self._current else None
+        if holder is not None and holder is not after and holder.state in ("running", "aborting"):
+            raise RunSlotBusy(SLOT_BUSY)
+        self._current = run.run_id
 
     def current(self) -> Optional[ActiveRun]:
         with self._lock:
@@ -292,8 +322,9 @@ class RunManager:
                         executed=executed, operator_steps=list(operator_steps or []),
                         live_steps=list(live_steps or []))
         with self._lock:
+            if executed:
+                self._claim(run)
             self._runs[run_id] = run
-            self._current = run_id
 
         def record(result) -> None:
             run.results.append({
@@ -314,9 +345,10 @@ class RunManager:
             Caveat: ``redirect_stdout`` swaps the process-wide ``sys.stdout``,
             so anything else printing while a run is active also lands in that
             run's log. Tolerable only because RunManager permits exactly one
-            run at a time and nothing else here writes to stdout; if either
-            stops being true, pass an explicit log callback into run_plan
-            instead.
+            executed run at a time and nothing else here writes to stdout (a
+            dry run beside it prints only its plan, which may then show in
+            both logs); if either stops being true, pass an explicit log
+            callback into run_plan instead.
             """
 
             def __init__(self, stream, sink):
@@ -418,8 +450,8 @@ class RunManager:
                                  "after": after.run_id if after is not None else ""},
                         controls=engine.ExploreControls())
         with self._lock:
+            self._claim(run, after=after)
             self._runs[run_id] = run
-            self._current = run_id
 
         class _Tee:
             def __init__(self, stream, sink):
@@ -1388,11 +1420,10 @@ def create_app(experiments_root: Optional[Path] = None,
         pin = request.form.get("pin", "").strip()
         overrides = pin.split() if pin else []
 
+        # An early answer only, before anything is loaded. The check that counts
+        # is inside runs.start, under the lock that claims the rig.
         if confirm and runs.busy():
-            return error(
-                "A campaign or an exploration is already running. Two stacks sharing one rig "
-                "would fight over the radio, the recorder and the airspace — wait for it, "
-                "or stop it first.", 409)
+            return error(SLOT_BUSY, 409)
 
         try:
             campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
@@ -1437,14 +1468,17 @@ def create_app(experiments_root: Optional[Path] = None,
         # page shows the CLI command with a copy button.
         operator_steps = annotate_steps(campaign.operator_steps)
         live_steps = annotate_steps(campaign.operator_live_steps)
-        active = runs.start(experiment=experiment, campaign_name=f"{name}{suffix}",
-                            campaign_file=name, plan=plan,
-                            config=config, bags_dir=root() / experiment / backends.record_dirs(root())["recordings"],
-                            executed=confirm, limit=limit, journal=journal,
-                            gate=gate, steps=steps, hold_s=hold_s, keep_stack=keep_stack,
-                            pause_before_action=pose_pause,
-                            operator_steps=operator_steps, live_steps=live_steps,
-                            extra_verify=campaign.verify_steps)
+        try:
+            active = runs.start(experiment=experiment, campaign_name=f"{name}{suffix}",
+                                campaign_file=name, plan=plan,
+                                config=config, bags_dir=root() / experiment / backends.record_dirs(root())["recordings"],
+                                executed=confirm, limit=limit, journal=journal,
+                                gate=gate, steps=steps, hold_s=hold_s, keep_stack=keep_stack,
+                                pause_before_action=pose_pause,
+                                operator_steps=operator_steps, live_steps=live_steps,
+                                extra_verify=campaign.verify_steps)
+        except RunSlotBusy as exc:
+            return error(str(exc), 409)
         return redirect(url_for("run_view", run_id=active.run_id))
 
     def begin_explore(experiment: str, name: str, pin: str, armed: bool,
@@ -1478,11 +1512,15 @@ def create_app(experiments_root: Optional[Path] = None,
         picker = [{"name": f, "levels": list(levels), "value": spec.values.get(f)}
                   for f, levels in base.sweep.items() if len(levels) > 1]
         label = f"{name} [explore{' ' + pin if pin else ''}]"
-        return runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
-                                  label=label, config=config, root=root(), journal=journal,
-                                  operator_steps=annotate_steps(campaign.operator_steps),
-                                  layouts=cache.get(experiment).layouts, picker=picker,
-                                  after=after)
+        try:
+            return runs.start_explore(experiment=experiment, campaign=campaign, campaign_file=name,
+                                      label=label, config=config, root=root(), journal=journal,
+                                      operator_steps=annotate_steps(campaign.operator_steps),
+                                      layouts=cache.get(experiment).layouts, picker=picker,
+                                      after=after)
+        except RunSlotBusy:
+            return error("A campaign or an exploration is already running. Stop it first: "
+                         "two stacks on one graph would fight over every topic.", 409, crumbs)
 
     @action("/explore")
     @requires_auth

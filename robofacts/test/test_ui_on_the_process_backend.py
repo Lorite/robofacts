@@ -144,3 +144,103 @@ def test_a_campaign_runs_from_the_interface(client):
         assert state["state"] not in ("running", "aborting"), state
         page = c.get(f"/run/{run_id}", headers=auth()).get_data(as_text=True)
         assert "Foxglove" not in page
+
+
+# --------------------------------------------------------------------------- #
+# Review round 2 (2026-11-25): the rig's run slot, the stops, the gate, the forms
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def bare(tmp_path, monkeypatch):
+    """The interface on a copy of the example with no trial recorded, and its parts."""
+    pytest.importorskip("flask")
+    from types import SimpleNamespace
+    from robofacts import trial_index as ti
+    from robofacts.ui import app as ui
+    project = tmp_path / "example_project"
+    shutil.copytree(EXAMPLE, project)
+    experiments = project / "experiments"
+    monkeypatch.setenv("TRIALS_EXPERIMENTS_ROOT", str(experiments))
+    monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("PYTHONPATH", str(PACKAGE) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    monkeypatch.setenv("TRIALS_VOICE", "off")
+    monkeypatch.chdir(project)
+    ti._recorder_at.cache_clear()
+    app = ui.create_app(experiments, password="pw")
+    app.config["TESTING"] = True
+    yield SimpleNamespace(app=app, c=app.test_client(), root=experiments, runs=app.config["RUNS"],
+                          ui=ui, project=project)
+    ti._recorder_at.cache_clear()
+
+
+@pytest.fixture
+def held_runner(monkeypatch):
+    """run_plan replaced: an executed run holds the rig until the test releases it, and a dry
+    run ends at once. Nothing is launched."""
+    import threading
+    from robofacts import trial_runner as tr
+    release = threading.Event()
+
+    def run_plan(plan, config, bags_dir, *, dry_run=True, **kwargs):
+        if not dry_run:
+            release.wait(timeout=30)
+        return []
+
+    monkeypatch.setattr(tr, "run_plan", run_plan)
+    yield release
+    release.set()
+
+
+EXECUTE = {"experiment": "demo_log_recorder", "campaign": "grid", "limit": "1",
+           "go": "execute", "confirm": "yes"}
+DRY = {"experiment": "demo_log_recorder", "campaign": "grid", "limit": "1", "go": "dry"}
+
+
+def run_id_of(response) -> str:
+    assert response.status_code == 302, response.get_data(as_text=True)[:800]
+    return response.headers["Location"].rstrip("/").rsplit("/", 1)[-1]
+
+
+def wait_until_ended(run, timeout: float = 20.0):
+    deadline = time.time() + timeout
+    while run.state in ("running", "aborting") and time.time() < deadline:
+        time.sleep(0.05)
+    return run
+
+
+def test_a_dry_run_during_an_executed_campaign_does_not_take_the_rig(bare, held_runner, monkeypatch):
+    """C2-1: a dry run took the single run slot, so a second EXECUTE was accepted and the stop
+    button aborted the dry run instead of the campaign that flew."""
+    executed = bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth())))
+    dry = wait_until_ended(bare.runs.get(run_id_of(bare.c.post("/run", data=DRY, headers=auth()))))
+    assert dry.state == "finished" and not dry.executed
+    assert bare.runs.busy() and bare.runs.current() is executed
+    second = bare.c.post("/run", data=EXECUTE, headers=auth())
+    assert second.status_code == 409 and "already running" in second.get_data(as_text=True)
+    assert sum(1 for r in bare.runs.all() if r.executed) == 1
+
+    class Done:
+        returncode, stdout, stderr = 0, "stopped", ""
+
+    monkeypatch.setattr(bare.ui.subprocess, "run", lambda cmd, **kw: Done())
+    page = bare.c.post("/stop", data={"action": "estop"}, headers=auth()).get_data(as_text=True)
+    assert executed.state == "aborting", "the stop must reach the campaign that runs"
+    assert "told to stop" in page
+
+
+def test_the_run_slot_is_claimed_inside_start_under_its_lock(bare, held_runner):
+    """C2-1: the busy check lives where the slot is taken, so two EXECUTE posts that both
+    passed the route's early check cannot both start a stack."""
+    from robofacts import campaign_plan as cp
+    from robofacts import campaign_spec as cs
+    from robofacts import trial_runner as tr
+    campaign = cs.load_campaign(bare.root / "demo_log_recorder" / "campaigns" / "grid.yaml", bare.root)
+    args = dict(experiment="demo_log_recorder", campaign_name="grid", campaign_file="grid",
+                plan=cp.build_plan(campaign, [], False),
+                config=tr.RunnerConfig.load("demo_log_recorder", bare.root),
+                bags_dir=bare.root / "demo_log_recorder" / "recordings", limit=1,
+                journal=bare.app.config["JOURNAL"])
+    first = bare.runs.start(executed=True, **args)
+    with pytest.raises(bare.ui.RunSlotBusy):
+        bare.runs.start(executed=True, **args)
+    wait_until_ended(bare.runs.start(executed=False, **args))
+    assert bare.runs.current() is first and bare.runs.busy()
