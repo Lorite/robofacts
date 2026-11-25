@@ -2313,8 +2313,11 @@ def recover_killed_trial(record: Dict[str, Any]) -> Optional[Path]:
         meta_path = bag_dir / "trial_metadata.json"
         written = None
         if pending.get("remote"):
+            # Third review of 2026-11-25: the groups checked here were only the ssh clients.
             print(f"[runner] the killed trial {bag_dir.name} recorded on {pending['remote']}: "
-                  f"its recording is not checked from here")
+                  f"its recording is not checked from here, and its recorder and stack may "
+                  f"still run there: clean up there before the next trial (the warning above "
+                  f"says how)")
         elif bag_dir.is_dir() and not _metadata_in_place(meta_path) \
                 and backends.load(pending["backend"]).recorder.holds_data(bag_dir):
             metadata = dict(pending.get("metadata") or {})

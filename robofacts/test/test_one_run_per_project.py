@@ -242,3 +242,96 @@ def test_the_trial_of_a_runner_killed_during_the_action_is_put_on_record(project
         [(trial.bag_dir.name, "interrupted", True)]
     assert rows[0]["campaign"] == "rates" and rows[0]["abort_reason"] == tr.KILLED_REASON
     assert not run_marker.marker_path(project).exists()
+
+
+# --------------------------------------------------------------------------- #
+# A killed run whose stack ran on another machine (third review of 2026-11-25)
+# --------------------------------------------------------------------------- #
+REMOTE_HOSTS = """\
+version: 1
+hosts:
+  here: {local: true}
+  robot:
+    host: robot-host
+    container: robot_dev
+    workspace: /ws/project
+    shell: zsh
+"""
+
+
+def _remote_marker(project: Path, groups: list, trial: bool = True) -> None:
+    """The marker of a killed run whose stack ran on the level ``robot``: its ssh clients
+    died with this machine (no groups), or ``groups`` still run here."""
+    import socket
+    (project / "common" / "config").mkdir(parents=True, exist_ok=True)
+    (project / "common" / "config" / "hosts.yaml").write_text(REMOTE_HOSTS, encoding="utf-8")
+    record = {"host": socket.gethostname(), "pid": _dead_pid(), "experiment": "plant",
+              "started": "2026-11-25T20:00:00+00:00", "execution_host": "robot",
+              "simulation": False, "groups": groups, "trial_stage": "running"}
+    if trial:
+        record["trial"] = {"bag_dir": "/ws/project/experiments/plant/recordings/T1",
+                           "remote": "robot-host", "backend": "process",
+                           "runs_dir": str(project / "plant" / "runs"), "metadata": {},
+                           "attempt": {"trial_label": "T1"}}
+    run_marker.marker_path(project).write_text(json.dumps(record), encoding="utf-8")
+
+
+def _with_clean_slate_tool(monkeypatch, tool: str = "clean_slate.sh") -> None:
+    """The process backend, as a backend that ships a clean-slate tool."""
+    import dataclasses
+    from robofacts import backend
+    load = backend.load
+    monkeypatch.setattr(backend, "load",
+                        lambda name: dataclasses.replace(load(name), clean_slate_tool=tool))
+
+
+@pytest.mark.parametrize("trial", [True, False], ids=["during-a-trial", "between-trials"])
+def test_a_killed_remote_run_says_that_its_stack_may_still_run_there(project, capsys, monkeypatch,
+                                                                     trial):
+    """Its local groups were only ssh clients, which died with the laptop: the new run still
+    starts, as before, but says where to clean up and how."""
+    _with_clean_slate_tool(monkeypatch)
+    _remote_marker(project, [], trial=trial)
+    with run_marker.running(project, on_dead=tr.recover_killed_trial, experiment="plant"):
+        started = True
+    assert started
+    out = capsys.readouterr().out
+    assert "ran its stack and its recorder on robot-host (execution host robot)" in out, out
+    assert "may still run there" in out
+    assert "  ssh robot-host\n  docker exec -it robot_dev zsh -l\n" \
+           "  cd /ws/project && trials tool clean_slate.sh" in out, out
+
+
+def test_without_a_clean_slate_tool_the_clean_up_is_said_in_words(project, capsys):
+    _remote_marker(project, [])
+    with run_marker.running(project, on_dead=tr.recover_killed_trial, experiment="plant"):
+        pass
+    out = capsys.readouterr().out
+    assert "  ssh robot-host\n  docker exec -it robot_dev zsh -l\n" \
+           "  then stop the stack and the recorder of that run there" in out, out
+
+
+def test_the_refusal_for_a_remote_run_says_that_the_kill_stops_only_the_clients(project, monkeypatch):
+    _with_clean_slate_tool(monkeypatch)
+    leftover = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        _remote_marker(project, [{"name": "launch_stack", "pgid": leftover.pid}])
+        with pytest.raises(run_marker.RunRefused) as refused:
+            with run_marker.running(project, on_dead=tr.recover_killed_trial, experiment="plant"):
+                pass
+        text = str(refused.value)
+        assert f"kill -INT -- -{leftover.pid}" in text, "the refusal and its commands stay"
+        assert "only their ssh clients" in text and "trials tool clean_slate.sh" in text, text
+    finally:
+        leftover.kill()
+        leftover.wait()
+
+
+def test_a_killed_local_run_gets_no_remote_clean_up(project, capsys):
+    _remote_marker(project, [], trial=False)
+    record = json.loads(run_marker.marker_path(project).read_text(encoding="utf-8"))
+    record["execution_host"] = "here"
+    run_marker.marker_path(project).write_text(json.dumps(record), encoding="utf-8")
+    with run_marker.running(project, on_dead=tr.recover_killed_trial, experiment="plant"):
+        pass
+    assert "ssh" not in capsys.readouterr().out

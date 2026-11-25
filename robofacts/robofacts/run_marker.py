@@ -222,6 +222,16 @@ def _leftovers(root: Path, record: Dict[str, Any],
     lines += [f"  kill -INT -- -{group.get('pgid')}" for group, _ in survivors]
     lines.append("The runner does not stop them itself: a process group number can belong to "
                  "an unrelated program by now.")
+    # A run on another machine (third review of 2026-11-25): the groups here are its ssh
+    # clients, and the kill above stops only them.
+    from . import host_registry
+    where = host_registry.run_host(root, record)
+    if where is not None:
+        lines.append(f"That run ran its stack and its recorder on {where['host']}"
+                     + (f" (execution host {where['level']})" if where.get("level") else "")
+                     + ": the groups above are only their ssh clients, and stopping them does "
+                       "not stop the processes there. Clean up there too:")
+        lines.append(host_registry.remote_cleanup(where))
     return "\n".join(lines)
 
 
@@ -267,6 +277,17 @@ def _claim(root: Path, info: Dict[str, Any],
                 print(f"[runner] WARNING: the run marker {path} names pid {left.get('pid')} "
                       f"(started {left.get('started', '?')}), which no longer runs: that run "
                       f"was killed without its teardown. Its marker is replaced.")
+                # Only this machine's process groups were checked (third review of 2026-11-25).
+                from . import host_registry
+                where = host_registry.run_host(root, left)
+                if where is not None:
+                    print(f"[runner] WARNING: that run ran its stack and its recorder on "
+                          f"{where['host']}"
+                          + (f" (execution host {where['level']})" if where.get("level") else "")
+                          + ". Only their ssh clients on this machine were checked, and they "
+                            "are gone: the stack and the recorder may still run there, and the "
+                            "next trial would start on top of them and record them. Clean up "
+                            "there first:\n" + host_registry.remote_cleanup(where))
                 if on_dead is not None:
                     try:
                         on_dead(left)

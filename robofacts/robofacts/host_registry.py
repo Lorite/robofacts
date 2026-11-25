@@ -251,3 +251,81 @@ def robot_targets(robots_config: Path, robots: Mapping[str, Any], *,
                                        str(spec.get("shell") or "zsh"), source,
                                        str(spec.get("container_hostname") or ""))
     return targets
+
+
+# --------------------------------------------------------------------------- #
+# Where a killed run left its stack (run_marker, trial_runner.recover_killed_trial)
+# --------------------------------------------------------------------------- #
+def run_host(experiments_root: Path, record: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Where the run of a run marker ran its stack and its recorder, when that is another
+    machine than the runner's: ``{"level", "host", "container", "shell", "workspace",
+    "backend"}``, or None when they ran on the runner's machine or nothing tells (third review
+    of 2026-11-25).
+
+    The trial in progress names its ssh host (``trial.remote``). Otherwise the marker's
+    ``execution_host`` level is resolved as the runner resolves it: the experiment's
+    runner.yaml ``hosts:``, filled from hosts.yaml. A run marker sees only the process
+    groups of the runner's machine, which for such a run are ssh clients: the stack and the
+    recorder they started can outlive them. Never raises.
+    """
+    try:
+        pending = record.get("trial") if isinstance(record.get("trial"), dict) else {}
+        level = record.get("execution_host")
+        spec: Dict[str, Any] = {}
+        if level is not None:
+            root = Path(experiments_root)
+            registry = load(root)
+            declared = None
+            runner = root / str(record.get("experiment") or "") / "config" / "runner.yaml"
+            if record.get("experiment") and runner.is_file():
+                declared = (yaml.safe_load(runner.read_text(encoding="utf-8")) or {}).get("hosts")
+            merged = resolve(registry, declared if isinstance(declared, dict) else {}, str(runner))
+            spec = merged.get(str(level)) or registry.hosts.get(str(level)) or {}
+        host = pending.get("remote")
+        if not host:
+            runner_inside = spec.get("container_hostname") and \
+                record.get("host") == spec.get("container_hostname")
+            if spec.get("local", False) or runner_inside:
+                return None
+            host = spec.get("host")
+        if not host:
+            return None
+        backend_name = pending.get("backend")
+        if not backend_name:
+            from . import backend
+            try:
+                backend_name = backend.configured_name(experiments_root)
+            except Exception:  # noqa: BLE001 - the clean-up then names no tool
+                backend_name = None
+        return {"level": level, "host": str(host), "container": spec.get("container") or None,
+                "shell": str(spec.get("shell") or "zsh"), "workspace": spec.get("workspace") or None,
+                "backend": backend_name}
+    except Exception:  # noqa: BLE001 - only a message depends on it
+        pending = record.get("trial") if isinstance(record, Mapping) else None
+        remote = pending.get("remote") if isinstance(pending, dict) else None
+        return {"level": None, "host": str(remote), "container": None, "shell": "zsh",
+                "workspace": None, "backend": pending.get("backend")} if remote else None
+
+
+def remote_cleanup(where: Mapping[str, Any]) -> str:
+    """The clean slate to run on the machine of ``where`` (run_host), as the web interface's
+    clean slate runs it there: the backend's clean-slate tool (``trials tool <tool>``) in the
+    project's checkout, inside the host's container. A backend without such a tool gets the
+    plain instruction."""
+    tool = ""
+    try:
+        from . import backend
+        if where.get("backend"):
+            tool = backend.load(str(where["backend"])).clean_slate_tool
+    except Exception:  # noqa: BLE001 - the plain instruction then
+        tool = ""
+    lines = [f"  ssh {where['host']}"]
+    if where.get("container"):
+        lines.append(f"  docker exec -it {where['container']} {where.get('shell') or 'zsh'} -l")
+    if not tool:
+        lines.append("  then stop the stack and the recorder of that run there")
+    elif where.get("workspace"):
+        lines.append(f"  cd {where['workspace']} && trials tool {tool}")
+    else:
+        lines.append(f"  trials tool {tool}   (in the project's checkout)")
+    return "\n".join(lines)

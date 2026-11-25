@@ -160,6 +160,10 @@ class Backend:
     skeleton_dir: Optional[Path] = None
     #: Shell tools the backend ships, found by ``trials tool`` after the core's.
     tools_dir: Optional[Path] = None
+    #: The one of those tools that stops every process of the backend's stacks on a host (the
+    #: clean slate of the web interface), or "" when the backend ships none. The recovery of a
+    #: killed run names it for the host where that run's stack may still run.
+    clean_slate_tool: str = ""
     #: How to start ``trials`` on another machine where the package is installed.
     cli: Tuple[str, ...] = ("trials",)
     #: The package whose modules run on another machine as ``python3 -m <package>.<module>``.

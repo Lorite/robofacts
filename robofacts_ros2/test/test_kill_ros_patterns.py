@@ -136,3 +136,14 @@ def test_a_real_run_kills_its_domain_and_spares_the_other(procs):
     assert out.returncode == 0, out.stderr
     assert mine.wait(timeout=10) is not None, "the caller's domain was not killed"
     assert other.poll() is None, "a process on another domain was killed"
+
+
+def test_the_backend_names_kill_ros_as_its_clean_slate_tool():
+    """The recovery of a killed remote run prints `trials tool <clean_slate_tool>` for the host
+    where the stack may still run (third review of 2026-11-25)."""
+    from robofacts import host_registry
+    from robofacts_ros2 import BACKEND
+    assert (BACKEND.tools_dir / BACKEND.clean_slate_tool).is_file()
+    text = host_registry.remote_cleanup({"host": "rig", "container": "rig_dev", "shell": "zsh",
+                                         "workspace": "/ws", "backend": "ros2"})
+    assert text.endswith("  cd /ws && trials tool kill_ros.sh"), text

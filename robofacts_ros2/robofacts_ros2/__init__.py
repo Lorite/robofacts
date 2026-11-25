@@ -108,6 +108,7 @@ BACKEND = Backend(
     lint_files=(_HERE / "lint_ros2.py",),
     skeleton_dir=_HERE / "skeleton",
     tools_dir=_HERE / "tools",
+    clean_slate_tool="kill_ros.sh",
     cli=("ros2", "run", "robofacts_ros2", "trials"),
     package="robofacts_ros2",
     build_workspaces=(".", "ros2_ws"), workspaces_setting="colcon_workspaces",
