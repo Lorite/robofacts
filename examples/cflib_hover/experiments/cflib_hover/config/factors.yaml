@@ -1,0 +1,12 @@
+# The factors of the experiment cflib_hover: the axes a campaign may vary.
+version: 1
+
+factors:
+  hover_s:
+    describe: >-
+      How long the drone holds its height after the takeoff, in seconds. The action is
+      started with this level, so it is a property of the procedure.
+    levels: ["10", "30"]
+    default: "10"
+    metadata_key: hover_s
+    maps_to: {kind: internal}

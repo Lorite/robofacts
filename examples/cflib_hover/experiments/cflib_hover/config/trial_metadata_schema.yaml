@@ -1,0 +1,19 @@
+# The metadata contract of the experiment cflib_hover: the fields every trial records, on top of
+# the project's core contract (experiments/common/config/trial_metadata_core.yaml). A field
+# with `factor: true` is a coverage axis: the index groups the trials by it. A trial whose
+# metadata breaks the contract does not count.
+version: 1
+
+fields:
+  hover_s:
+    required: true
+    type: str
+    factor: true
+    enum: ["10", "30"]
+    describe: "The level of the hover_s factor this trial ran at."
+  record_profile:
+    required: false
+    type: str
+    factor: true
+    enum: [custom]
+    describe: "This experiment lists what it records in runner.yaml (record_sources)."

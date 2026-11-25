@@ -1,0 +1,12 @@
+# A campaign of the experiment cflib_hover: which factors to sweep, which to fix, how many
+# repetitions. `trials plan` lists the cells that still miss trials.
+name: baseline
+experiment: cflib_hover
+describe: >-
+  One 10 s hover of one Crazyflie on its Flow deck, commanded with cflib, no middleware. It
+  evidences that the framework runs a real robot trial on the process backend: gate, recording,
+  verify step and coverage index. Safety-critical: a real drone takes off. Keep the stop
+  command typed in a second terminal, and stay within reach of the drone.
+repetitions: 1
+fixed:
+  hover_s: "10"

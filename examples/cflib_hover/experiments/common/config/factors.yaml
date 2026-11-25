@@ -1,0 +1,58 @@
+# Shared core of the experiment factor space.
+#
+# A "factor" is one axis of the space a trial lives in. Declaring it here makes
+# it three things at once:
+#   * something a campaign may sweep,
+#   * something the runner knows how to turn into a launch argument, a host, a
+#     record profile or an internal setting,
+#   * something the coverage grid can group by, through `metadata_key`, which
+#     must name a field the trial records. A factor that is never recorded would
+#     produce a campaign whose coverage can never be measured, so the loader
+#     refuses it.
+#
+# Per-experiment factors live in experiments/<name>/config/factors.yaml and are
+# merged on top. An experiment may override a core factor by name to narrow its
+# levels or change its default.
+#
+# Field spec:
+#   describe     : what the axis means and why it matters
+#   levels       : allowed values. A campaign may only sweep these.
+#   default      : the value used when a campaign does not mention the factor
+#   metadata_key : the trial_metadata.json field this lands in (coverage axis)
+#   aliases      : older spellings of a level, so historical trials still match
+#   maps_to      : how the runner realizes the level. kind is one of
+#                    host           - selects the execution machine (runner.yaml `hosts:`)
+#                    launch_arg     - an argument of the stack's launcher
+#                    record_profile - selects a named record topic set
+#                    internal       - affects orchestration only, not the launch
+#                    gate           - selects the T-0 gate mode (simulation only)
+#                    operator       - realized by the operator, checked by the gate
+
+version: 1
+
+factors:
+  execution_host:
+    describe: >-
+      Which machine actually runs the trial. A result without a host is not
+      comparable: the same code behaves differently on a laptop, a lab
+      workstation and an on-robot computer. Every level needs an entry under
+      `hosts:` in the experiment's runner.yaml.
+    levels: [laptop]
+    default: laptop
+    metadata_key: execution_host
+    aliases:
+      laptop: [local]
+    maps_to:
+      kind: host
+
+  record_profile:
+    describe: >-
+      Which topic set is recorded. It determines what questions the resulting
+      bag can answer, so it belongs in the factor space rather than being an
+      afterthought at record time. `custom` records the `record_topics` list of
+      the experiment's runner.yaml.
+    levels: [custom]
+    default: custom
+    metadata_key: record_profile
+    maps_to:
+      kind: record_profile

@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "The T-0 gate of the cflib example: what must hold seconds before the drone arms.",
+    "The two drone checks are this project's own (experiments/common/preflight/checks/). They",
+    "open the Crazyradio, so they run one at a time, and they need no middleware."
+  ],
+  "variables": {},
+  "checklist": [
+    {
+      "text": "[HARD] No operator stop in the last 120 s.",
+      "check": "stop_latch",
+      "args": {}
+    },
+    {
+      "text": "[HARD] The battery is charged, read over the radio.",
+      "check": "cf_battery",
+      "args": {},
+      "speak": "The drone battery is low or unreadable."
+    },
+    {
+      "text": "[HARD] The Flow deck is detected and sees the floor.",
+      "check": "cf_flow_deck",
+      "args": {},
+      "speak": "The flow deck does not see the floor."
+    },
+    {
+      "text": "[HARD] The recording directory is writable on the machine that records.",
+      "check": "recording_dir_writable",
+      "args": {
+        "path": "experiments/cflib_hover/recordings",
+        "label": "recordings"
+      }
+    },
+    "Operator: the drone stands on its mark on a flat, textured floor, nobody within 1.5 m, and you can reach it.",
+    "Operator: a second terminal is open in this project with the landing command typed: trials tool estop.sh --soft (without --soft it cuts the motors)"
+  ]
+}

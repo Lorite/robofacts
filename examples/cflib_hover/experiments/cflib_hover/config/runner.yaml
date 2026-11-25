@@ -1,0 +1,37 @@
+# How to run one trial of the experiment cflib_hover: one Crazyflie hovers on its Flow deck,
+# commanded with cflib, no middleware.
+#
+# The runner owns the order (setup steps -> robot resets -> gate -> record -> action -> stop the
+# recorder -> verify steps -> metadata). There is no stack: the action holds the radio link
+# for the whole flight, and the recorder stores the flight log it writes.
+
+# A real drone flies: the trials count in the `hardware` domain.
+simulation: false
+
+# The robot of robots.yaml: its reset (a power cycle over the radio) runs before every trial.
+robots: [crazyflie]
+
+# What to record: the flight log that the action appends to (estimate, range, battery, flow
+# quality at 20 Hz, and the takeoff and landing events).
+record_sources: [experiments/cflib_hover/runs/flight.jsonl]
+
+# The one foreground command that IS the trial. It runs in the project root. It refuses before
+# arming when the drone is not ready, and it lands on Ctrl+C, SIGTERM and the stop latch.
+action:
+  command: "python3 experiments/cflib_hover/scripts/cf_hover.py --log experiments/cflib_hover/runs/flight.jsonl --hover-s {hover_s}"
+
+settle_s: 0
+stop_grace_s: 1
+
+# A still-running action receives SIGTERM (it lands) and the trial is aborted.
+action_timeout_s: 120
+
+# The action exits 0 also when it never took off, so only the recording shows a flight.
+verify_steps:
+  - name: drone_left_the_ground
+    command: "python3 experiments/cflib_hover/scripts/verify_hover.py {recording} --min-airborne-s 3"
+
+hosts:
+  # The computer with the Crazyradio.
+  laptop:
+    local: true

@@ -22,6 +22,8 @@ pip install ./robofacts
 
 `robofacts/quickstart.sh` runs, on the example project `robofacts/example_project`, the linter, the planner, a dry run, the four trials of a campaign that sweeps two factors (gate, trial, recording, verify step, metadata) and the coverage index, which then lists the four cells with one usable trial each. The example's "system under test" is a script that appends lines to a log file, the recorder stores what it writes during a trial, and nothing needs a robot or a middleware.
 
+A real robot without ROS 2: `examples/cflib_hover` flies one Crazyflie on its Flow deck with cflib, on the same `process` backend (a gate over the radio, a flight log as the recording, a verify step on the recorded height). Its tests run without a drone, see its README for the operator procedure.
+
 With ROS 2 and Docker, from this directory:
 
 ```bash

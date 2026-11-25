@@ -1,0 +1,23 @@
+# The drone of the cflib example: one file for the gate, the reset and the hover.
+# $CF_URI overrides `uri` for one shell.
+uri: radio://0/80/2M/E7E7E7E7E7     # the factory address of a Crazyflie
+
+# Refusals before arming
+min_vbat: 3.85          # V, at rest
+min_squal: 50           # the Flow deck's median motion.squal over 2 s
+ground_guard_m: 0.05    # the estimated ground position after the estimator reset, from the origin
+
+# The two-stage takeoff: flow off on the floor, a quick first stage through the sensor's blind
+# zone, flow back on, then the climb (values of the lab's Flow-only flights, 2026-11-04)
+stage1_m: 0.20
+stage1_s: 1.0
+flow_on_m: 0.10
+stage2_s: 1.5
+height_m: 0.50
+
+# The hover and the landing
+max_hover_s: 60
+fence_xy_m: 0.50        # land when the estimate is farther than this from the takeoff point
+fence_z_m: 0.90
+land_m: 0.05
+land_s: 3.0

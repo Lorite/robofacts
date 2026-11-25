@@ -38,6 +38,8 @@ jobs:
           ./robofacts/quickstart.sh | tee /tmp/quickstart.txt
           grep -q "wanted 4 · covered 4 · STILL MISSING 0" /tmp/quickstart.txt
           grep -q "demo_log_recorder  (4 trials, 4 usable)" /tmp/quickstart.txt
+      - name: The Crazyflie example without a drone (lint, dry run, gate without a radio, hover logic on a fake drone, verify step)
+        run: cd examples/cflib_hover && python -m pytest -q -p no:cacheprovider test
       - name: A generated project does the same
         run: |
           cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject

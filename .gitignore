@@ -18,3 +18,9 @@ robofacts/example_project/experiments/*/bags_slim/
 robofacts/example_project/experiments/*/bags_scratch/
 robofacts/example_project/experiments/*/runs/
 robofacts/example_project/experiments/*/results/
+# What the cflib example records
+examples/*/experiments/*/recordings/*/
+examples/*/experiments/*/recordings_*/
+examples/*/experiments/*/runs/*
+!examples/*/experiments/*/runs/.gitkeep
+examples/*/experiments/*/results/*/

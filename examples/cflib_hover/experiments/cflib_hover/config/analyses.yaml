@@ -1,0 +1,9 @@
+# The named analyses of the experiment cflib_hover: repeatable computations over a cohort of
+# usable trials. `trials analyze cflib_hover <name>` prints the commands, `--execute` runs them
+# and writes analysis_metadata.json with the exact list of recordings.
+analyses:
+  airborne:
+    describe: "How long each trial was airborne, and its last height, judged again."
+    per: bag
+    command: >-
+      python3 experiments/cflib_hover/scripts/verify_hover.py {recording} --min-airborne-s 0
