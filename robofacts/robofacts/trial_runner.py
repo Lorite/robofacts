@@ -46,6 +46,7 @@ import contextlib
 import dataclasses
 import json
 import hashlib
+import os
 import shlex
 import socket
 import subprocess
@@ -1194,21 +1195,26 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # writing bags to the wrong disk is the outcome this refuses to have.
         print(f"[runner] RECORD DESTINATION UNUSABLE - not recording, the action does not run")
         return TrialResult(trial, None, "blocked", str(exc), [])
+    def _taken(name: str) -> bool:
+        """A directory of that name, its repo link or its run log exists already."""
+        return any(os.path.lexists(p) for p in (record_dir / name, bags_dir / name,
+                                                bags_dir.parent / "runs" / f"{name}.log"))
+
+    # The name is generated NOW, at run time, and de-collided against what is already on
+    # disk. 2026-08-12: a hand-built recorder pane pre-typed with a bag name from earlier in
+    # the session captured 53 s of a landed drone instead of the flight. A name nobody typed
+    # cannot be stale. Campaign trials are de-collided too since 2026-11-25 (review B2-2):
+    # two attempts of one cell in the same second shared one directory, and the second
+    # overwrote the first one's metadata and run log.
     if scratch_label is None:
-        bag_dir = record_dir / bag_name(trial, factors, stamp)
-        _ctx["label"] = bag_dir.name
+        base = bag_name(trial, factors, stamp)
     else:
-        # The name is generated NOW, at run time, and de-collided against what
-        # is already on disk. 2026-08-12: a hand-built recorder pane pre-typed
-        # with a bag name from earlier in the session captured 53 s of a landed
-        # drone instead of the flight. A name nobody typed cannot be stale.
         base = f"{stamp}_scratch" + (f"_{scratch_label}" if scratch_label else "")
-        bag_dir = record_dir / base
-        suffix = 2
-        while bag_dir.exists():
-            bag_dir = record_dir / f"{base}-{suffix}"
-            suffix += 1
-        _ctx["label"] = bag_dir.name
+    name, suffix = base, 2
+    while _taken(name):
+        name, suffix = f"{base}-{suffix}", suffix + 1
+    bag_dir = record_dir / name
+    _ctx["label"] = bag_dir.name
     _ctx["bag_dir"] = bag_dir
     if external_record:
         print(f"[runner] recording to EXTERNAL storage: {record_dir}")
@@ -2109,8 +2115,8 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
         return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
                                  session_id=session_id, ledger=ledger, **kwargs)
     root = Path(bags_dir).resolve().parents[1]
-    with run_marker.running(root, experiment=trial.experiment,
-                            campaign=campaign_name, label=trial.describe()):
+    with hold_run_marker(root, experiment=trial.experiment,
+                         campaign=campaign_name, label=trial.describe()):
         # Where this trial's stack runs, for a stop typed on this machine (host_registry
         # robot_targets): the level, the robots it applies to (None = every robot) and
         # whether it is a simulation, which never moves a stop.
@@ -2120,6 +2126,24 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
         _print_stop_targets(root)
         return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
                                  session_id=session_id, ledger=ledger, **kwargs)
+
+
+def hold_run_marker(experiments_root: Path, **info: Any) -> contextlib.ExitStack:
+    """The run marker of an executed run (run_marker.running), for a ``with`` block.
+
+    Taking it refuses the run when another live run of this project holds the marker
+    (2026-11-25, review B2-2: two runners started 1.5 s apart recorded every cell twice,
+    each recording holding the other runner's lines). Here and not in main(), so a run
+    started from the web interface, which calls run_plan, is refused too. The refusal is a
+    RunnerError, printed first so the run log says it.
+    """
+    stack = contextlib.ExitStack()
+    try:
+        stack.enter_context(run_marker.running(experiments_root, **info))
+    except run_marker.RunRefused as exc:
+        print(_c("31;1", f"[runner] REFUSED - {exc}"), flush=True)
+        raise RunnerError(str(exc)) from None
+    return stack
 
 
 def _print_stop_targets(experiments_root: Path) -> None:
@@ -2439,7 +2463,7 @@ def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
     session: Optional[Dict[str, Any]] = {} if (keep_stack and not dry_run) else None
     # The run marker spans the whole campaign, the gaps between trials included
     # (run_marker.py): an uploader must not start between two flights.
-    marker = contextlib.nullcontext() if dry_run else run_marker.running(
+    marker = contextlib.nullcontext() if dry_run else hold_run_marker(
         Path(bags_dir).resolve().parents[1], experiment=plan.campaign.experiment,
         campaign=plan.campaign.name)
     with marker:
