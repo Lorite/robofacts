@@ -38,7 +38,9 @@ setup(
         ],
     },
     include_package_data=True,
-    install_requires=["pyyaml"],
+    # pytest: the linter's rules are pytest tests (robofacts/lint.py), and trials lint and
+    # trials validate run them. Without it a plain pip install fails at the first lint.
+    install_requires=["pyyaml", "pytest"],
     # The web interface (trials ui) needs Flask. Everything else runs without it.
     extras_require={"ui": ["flask"], "test": ["pytest", "flask"]},
     python_requires=">=3.10",

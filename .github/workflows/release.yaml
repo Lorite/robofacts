@@ -40,10 +40,10 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           test -f "dist/robofacts-${version}.tar.gz" && test -f "dist/robofacts-${version}-py3-none-any.whl" \
             || { echo "tag ${GITHUB_REF_NAME} does not match the built version:"; ls dist; exit 1; }
-      - name: The wheel installs alone and a generated project passes lint, plan and one trial
+      - name: The wheel installs alone, without extras, and a generated project passes lint, plan and one trial
         run: |
           python -m venv /tmp/wheel-env
-          /tmp/wheel-env/bin/pip install "$(ls dist/*.whl)[test]"
+          /tmp/wheel-env/bin/pip install dist/*.whl
           export PATH="/tmp/wheel-env/bin:$PATH"
           if [ "$GITHUB_REF_TYPE" = tag ]; then test "$(trials --version)" = "${GITHUB_REF_NAME#v}"; fi
           cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject

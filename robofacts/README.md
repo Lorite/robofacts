@@ -4,7 +4,7 @@ RoboFACTS is a framework for experiments with robots, in simulation and on hardw
 
 The name stands for Factors, A Contract, and checked Trials in Simulation and on hardware. The framework is described in a paper accepted at ACM SAC 2027 (see [Cite](#cite)).
 
-This is the general package. It needs Python 3.10 or newer and PyYAML, and no robot middleware. Its built-in backend, `process`, starts the system under test as a shell command and records the files that the system writes during a trial. A backend for a robot middleware is a separate package: the [repository](https://github.com/Lorite/robofacts#two-packages) holds one, built from source.
+This is the general package. It needs Python 3.10 or newer, PyYAML and pytest (the linter runs its rules with it), and no robot middleware. Its built-in backend, `process`, starts the system under test as a shell command and records the files that the system writes during a trial. A backend for a robot middleware is a separate package: the [repository](https://github.com/Lorite/robofacts#two-packages) holds one, built from source.
 
 ## Install
 

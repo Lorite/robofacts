@@ -8,7 +8,7 @@ The name stands for Factors, A Contract, and checked Trials in Simulation and on
 
 | Package | Holds | Needs |
 |---|---|---|
-| `robofacts/` | the declarations (factors, contract, campaigns), the planner, the linter, the coverage index, the runner, the gate with 8 general checks, the web interface, and a built-in backend without any middleware (`process`) | Python 3.10 and PyYAML. The web interface also needs Flask |
+| `robofacts/` | the declarations (factors, contract, campaigns), the planner, the linter, the coverage index, the runner, the gate with 8 general checks, the web interface, and a built-in backend without any middleware (`process`) | Python 3.10, PyYAML and pytest (the linter runs its rules with it). The web interface also needs Flask |
 | `robofacts_ros2/` | the ROS 2 backend: `ros2 launch`, `ros2 bag record`, the bag readers, 13 ROS 2 gate checks, the robot adapters, and the ROS 2 part of the web interface | `robofacts` and ROS 2 Humble |
 
 The dependency goes one way. A test fails the build when `robofacts` imports a ROS module or names ROS in any file.

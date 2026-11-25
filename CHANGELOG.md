@@ -3,6 +3,7 @@
 ## 0.1.1 (unreleased)
 
 - `robofacts` on PyPI (2026-11-25): `pip install robofacts` installs the general package from PyPI, without a clone. The workflow `.github/workflows/release.yaml` builds the sdist and the wheel of `robofacts/` on every `v*` tag, fails on a `twine check --strict` warning or on a tag that differs from the built version, installs the wheel alone and runs a generated project (lint, plan, one trial, the coverage index), and then publishes through PyPI trusted publishing, so no token is stored in the repository. A manual run builds and checks only. The package has its own README for the PyPI page (`robofacts/README.md`, without middleware names, so the purity test still passes) and the project links, keywords and classifiers. `robofacts_ros2` is not on PyPI, because it needs `rclpy`. Both packages and `CITATION.cff` say 0.1.1.
+- pytest is a dependency of `robofacts` (2026-11-25): the linter's rules are pytest tests, so `trials lint` and `trials validate` stopped with `ModuleNotFoundError: No module named 'pytest'` after a plain `pip install` (found by installing the wheel without extras in `python:3.10-slim`). The CI had always installed the `test` extra.
 
 ## 0.1.0 (2026-11-25)
 
