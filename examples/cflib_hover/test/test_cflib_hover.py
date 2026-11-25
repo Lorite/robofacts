@@ -54,7 +54,8 @@ def run_verify(recording: Path, *extra: str) -> int:
 
 def test_verify_passes_a_flight(tmp_path, capsys):
     assert run_verify(write_log(tmp_path / "r", flight(), events=["takeoff", "land"])) == 0
-    assert capsys.readouterr().out.startswith("PASS: airborne 1")
+    out = capsys.readouterr().out
+    assert out.startswith("PASS: airborne 1") and "longest gap between samples 0.05 s" in out
 
 
 def test_verify_fails_when_the_drone_never_left_the_ground(tmp_path, capsys):

@@ -55,7 +55,11 @@ def judge(log: Path, min_airborne_s: float, airborne_m: float, landed_m: float) 
                        f"(max height {max(h for _, h in samples):.2f} m)")
     if samples[-1][1] > landed_m:
         return False, f"the last height is {samples[-1][1]:.2f} m: the recording ends in the air"
-    return True, f"airborne {up:.1f} s above {airborne_m} m, landed ({samples[-1][1]:.2f} m)"
+    gap = max((b[0] - a[0] for a, b in zip(samples, samples[1:])), default=0.0)
+    # The longest gap between two samples measures the radio link in flight, the input to the
+    # decision about the firmware's emergency-stop watchdog (it cuts the motors after 1 s).
+    return True, (f"airborne {up:.1f} s above {airborne_m} m, landed ({samples[-1][1]:.2f} m), "
+                  f"longest gap between samples {gap:.2f} s")
 
 
 def main(argv=None) -> int:
