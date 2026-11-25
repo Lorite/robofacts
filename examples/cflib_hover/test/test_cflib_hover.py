@@ -23,7 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 import cf_hover  # noqa: E402
 import cf_link  # noqa: E402
 import verify_hover  # noqa: E402
-from cflib_drone import LinkError  # noqa: E402
+from cflib_drone import CflibDrone, LinkError  # noqa: E402
 
 #: A radio index that no computer has: cflib fails at once, and no drone hears anything.
 NO_RADIO_URI = "radio://9/125/2M/E7E7E7E7E7"
@@ -360,6 +360,20 @@ def test_a_link_that_does_not_come_up_refuses(env):
 
 def test_a_hover_longer_than_the_config_allows_is_refused(env):
     assert hover(env, hover_s="61")[0] == cf_hover.REFUSED_RC
+
+
+def test_arming_goes_through_the_supervisor_not_the_deprecated_platform_call():
+    """cflib deprecates platform.send_arming_request (a DeprecationWarning at every arm and
+    disarm of the first hover, 2026-11-25): the wrapper calls supervisor.send_arming_request."""
+    from types import SimpleNamespace
+    calls = []
+    cf = SimpleNamespace(supervisor=SimpleNamespace(send_arming_request=lambda on: calls.append(("supervisor", on))),
+                         platform=SimpleNamespace(send_arming_request=lambda on: calls.append(("platform", on))))
+    drone = CflibDrone(NO_RADIO_URI)
+    drone._scf = SimpleNamespace(cf=cf)
+    drone.arm(True)
+    drone.arm(False)
+    assert calls == [("supervisor", True), ("supervisor", False)]
 
 
 # --------------------------------------------------------------------------- #

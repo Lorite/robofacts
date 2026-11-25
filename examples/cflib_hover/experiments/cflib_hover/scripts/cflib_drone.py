@@ -152,7 +152,7 @@ class CflibDrone:
 
     # --- commanding -----------------------------------------------------------------------
     def arm(self, on: bool) -> None:
-        self.cf.platform.send_arming_request(on)
+        self.cf.supervisor.send_arming_request(on)   # platform.send_arming_request is deprecated in cflib
 
     def takeoff(self, height_m: float, duration_s: float) -> None:
         self.cf.high_level_commander.takeoff(height_m, duration_s)
