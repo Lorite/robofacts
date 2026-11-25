@@ -2703,9 +2703,11 @@ def plan_command_problems(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *
     stack had run and the recorder had recorded (2026-11-25). Here every attempt of the plan
     is rendered before the first one starts, with a stand-in recording directory: only the
     placeholder names matter, and the ``{arg_*}`` of a launch argument can differ from one
-    combination to the next. The action, the setup steps and the aux launches are rendered
-    the same way, as ``_run_trial`` renders them, so a placeholder that only a later
-    combination lacks fails here too.
+    combination to the next. The launch command, the action, the setup steps and the aux
+    launches are rendered the same way, as ``_run_trial`` renders them, so a placeholder
+    that only a later combination lacks fails here too. Until the third review of 2026-11-25
+    the launch command was left out: a typo in its template stopped the first executed
+    trial, and left a failed attempt and a failure report for a trial that never launched.
     """
     steps = {**DEFAULT_STEPS, **(steps or {})}
     campaign = plan.campaign
@@ -2725,6 +2727,8 @@ def plan_command_problems(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *
             renders += [lambda s=s: templated_command(s["command"], trial, f"setup step {s['name']}",
                                                       **arg_ph) for s in setup]
         if steps["launch"]:
+            # The backend's launcher builds the stack's command from the same values.
+            renders.append(lambda: launch_command(trial, campaign.factors, config))
             renders += [lambda a=a: templated_command(a["command"], trial, f"aux launch {a['name']}",
                                                       **{**recording, **arg_ph})
                         for a in config.aux_launches]

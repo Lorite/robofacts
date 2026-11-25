@@ -74,3 +74,34 @@ def test_every_attempt_is_rendered_and_each_problem_is_named_once(project):
     # A trial without a recording never runs its verify steps, so they are not rendered.
     assert tr.plan_command_problems(plan, config, project, extra_verify=campaign.verify_steps,
                                     steps={"record": False}) == []
+
+
+def test_a_launch_template_typo_stops_the_run_before_the_first_trial(tmp_path, monkeypatch, capsys):
+    """A3-10 (round 3): the launch command was not rendered with the others. A typo in its
+    template (``{rates}``) passed this check, and with --execute the first trial stopped with
+    an execution error, leaving a failed attempt in the ledger and a failure report for a
+    trial that never launched. An aux launch's typo is refused the same way."""
+    root = tmp_path / "proj"
+    shutil.copytree(EXAMPLE, root)
+    experiments = root / "experiments"
+    runner = experiments / EXPERIMENT / "config" / "runner.yaml"
+    text = runner.read_text(encoding="utf-8")
+    assert "--rate {rate} --log" in text
+    runner.unlink()
+    runner.write_text(text.replace("--rate {rate} --log", "--rate {rates} --log"), encoding="utf-8")
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("TRIALS_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TRIALS_EXPERIMENTS_ROOT", str(experiments))
+    monkeypatch.setenv("PYTHONPATH", str(PACKAGE) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    monkeypatch.setenv("TRIALS_VOICE", "off")
+    ti._recorder_at.cache_clear()
+    campaign = experiments / EXPERIMENT / "campaigns" / "grid.yaml"
+    rc = tr.main([str(campaign), "--experiments-root", str(experiments), "--no-pause", "--execute"])
+    out = capsys.readouterr().out
+    assert rc == 1 and "launch command references unknown factor 'rates'" in out, out
+    assert "no trial runs" in out, out
+    runs = experiments / EXPERIMENT / "runs"
+    assert not (runs / tr.ATTEMPT_LEDGER_NAME).exists(), "a failed attempt was written"
+    assert not list(runs.glob("*failure*")), "a failure report was written"
+    assert not [d for d in (experiments / EXPERIMENT / "recordings").iterdir() if d.is_dir()]
+    ti._recorder_at.cache_clear()
