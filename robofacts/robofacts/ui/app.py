@@ -1777,7 +1777,11 @@ def create_app(experiments_root: Optional[Path] = None,
         except tr.RunnerError as exc:
             return error(str(exc), 400, crumbs)
         host_level = request.form.get("host", "").strip() or None
-        target = config.remote_target(host_level)
+        try:
+            target = config.remote_target(host_level)
+        except tr.RunnerError as exc:
+            # A host the experiment does not declare: a 500 before 2026-11-25.
+            return error(str(exc), 400, crumbs)
         cmd = ["bash", f"experiments/{experiment}/scripts/preflight.sh"]
         if target is not None:
             from robofacts.remote_exec_utils import wrap_command

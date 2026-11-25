@@ -392,3 +392,14 @@ def test_a_manual_window_that_is_not_0_to_3600_seconds_is_refused(bare, held_run
 @pytest.mark.parametrize("hold", ["", "0", "60", "3600"])
 def test_a_manual_window_from_0_to_3600_seconds_is_accepted(bare, held_runner, hold):
     assert bare.c.post("/run", data={**DRY, "hold_s": hold}, headers=auth()).status_code == 302
+
+
+def test_the_gate_button_for_an_undeclared_host_is_a_clear_400(bare, monkeypatch):
+    """C2-10a: /preflight answered 500, because the RunnerError of an undeclared host was not caught."""
+    scripts = bare.root / "demo_log_recorder" / "scripts"
+    (scripts / "preflight.sh").write_text("echo PASS\n", encoding="utf-8")
+    monkeypatch.setattr(bare.ui.subprocess, "run",
+                        lambda cmd, **kw: (_ for _ in ()).throw(AssertionError(f"spawned {cmd}")))
+    response = bare.c.post("/preflight/demo_log_recorder", data={"host": "nowhere"}, headers=auth())
+    assert response.status_code == 400
+    assert "nowhere" in response.get_data(as_text=True)
