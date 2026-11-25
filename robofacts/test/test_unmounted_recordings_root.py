@@ -43,6 +43,23 @@ def test_an_unmounted_recordings_root_stops_the_plan_and_the_run(tmp_path, monke
     ti._recorder_at.cache_clear()
 
 
+@pytest.mark.parametrize("execute", [True, False], ids=["execute", "dry-run"])
+def test_the_run_refuses_an_unmounted_disk_before_it_prints_the_plan(tmp_path, monkeypatch, capsys, execute):
+    """A3-9 (round 3): `trials run` printed the plan (wanted 2, covered 0, STILL MISSING 2)
+    and only then refused the unmounted disk."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    recordings = experiments / "plant" / backend.record_dirs(experiments)["recordings"]
+    os.symlink(tmp_path / "disk" / "plant" / "recordings" / "t1", recordings / "t1")
+    run = ["run", str(experiments / "plant" / "campaigns" / "rates.yaml"),
+           "--experiments-root", str(experiments), "--no-pause"] + (["--execute"] if execute else [])
+    assert cli.main(run) == 2
+    out, err = capsys.readouterr()
+    assert "is not mounted" in err
+    assert "STILL MISSING" not in out and "wanted" not in out, out
+
+
 def test_a_slim_copy_or_a_deleted_recording_is_not_an_unmounted_disk(tmp_path):
     experiments = write_project(tmp_path / "proj")
     rd = backend.record_dirs(experiments)

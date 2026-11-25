@@ -3171,6 +3171,9 @@ def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             pause_before_action=not args.no_pause)
         return 1 if result.status in ("blocked", "failed") else 0
 
+    # Refused before the plan is printed (third review of 2026-11-25): run_plan refuses it
+    # too, but only after the plan had shown the unmounted disk's cells as STILL MISSING.
+    ti.require_recordings_mounted(args.experiments_root, campaign.experiment)
     trials = ti.load_trials(args.experiments_root, campaign.experiment)
     plan = cp.build_plan(campaign, trials, args.include_unverified)
     bags_dir = args.experiments_root / campaign.experiment / backends.record_dirs(args.experiments_root)["recordings"]
