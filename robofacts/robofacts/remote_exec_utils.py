@@ -301,8 +301,20 @@ def stop_signals_interrupt() -> Iterator[None]:
     try:
         yield
     finally:
+        _restore_handlers(old)
+
+
+def _restore_handlers(old: dict) -> None:
+    """Put the handlers back with the stop signals blocked, so a signal that arrives in the
+    middle cannot leave some of them on a handler whose block has ended (a Ctrl-C there
+    left SIGTERM and SIGHUP on a dead hold, second review of 2026-11-25). A signal that
+    arrived meanwhile is delivered to the restored handler when they are unblocked."""
+    blocked = signal.pthread_sigmask(signal.SIG_BLOCK, set(old))
+    try:
         for s, handler in old.items():
             signal.signal(s, handler)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
 
 
 @contextlib.contextmanager
@@ -328,8 +340,7 @@ def interrupts_held(what: str) -> Iterator[list]:
     try:
         yield pending
     finally:
-        for s, handler in old.items():
-            signal.signal(s, handler)
+        _restore_handlers(old)
 
 
 def deferred_interrupt(signum: int) -> KeyboardInterrupt:
