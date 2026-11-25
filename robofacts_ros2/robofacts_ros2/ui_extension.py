@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 import shlex
 import subprocess
 from functools import wraps
@@ -43,30 +44,48 @@ def foxglove_layouts(experiments_root: Path) -> Dict[str, List[Path]]:
             out.setdefault(f.parents[1].name, []).append(f)
     return out
 
-def bag_token(password: str, experiment: str, name: str) -> str:
+#: The app config entry of the secret that keys the bag tokens (see bag_token).
+TOKEN_KEY = "BAG_TOKEN_KEY"
+
+
+def token_key(app) -> Optional[bytes]:
+    """The key of the bag tokens of ``app``, or None when the interface has no password
+    (``--no-auth``: the bag URLs then carry no token, as before 2026-11-25). The key is a
+    random secret, made once per server process and kept in the app config."""
+    if not app.config.get("PASSWORD"):
+        return None
+    return app.config.setdefault(TOKEN_KEY, secrets.token_bytes(32))
+
+
+def bag_token(key: bytes, experiment: str, name: str) -> str:
     """The token of one slim bag's URL when the interface has a password (2026-11-25).
 
-    Hex HMAC-SHA256 of ``<experiment>/<name>`` (the bag's name without .mcap), keyed
-    with the password. Foxglove fetches the bag itself and cannot send the Basic
-    credentials, so the link carries this token in its query parameter ``t``
-    instead. It opens that one bag only, and it reveals nothing about the password.
+    Hex HMAC-SHA256 of ``<experiment>/<name>`` (the bag's name without .mcap), keyed with
+    the server's random secret (token_key). Foxglove fetches the bag itself and cannot send
+    the Basic credentials, so the link carries this token in its query parameter ``t``
+    instead. It opens that one bag only. It is not derived from the password, so a link
+    tells nothing about the password, also to whoever sees it on its way (a link to
+    app.foxglove.dev is sent there). Until the third review of 2026-11-25 the password
+    keyed it, and one link was enough to test passwords offline. The secret is made anew
+    when the server starts, so the links of a page opened before a restart stop working:
+    reload the page for new ones.
     """
-    return hmac.new(password.encode("utf-8"), f"{experiment}/{name}".encode("utf-8"),
-                    hashlib.sha256).hexdigest()
+    return hmac.new(key, f"{experiment}/{name}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def bag_query(password: Optional[str], experiment: str, name: str) -> str:
-    """``?t=<token>`` for a bag URL when there is a password, else "" (the URL as before)."""
-    return f"?t={bag_token(password, experiment, name)}" if password else ""
+def bag_query(key: Optional[bytes], experiment: str, name: str) -> str:
+    """``?t=<token>`` for a bag URL when there is a key (a password), else "" (the URL as
+    before)."""
+    return f"?t={bag_token(key, experiment, name)}" if key else ""
 
 
-def bag_url(base_url: str, experiment: str, bag_name: str, password: Optional[str] = None) -> str:
+def bag_url(base_url: str, experiment: str, bag_name: str, key: Optional[bytes] = None) -> str:
     """The URL of a slim bag served by /bag, with its token when the interface has a password."""
-    return f"{base_url}/bag/{experiment}/{bag_name}.mcap" + bag_query(password, experiment, bag_name)
+    return f"{base_url}/bag/{experiment}/{bag_name}.mcap" + bag_query(key, experiment, bag_name)
 
 
 def foxglove_link(base_url: str, experiment: str, bag_name: str,
-                  password: Optional[str] = None) -> str:
+                  key: Optional[bytes] = None) -> str:
     """Deep link that opens the laptop's Foxglove on a bag served by this UI.
 
     Clicked in the operator's browser, so it reaches the laptop's Foxglove even
@@ -74,13 +93,14 @@ def foxglove_link(base_url: str, experiment: str, bag_name: str,
     Foxglove picks its reader from the path's extension, so the token in the
     query does not change it.
     """
-    return "foxglove://open?ds=remote-file&ds.url=" + bag_url(base_url, experiment, bag_name, password)
+    return "foxglove://open?ds=remote-file&ds.url=" + bag_url(base_url, experiment, bag_name, key)
 
 def foxglove_web_link(base_url: str, experiment: str, bag_name: str,
-                      password: Optional[str] = None) -> str:
-    """The same bag in Foxglove's web app (app.foxglove.dev, the default org)."""
+                      key: Optional[bytes] = None) -> str:
+    """The same bag in Foxglove's web app (app.foxglove.dev, the default org). The link,
+    with its token, goes to that site, which is why the token carries no password."""
     return ("https://app.foxglove.dev/~/view?ds=remote-file&ds.url="
-            + bag_url(base_url, experiment, bag_name, password))
+            + bag_url(base_url, experiment, bag_name, key))
 
 
 def layouts(root: Path, experiment: str) -> List[str]:
@@ -88,41 +108,41 @@ def layouts(root: Path, experiment: str) -> List[str]:
     return [f.name for f in foxglove_layouts(root).get(experiment, [])]
 
 
-def _password() -> Optional[str]:
-    """The password of the interface that renders the page, or None (``--no-auth``)."""
-    return current_app.config.get("PASSWORD") or None
+def _token_key() -> Optional[bytes]:
+    """The bag token key of the interface that renders the page, or None (``--no-auth``)."""
+    return token_key(current_app)
 
 
 def template_globals() -> Dict[str, object]:
     """What this package's templates need besides the general interface's globals.
 
-    The bag links carry the token of the interface's password (see bag_token).
+    The bag links carry a token when the interface has a password (see bag_token).
     """
     def fox_link(base_url: str, experiment: str, bag_name: str) -> str:
-        return foxglove_link(base_url, experiment, bag_name, _password())
+        return foxglove_link(base_url, experiment, bag_name, _token_key())
 
     def fox_web_link(base_url: str, experiment: str, bag_name: str) -> str:
-        return foxglove_web_link(base_url, experiment, bag_name, _password())
+        return foxglove_web_link(base_url, experiment, bag_name, _token_key())
 
     def slim_bag_url(base_url: str, experiment: str, bag_name: str) -> str:
-        return bag_url(base_url, experiment, bag_name, _password())
+        return bag_url(base_url, experiment, bag_name, _token_key())
 
     return {"fox_link": fox_link, "fox_web_link": fox_web_link, "bag_url": slim_bag_url}
 
 
-def add_bag_queries(run: Dict[str, Any], password: Optional[str]) -> Dict[str, Any]:
+def add_bag_queries(run: Dict[str, Any], key: Optional[bytes]) -> Dict[str, Any]:
     """A run's JSON with the query of each slim bag link the run and Explore pages build.
 
     Those pages build the links in the browser, which cannot compute a token
-    without the password: each recorded result gets ``bag_query`` (for its
+    without the server's key: each recorded result gets ``bag_query`` (for its
     ``<bag>_slim``) and each exploration recording ``slim_query``.
     """
     experiment = run.get("experiment", "")
-    run["results"] = [dict(r, bag_query=bag_query(password, experiment, f"{r['bag']}_slim"))
+    run["results"] = [dict(r, bag_query=bag_query(key, experiment, f"{r['bag']}_slim"))
                       if r.get("bag") else r for r in run.get("results") or []]
     live = (run.get("explore") or {}).get("live")
     if isinstance(live, dict) and live.get("recordings"):
-        live["recordings"] = [dict(r, slim_query=bag_query(password, experiment, r["slim"]))
+        live["recordings"] = [dict(r, slim_query=bag_query(key, experiment, r["slim"]))
                               if r.get("slim") else r for r in live["recordings"]]
     return run
 
@@ -131,6 +151,7 @@ def register(ui) -> None:
     """Add the ROS 2 routes to the general interface's app."""
     app, requires_auth, action, root = ui.app, ui.requires_auth, ui.action, ui.root
     error, cache, runs, journal = ui.error, ui.cache, ui.runs, ui.journal
+    token_key(app)   # the bag token key, made once when the server starts
 
     api_run = app.view_functions.get("api_run")
     if api_run is not None:
@@ -138,7 +159,7 @@ def register(ui) -> None:
         def api_run_with_bag_queries(*args, **kwargs):
             """The general /api/run/<id>.json, plus the token of each slim bag link."""
             out = api_run(*args, **kwargs)
-            return add_bag_queries(out, app.config.get("PASSWORD")) if isinstance(out, dict) else out
+            return add_bag_queries(out, token_key(app)) if isinstance(out, dict) else out
 
         app.view_functions["api_run"] = api_run_with_bag_queries
 
@@ -235,10 +256,10 @@ def register(ui) -> None:
         port could download every slim bag, also of a password-protected
         view-only archive. Without a password nothing changes.
         """
-        password = app.config.get("PASSWORD")
-        if password and not hmac.compare_digest(
+        key = token_key(app)
+        if key and not hmac.compare_digest(
                 request.args.get("t", "").encode("utf-8"),
-                bag_token(password, experiment, name).encode("utf-8")):
+                bag_token(key, experiment, name).encode("utf-8")):
             return {"error": "this bag link has no valid token: open the bag from a page of "
                              "the interface, whose links carry one"}, 403
         for slim_root in (root() / experiment / "bags_slim",

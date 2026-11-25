@@ -613,8 +613,18 @@ def test_viewers_page_lists_per_experiment_foxglove_layouts(client, root):
     assert client.get("/layout/expA/foxglove_demo.json").status_code == 401, "layouts stay behind auth"
 
 
-def bag_token(name: str, experiment: str = "expA", password: str = PASSWORD) -> str:
-    """The token the interface puts in a bag link: hex HMAC-SHA256 of "<exp>/<name>"."""
+def bag_token(c, name: str, experiment: str = "expA") -> str:
+    """The token the interface ``c`` (a test client or an app) puts in a bag link: hex
+    HMAC-SHA256 of "<exp>/<name>", keyed with that server's random secret."""
+    import hashlib
+    import hmac
+    app = getattr(c, "application", c)
+    key = app.config[ui_ext.TOKEN_KEY]
+    return hmac.new(key, f"{experiment}/{name}".encode(), hashlib.sha256).hexdigest()
+
+
+def password_token(name: str, experiment: str = "expA", password: str = PASSWORD) -> str:
+    """The token as it was until the third review of 2026-11-25: keyed with the password."""
     import hashlib
     import hmac
     return hmac.new(password.encode(), f"{experiment}/{name}".encode(), hashlib.sha256).hexdigest()
@@ -624,7 +634,7 @@ def test_a_slim_bag_can_be_streamed(client, root):
     bag = root / "expA" / "bags_slim" / "t1_slim"
     bag.mkdir(parents=True)
     (bag / "d_0.mcap").write_bytes(b"MCAPDATA")
-    response = client.get(f"/bag/expA/t1_slim.mcap?t={bag_token('t1_slim')}")
+    response = client.get(f"/bag/expA/t1_slim.mcap?t={bag_token(client, 't1_slim')}")
     assert response.status_code == 200 and response.get_data() == b"MCAPDATA"
 
 
@@ -652,7 +662,7 @@ def test_bag_serving_is_deliberately_public(client):
     been red ever since. It now pins the real contract instead. Since
     2026-11-25 the URL carries a token of the password instead (C2-7).
     """
-    response = client.get(f"/bag/expA/t1_slim.mcap?t={bag_token('t1_slim')}")
+    response = client.get(f"/bag/expA/t1_slim.mcap?t={bag_token(client, 't1_slim')}")
     assert response.status_code != 401, "serving must not demand Basic auth"
     # No such slim bag in the fixture, so the traversal-safe lookup 404s.
     assert response.status_code == 404
@@ -666,11 +676,12 @@ def test_a_bag_url_needs_the_token_of_the_password(client, root, viewer):
     slim.mkdir(parents=True)
     (slim / "t9_slim_0.mcap").write_bytes(b"EXCLUDED-SLIM")
     for c in (client, viewer):
-        for query in ("", "?t=", f"?t={bag_token('t1_slim')}", f"?t={bag_token('t9_slim', password='x')}"):
+        for query in ("", "?t=", f"?t={bag_token(c, 't1_slim')}",
+                      f"?t={ui_ext.bag_token(b'x' * 32, 'expA', 't9_slim')}"):
             response = c.get(f"/bag/expA/t9_slim.mcap{query}", headers={"Origin": "https://evil.example"})
             assert response.status_code == 403, query
             assert b"EXCLUDED" not in response.get_data()
-        good = c.get(f"/bag/expA/t9_slim.mcap?t={bag_token('t9_slim')}", headers={"Range": "bytes=0-7"})
+        good = c.get(f"/bag/expA/t9_slim.mcap?t={bag_token(c, 't9_slim')}", headers={"Range": "bytes=0-7"})
         assert good.status_code == 206 and good.get_data() == b"EXCLUDED"
         assert good.headers["Access-Control-Allow-Origin"] == "*", "Foxglove web still reads it"
     # Without a password (--no-auth) nothing changes: no token, and the links carry none.
@@ -678,6 +689,30 @@ def test_a_bag_url_needs_the_token_of_the_password(client, root, viewer):
     open_app.config["TESTING"] = True
     assert open_app.test_client().get("/bag/expA/t9_slim.mcap").get_data() == b"EXCLUDED-SLIM"
     assert ui_ext.foxglove_link("http://h", "expA", "t9_slim", None).endswith("/bag/expA/t9_slim.mcap")
+
+
+def test_a_bag_link_tells_nothing_about_the_password(client, root, viewer):
+    """Third review of 2026-11-25: the token was an HMAC keyed with the password, so anyone who
+    saw one link (it goes to app.foxglove.dev) could test passwords offline. It is keyed with a
+    random secret of the server now: the password's HMAC opens nothing, and two servers (or one
+    server after a restart) give different tokens."""
+    import hashlib
+    import hmac
+    slim = root / "expA" / "bags_slim" / "t1_slim"
+    slim.mkdir(parents=True)
+    (slim / "d_0.mcap").write_bytes(b"MCAPDATA")
+    with client.application.app_context():   # the helper the pages render the link with
+        link = ui_ext.template_globals()["fox_web_link"]("http://h", "expA", "t1_slim")
+    assert link.startswith("https://app.foxglove.dev/")
+    token = link.rsplit("t=", 1)[1]
+    message = b"expA/t1_slim"
+    guesses = [PASSWORD, "x", "lab2026", "", "hunter1", "hunter3"]
+    assert not any(hmac.new(g.encode(), message, hashlib.sha256).hexdigest() == token
+                   for g in guesses), "the token is an HMAC of the password"
+    assert client.get(f"/bag/expA/t1_slim.mcap?t={password_token('t1_slim')}").status_code == 403
+    assert client.get(f"/bag/expA/t1_slim.mcap?t={token}").status_code == 200
+    assert bag_token(viewer, "t1_slim") != token, "every server process makes its own secret"
+    assert viewer.get(f"/bag/expA/t1_slim.mcap?t={token}").status_code == 403
 
 
 def test_the_run_and_explore_pages_get_the_token_of_each_bag_they_link(client):
@@ -688,11 +723,12 @@ def test_the_run_and_explore_pages_get_the_token_of_each_bag_they_link(client):
     run.results.append({"status": "ran", "describe": "", "bag": "t1", "detail": "", "commands": []})
     runs._runs["r1"] = run
     payload = client.get("/api/run/r1.json", headers=auth()).get_json()
-    assert payload["results"][0]["bag_query"] == f"?t={bag_token('t1_slim')}"
+    assert payload["results"][0]["bag_query"] == f"?t={bag_token(client, 't1_slim')}"
     assert "bag_query" not in run.results[0], "the run's own record stays as it was"
     explore = ui_ext.add_bag_queries({"experiment": "expA", "results": [], "explore": {"live": {
-        "recordings": [{"name": "s1", "slim": "s1_slim"}, {"name": "s2", "slim": ""}]}}}, PASSWORD)
-    assert explore["explore"]["live"]["recordings"][0]["slim_query"] == f"?t={bag_token('s1_slim')}"
+        "recordings": [{"name": "s1", "slim": "s1_slim"}, {"name": "s2", "slim": ""}]}}},
+        ui_ext.token_key(client.application))
+    assert explore["explore"]["live"]["recordings"][0]["slim_query"] == f"?t={bag_token(client, 's1_slim')}"
     assert "slim_query" not in explore["explore"]["live"]["recordings"][1]
     for page, needle in (("_viewers.html", "t.bag_query"), ("explore.html", "r.slim_query")):
         assert needle in (ui_ext.TEMPLATES / page).read_text(encoding="utf-8"), page
@@ -983,7 +1019,7 @@ def test_the_trial_row_and_page_carry_replay_layout_video_analyses_and_logs(clie
     page = client.get(f"/e/expA/t/{name}", headers=auth()).get_data(as_text=True)
     for body in (row, page):
         # The & is escaped in the attribute, as it must be; the browser decodes it.
-        token = bag_token(f"{name}_slim")
+        token = bag_token(client, f"{name}_slim")
         assert (f"foxglove://open?ds=remote-file&amp;ds.url=http://localhost/bag/expA/{name}_slim.mcap"
                 f"?t={token}") in body
         assert f'href="http://localhost/bag/expA/{name}_slim.mcap?t={token}"' in body, "the download too"
@@ -993,7 +1029,7 @@ def test_the_trial_row_and_page_carry_replay_layout_video_analyses_and_logs(clie
         assert f"/files/expA/runs/{name}.log" in body
         assert f"/files/expA/bags/{name}/trial_metadata.json" in body
     assert "<video" in page and "<code>flew</code>" in page, "the video plays, the verify report lists the step"
-    assert client.get(f"/bag/expA/{name}_slim.mcap?t={bag_token(name + '_slim')}").get_data() == b"SLIM"
+    assert client.get(f"/bag/expA/{name}_slim.mcap?t={bag_token(client, name + '_slim')}").get_data() == b"SLIM"
 
 
 def test_the_filters_are_the_cli_flags_and_the_page_prints_the_command(client, root):
