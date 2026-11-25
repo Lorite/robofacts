@@ -188,6 +188,23 @@ def test_a_level_listed_twice_in_a_sweep_is_refused(root):
         cs.load_campaign(campaign_file(root, BASIC), root, ["trajectory=circle,circle"])
 
 
+def test_levels_equal_in_python_but_of_another_type_are_not_duplicates(root):
+    """1, 1.0 and true compare equal in Python, so ``levels.count`` called them one level
+    listed three times. They are three levels: the duplicate check compares type and value."""
+    (root / "expA" / "config" / "factors.yaml").write_text(EXPERIMENT + """
+  gain:
+    levels: [1, 1.0, true]
+    default: 1
+    metadata_key: gain
+    maps_to: {kind: launch_arg, name: gain}
+""", encoding="utf-8")
+    body = "name: c\nexperiment: expA\nsweep:\n  gain: [1, 1.0, true]\n"
+    campaign = cs.load_campaign(campaign_file(root, body), root)
+    assert [type(t.values["gain"]) for t in campaign.combinations()] == [int, float, bool]
+    with pytest.raises(cs.SpecError, match="gain lists the level.s. 1.0 more than once"):
+        cs.load_campaign(campaign_file(root, body.replace("[1, 1.0, true]", "[1, 1.0, 1.0]")), root)
+
+
 def test_unswept_factors_take_their_default(root):
     trial = next(cs.load_campaign(campaign_file(root, BASIC), root).combinations())
     assert trial.values["execution_host"] == "orin"

@@ -877,9 +877,12 @@ def validate(campaign: Campaign) -> List[str]:
 
     # A level listed twice doubled the cells that want it, so the campaign asked for twice
     # the trials of that level and could never be covered as written (found 2026-11-25).
+    # Type and value both count: Python finds 1, 1.0 and true equal, but they are three
+    # distinct levels with three spellings in the metadata.
     for name, value in campaign.sweep.items():
         levels = value if isinstance(value, list) else [value]
-        twice = sorted({str(level) for level in levels if levels.count(level) > 1})
+        keys = [(type(level), level) for level in levels]
+        twice = sorted({str(level) for level, key in zip(levels, keys) if keys.count(key) > 1})
         if twice:
             problems.append(f"sweep: {name} lists the level(s) {', '.join(twice)} more than once. "
                             f"List each level once, `repetitions` sets how many trials each gets")
