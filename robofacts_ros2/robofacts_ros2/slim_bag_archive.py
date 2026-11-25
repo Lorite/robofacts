@@ -260,10 +260,13 @@ def archive_and_sync(bag_dir: Path, remote_target=None, *, project_root: Optiona
         root = Path(project_root or remote_target.workspace)
         # The project's shim when the rig's checkout has one, else the installed package
         # (2026-10-14: before, a project without the lab's shims could not slim remotely).
+        # This module is in robofacts_ros2: until the third review of 2026-11-25 the command
+        # named robofacts.slim_bag_archive, which does not exist, so every remote trial of a
+        # project without the shim got no slim copy.
         args = ["--bag", str(bag_dir), "--copy-if-light"]
         if not compress:
             args.append("--no-compress")
-        cmd = package_module_command(root, "slim_bag_archive", args)
+        cmd = package_module_command(root, "slim_bag_archive", args, package="robofacts_ros2")
         print(f"[slim] slimming on {remote_target.host} (nothing transferred yet)")
         completed = run_foreground(cmd, remote_target, cwd=root, check=False)
         if completed.returncode != 0:
