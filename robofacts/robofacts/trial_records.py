@@ -33,6 +33,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -486,12 +487,26 @@ def _associate_results(folders: List[Dict[str, Any]], names: Iterable[str]
 # The join
 # --------------------------------------------------------------------------- #
 def _started(name: str, ledger_row: Optional[Dict[str, Any]]) -> str:
+    """When the attempt started, in UTC, as ISO 8601 with a trailing ``Z``.
+
+    The ledger's ``ts_start`` and the stamp of a trial's name are both UTC. The time used to
+    be cut to its first 19 characters, which dropped the zone, so the table and ``--json``
+    showed a UTC time that read as local time (2026-11-25). A ``ts_start`` with another
+    offset is converted. Text that is not an ISO time is shown as it is, without a zone.
+    """
     if ledger_row and ledger_row.get("ts_start"):
-        return str(ledger_row["ts_start"])[:19]
+        text = str(ledger_row["ts_start"])
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return text[:19]
+        if moment.tzinfo is not None:
+            moment = moment.astimezone(timezone.utc)
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
     match = _STAMP.match(name)
     if match:
         s = match.group(1)
-        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}"
+        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}Z"
     return ""
 
 
@@ -859,7 +874,9 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
     width = max(len(class_label(r)) for r in records)
     lines = []
     for r in records:
-        bits = [r.started.replace("T", " ") or "-", f"{class_label(r):<{width}}", r.name]
+        started = r.started.replace("T", " ")
+        bits = [(started[:-1] + " UTC" if started.endswith("Z") else started) or "-",
+                f"{class_label(r):<{width}}", r.name]
         if r.kind == "scratch" and r.status != "scratch":
             bits.append("[scratch recording, never coverage]")
         if r.campaign:
