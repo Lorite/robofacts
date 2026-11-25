@@ -51,6 +51,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -934,6 +935,70 @@ class ProcessHooks:
                                    run_foreground=run_foreground,
                                    run_action=run_action if act is not None else None)
 
+    def noting_groups(self, experiments_root: Path) -> "ProcessHooks":
+        """These hooks, with the process group of every process they start (the stack, the
+        aux launches, the recorder, the action) noted in the run marker (2026-11-25, review
+        B2-3). Each leads its own group and outlives a runner killed with ``kill -9``, so
+        the next run must be able to tell that they still run."""
+        start, act = self.start_background, self.run_action
+
+        def start_background(cmd, target, **kwargs):
+            proc = start(cmd, target, **kwargs)
+            _note_process_group(experiments_root, kwargs.get("label") or "process", proc)
+            return proc
+
+        def run_action(cmd, target, **kwargs):
+            watch = _ActionGroupWatch(experiments_root)
+            try:
+                return act(cmd, target, **kwargs)
+            finally:
+                watch.stop()
+
+        return dataclasses.replace(self, start_background=start_background,
+                                   run_action=run_action if act is not None else None)
+
+
+def _note_process_group(experiments_root: Path, name: str, proc: Any) -> None:
+    """Note the process group ``proc`` leads in the run marker. A process in another group
+    (a fake of the tests, a remote action in the runner's own group) is not noted."""
+    pid = getattr(proc, "pid", None)
+    if not isinstance(pid, int) or pid <= 1:
+        return
+    try:
+        if os.getpgid(pid) != pid:
+            return
+    except OSError:
+        return
+    run_marker.note_group(experiments_root, name, pid)
+
+
+class _ActionGroupWatch:
+    """Note the action's process group while the action runs. remote_exec_utils.run_action
+    starts the action and returns only when it has ended, so a thread finds the new process
+    among the running foreground processes (remote_exec_utils._CURRENT_FOREGROUND, the list
+    that a stop also reads)."""
+
+    def __init__(self, experiments_root: Path):
+        from . import remote_exec_utils as rx
+        self._running = rx._CURRENT_FOREGROUND
+        self._before = {id(p) for p in self._running}
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._watch, args=(experiments_root,),
+                                        name="note-action-group", daemon=True)
+        self._thread.start()
+
+    def _watch(self, experiments_root: Path) -> None:
+        while not self._done.is_set():
+            for proc in list(self._running):
+                if id(proc) not in self._before:
+                    _note_process_group(experiments_root, "action", proc)
+                    return
+            self._done.wait(0.05)
+
+    def stop(self) -> None:
+        self._done.set()
+        self._thread.join(timeout=1.0)
+
 
 @dataclass
 class TrialResult:
@@ -1122,6 +1187,10 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     local_env = config.local_setup(trial.host(factors))
     if local_env is not None:
         hooks = hooks.with_local_setup(*local_env)
+    # The run marker of this trial's project (run_trial holds it for an executed trial).
+    marker_root = Path(bags_dir).resolve().parents[1]
+    if not dry_run and isinstance(hooks, ProcessHooks):
+        hooks = hooks.noting_groups(marker_root)
     steps = {**DEFAULT_STEPS, **(steps or {})}
     #: The backend's word for one recording in what the runner prints.
     noun = config.backend().recorder.noun
@@ -1216,6 +1285,11 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     bag_dir = record_dir / name
     _ctx["label"] = bag_dir.name
     _ctx["bag_dir"] = bag_dir
+    if not dry_run:
+        _note_trial_in_marker(marker_root, trial, factors, config, bag_dir, target,
+                              link=bags_dir / bag_dir.name if external_record else None,
+                              runs_dir=bags_dir.parent / "runs", scratch=scratch_label is not None,
+                              storage=f"external:{record_dir}" if external_record else "repo")
     if external_record:
         print(f"[runner] recording to EXTERNAL storage: {record_dir}")
         print(f"[runner]   a symlink will be left at {bags_dir / bag_dir.name} so the "
@@ -1771,6 +1845,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                     pass
         if held and leaving is None:
             raise deferred_interrupt(held[0])
+    # For a run after a hard kill from here on (recover_killed_trial): the recorder and the
+    # stack have stopped.
+    run_marker.note(marker_root, trial_stage="after teardown")
 
     if not steps["record"]:
         # No recorder was asked for, so no bag and NO metadata: an unrecorded
@@ -2122,10 +2199,16 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
         # whether it is a simulation, which never moves a stop.
         run_marker.note(root, execution_host=trial.host(factors), label=trial.describe(),
                         robots=[r["name"] for r in getattr(config, "robots", None) or []] or None,
-                        simulation=bool(getattr(config, "simulation", False)))
+                        simulation=bool(getattr(config, "simulation", False)),
+                        session=session_id)
         _print_stop_targets(root)
-        return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
-                                 session_id=session_id, ledger=ledger, **kwargs)
+        try:
+            return _run_trial_logged(trial, factors, config, bags_dir, campaign_name=campaign_name,
+                                     session_id=session_id, ledger=ledger, **kwargs)
+        finally:
+            # The attempt is on record now (its ledger line, or its finalization after an
+            # interrupt): a later run has nothing of it to recover.
+            run_marker.note(root, trial=None, trial_stage=None)
 
 
 def hold_run_marker(experiments_root: Path, **info: Any) -> contextlib.ExitStack:
@@ -2135,15 +2218,135 @@ def hold_run_marker(experiments_root: Path, **info: Any) -> contextlib.ExitStack
     (2026-11-25, review B2-2: two runners started 1.5 s apart recorded every cell twice,
     each recording holding the other runner's lines). Here and not in main(), so a run
     started from the web interface, which calls run_plan, is refused too. The refusal is a
-    RunnerError, printed first so the run log says it.
+    RunnerError, printed first so the run log says it. So is a killed run of this machine
+    whose process groups still run (review B2-3), and the trial of a killed run whose groups
+    have ended is put on record first (recover_killed_trial).
     """
     stack = contextlib.ExitStack()
     try:
-        stack.enter_context(run_marker.running(experiments_root, **info))
+        stack.enter_context(run_marker.running(experiments_root, on_dead=recover_killed_trial,
+                                               **info))
     except run_marker.RunRefused as exc:
         print(_c("31;1", f"[runner] REFUSED - {exc}"), flush=True)
         raise RunnerError(str(exc)) from None
     return stack
+
+
+#: The abort reason of a trial whose runner was killed hard during the trial (2026-11-25).
+KILLED_REASON = "the runner was killed during the trial, no teardown ran"
+#: ... and after the recorder and the stack had stopped.
+KILLED_AFTER_TEARDOWN_REASON = ("the runner was killed after the recorder and the stack had "
+                                "stopped, before it wrote the trial")
+
+
+def _note_trial_in_marker(root: Path, trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
+                          config: RunnerConfig, bag_dir: Path, target: Any, *,
+                          link: Optional[Path], runs_dir: Path, scratch: bool,
+                          storage: str) -> None:
+    """Note the trial now starting in the run marker, with what a later run needs to put it
+    on record when this runner is killed hard (recover_killed_trial). Never fatal."""
+    try:
+        metadata = trial_metadata(trial, factors, config, trial_id=bag_dir.name)
+        metadata["bag_storage"] = storage
+        if scratch:
+            metadata["scratch"] = True
+        started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        attempt = attempt_record(trial, factors, config, TrialResult(trial, bag_dir, "interrupted"),
+                                 {"label": bag_dir.name}, started=started, campaign_name=None,
+                                 session_id=None, scratch=scratch)
+        run_marker.note(root, trial_stage="running", trial={
+            "bag_dir": str(bag_dir), "link": str(link) if link is not None else None,
+            "remote": getattr(target, "host", None) if target is not None else None,
+            "backend": config.backend().name, "runs_dir": str(runs_dir),
+            "metadata": metadata, "attempt": attempt})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[runner] the run marker does not name this trial ({exc}) - continuing")
+
+
+def recover_killed_trial(record: Dict[str, Any]) -> Optional[Path]:
+    """Put the trial of a runner killed hard on record (2026-11-25, review B2-3).
+
+    ``record`` is the run marker that runner left (run_marker calls this when its process
+    is gone and none of its process groups runs any more). A recording with data and no
+    trial_metadata.json gets metadata written as ABORTED, so it never counts and is no
+    longer an anonymous directory, and the attempt gets its ledger line as
+    ``interrupted``. A trial recorded on another host is only written to the ledger.
+    Returns the metadata path written, or None. Never raises.
+    """
+    pending = record.get("trial")
+    if not isinstance(pending, dict) or not pending.get("bag_dir"):
+        return None
+    try:
+        bag_dir = Path(pending["bag_dir"])
+        runs_dir = Path(pending.get("runs_dir") or bag_dir.parents[1] / "runs")
+        ledger = runs_dir / ATTEMPT_LEDGER_NAME
+        if _ledger_names(ledger, bag_dir.name):
+            return None   # the runner wrote its line just before it died
+        reason = (KILLED_AFTER_TEARDOWN_REASON if record.get("trial_stage") == "after teardown"
+                  else KILLED_REASON)
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        recovered = {"by": "the next run", "at": now, "runner_pid": record.get("pid"),
+                     "runner_host": record.get("host")}
+        meta_path = bag_dir / "trial_metadata.json"
+        written = None
+        if pending.get("remote"):
+            print(f"[runner] the killed trial {bag_dir.name} recorded on {pending['remote']}: "
+                  f"its recording is not checked from here")
+        elif bag_dir.is_dir() and not _metadata_in_place(meta_path) \
+                and backends.load(pending["backend"]).recorder.holds_data(bag_dir):
+            metadata = dict(pending.get("metadata") or {})
+            metadata.update(aborted=True, abort_reason=reason, notes=reason, _recovered=recovered)
+            from .remote_exec_utils import write_trial_file
+            write_trial_file(None, meta_path, json.dumps(metadata, indent=2))
+            written = meta_path
+            print(f"[runner] RECOVERED - {meta_path} written as aborted: {reason}")
+            link = pending.get("link")
+            if link and not os.path.lexists(link):
+                Path(link).parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(bag_dir, link)
+        meta = None
+        if not pending.get("remote") and _metadata_in_place(meta_path):
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        row = dict(pending.get("attempt") or {})
+        row.update(ts_end=now, status="interrupted",
+                   campaign="scratch" if row.get("scratch") else record.get("campaign"),
+                   session=record.get("session"), metadata_written=meta is not None,
+                   aborted=(meta or {}).get("aborted"), abort_reason=(meta or {}).get("abort_reason"),
+                   detail=reason, _recovered=recovered)
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, default=str) + "\n")
+        write_failure_report(row, runs_dir)
+        print(f"[runner] the killed attempt {bag_dir.name} is in {ledger} as interrupted")
+        return written
+    except Exception as exc:  # noqa: BLE001 - never fatal to the new run
+        print(f"[runner] the killed run's trial was not put on record ({exc})")
+        return None
+
+
+def _metadata_in_place(path: Path) -> bool:
+    """A trial_metadata.json with content (an empty one is what a failed write left)."""
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _ledger_names(ledger: Path, label: str) -> bool:
+    """True when the attempt ledger has a line for ``label``."""
+    try:
+        with ledger.open(encoding="utf-8") as handle:
+            for line in handle:
+                if label not in line:
+                    continue
+                try:
+                    if json.loads(line).get("trial_label") == label:
+                        return True
+                except (ValueError, AttributeError):
+                    continue
+    except OSError:
+        pass
+    return False
 
 
 def _print_stop_targets(experiments_root: Path) -> None:

@@ -5,10 +5,15 @@ B2-2: two runners started 1.5 s apart on one project recorded 8 trials for a cam
 wanted 4, each recording held the other runner's lines, and the second runner deleted the
 run marker while the first still ran. Started in the same second, two attempts shared one
 trial directory.
+
+B2-3: a runner killed with kill -9 during the action left its stack and recorder running, a
+recording with data and no metadata, and no ledger line, and the next run said nothing.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -121,4 +126,104 @@ def test_two_runners_started_together_record_the_campaign_once(project):
     trials = ti.load_trials(project, "plant")
     assert sorted(t.metadata["rate"] for t in trials) == ["fast", "slow"], outs
     assert all(t.status == "usable" for t in trials)
+    assert not run_marker.marker_path(project).exists()
+
+
+# --------------------------------------------------------------------------- #
+# B2-3: a runner killed hard (kill -9 during the action) left its stack and recorder running,
+# a recording with data and no metadata, and no ledger line. The next run said nothing.
+# --------------------------------------------------------------------------- #
+def _dead_pid() -> int:
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    return done.pid
+
+
+def _kill_processes_under(root: Path) -> None:
+    """SIGKILL what this test started and left: every process whose working directory lies
+    under ``root``, the test's own directory."""
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            if os.readlink(entry / "cwd").startswith(str(root)):
+                os.kill(int(entry.name), signal.SIGKILL)
+        except OSError:
+            continue
+
+
+def _wait_until(predicate, timeout: float = 20.0, what: str = "") -> None:
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        if predicate():
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def test_a_killed_run_whose_processes_still_run_refuses_the_next_run(project):
+    import socket
+    leftover = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        run_marker.marker_path(project).write_text(json.dumps({
+            "host": socket.gethostname(), "pid": _dead_pid(), "experiment": "plant",
+            "started": "2026-11-25T10:00:00+00:00",
+            "groups": [{"name": "recorder", "pgid": leftover.pid}]}), encoding="utf-8")
+        config = tr.RunnerConfig.load("plant", project)
+        with pytest.raises(tr.RunnerError, match=rf"(?s)recorder: process group {leftover.pid}.*"
+                                                 rf"kill -INT -- -{leftover.pid}"):
+            tr.run_plan(_plan(project), config, project / "plant" / "recordings", dry_run=False)
+        assert leftover.poll() is None, "the runner never stops a leftover group itself"
+    finally:
+        leftover.kill()
+        leftover.wait()
+    # With the group gone, the next run replaces the stale marker and runs.
+    assert tr.run_plan(_plan(project), config, project / "plant" / "recordings",
+                       dry_run=False, limit=0) == []
+    assert not run_marker.marker_path(project).exists()
+
+
+@pytest.mark.real_sleep
+def test_the_trial_of_a_runner_killed_during_the_action_is_put_on_record(project):
+    (project / "plant" / "scripts" / "observe.py").write_text("import time\ntime.sleep(60)\n",
+                                                             encoding="utf-8")
+    runner = subprocess.Popen(
+        [sys.executable, "-m", "robofacts.cli", "run",
+         str(project / "plant" / "campaigns" / "rates.yaml"), "--experiments-root", str(project),
+         "--execute", "--no-pause", "--limit", "1"],
+        cwd=project.parent, env=_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    try:
+        def action_noted():
+            record = run_marker.read(project) or {}
+            return "action" in [g.get("name") for g in record.get("groups") or []]
+        _wait_until(action_noted, what="the action's process group in the run marker")
+        record = run_marker.read(project)
+        groups = [g["pgid"] for g in record["groups"]]
+        assert sorted(g["name"] for g in record["groups"]) == ["action", "recorder", "stack"]
+        runner.kill()   # kill -9: no teardown, no metadata, no ledger line
+        runner.wait()
+        config = tr.RunnerConfig.load("plant", project)
+        bags = project / "plant" / "recordings"
+        with pytest.raises(tr.RunnerError, match="kill -INT -- -") as refused:
+            tr.run_plan(_plan(project), config, bags, dry_run=False)
+        commands = [int(g) for g in re.findall(r"kill -INT -- -(\d+)", str(refused.value))]
+        assert sorted(commands) == sorted(groups)
+        for pgid in commands:   # what the operator does with the printed commands
+            os.killpg(pgid, signal.SIGINT)
+        _wait_until(lambda: not any(run_marker.group_alive(g) for g in groups),
+                    what="the leftover groups to stop")
+        assert tr.run_plan(_plan(project), config, bags, dry_run=False, limit=0) == []
+    finally:
+        if runner.poll() is None:
+            runner.kill()
+        _kill_processes_under(project.parent)
+    (trial,) = ti.load_trials(project, "plant")
+    assert trial.metadata["aborted"] is True and trial.status != "usable"
+    assert trial.metadata["abort_reason"] == tr.KILLED_REASON
+    rows = [json.loads(line) for line in (project / "plant" / "runs" / tr.ATTEMPT_LEDGER_NAME)
+            .read_text(encoding="utf-8").splitlines()]
+    assert [(r["trial_label"], r["status"], r["metadata_written"]) for r in rows] == \
+        [(trial.bag_dir.name, "interrupted", True)]
+    assert rows[0]["campaign"] == "rates" and rows[0]["abort_reason"] == tr.KILLED_REASON
     assert not run_marker.marker_path(project).exists()
