@@ -178,7 +178,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIALS_STOP_LATCH", str(latch))
     monkeypatch.delenv("CF_URI", raising=False)
     monkeypatch.setattr(cf_hover.time, "sleep", lambda s: _real_sleep(min(s, 0.005)))
-    handlers = {s: cf_hover.signal.getsignal(s) for s in (cf_hover.signal.SIGINT, cf_hover.signal.SIGTERM)}
+    handlers = {s: cf_hover.signal.getsignal(s) for s in cf_hover.LANDING_SIGNALS}
     yield {"cfg": cfg, "latch": latch, "log": tmp_path / "flight.jsonl"}
     for signum, handler in handlers.items():   # main() installs its own, give pytest its Ctrl+C back
         cf_hover.signal.signal(signum, handler)
@@ -237,6 +237,43 @@ def test_a_signal_lands_the_drone(env):
     rc, drone, _, log = hover(env, hover_s="30", on_tick=send_sigterm)
     assert rc == cf_hover.STOP_RC and "land" in drone.calls
     assert [e["reason"] for e in log if e.get("event") == "land"] == ["signal SIGTERM"]
+
+
+#: Runs one hover in a child process and sends it a signal in the air. A signal whose default
+#: action ends the process would end pytest itself in this process.
+SIGNAL_CHILD = """
+import json, signal, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import test_cflib_hover as t
+t.cf_hover.time.sleep = lambda s: t._real_sleep(min(s, 0.005))
+tmp, name = Path(sys.argv[2]), sys.argv[3]
+
+def send(drone):
+    if drone.z >= 0.5 and drone.ticks > 3 and not getattr(drone, "sent", False):
+        drone.sent = True
+        signal.raise_signal(getattr(signal, name))
+
+rc, drone, _, log = t.hover({"cfg": tmp / "drone.yaml", "log": tmp / "flight.jsonl"},
+                            hover_s="30", on_tick=send)
+print(json.dumps({"rc": rc, "calls": drone.calls,
+                  "land": [e["reason"] for e in log if e.get("event") == "land"]}))
+"""
+
+
+@pytest.mark.parametrize("name", ["SIGHUP", "SIGQUIT"])
+def test_a_hang_up_or_a_quit_lands_the_drone_like_sigterm(tmp_path, name):
+    """Review finding (2026-11-25): a closed terminal, a killed tmux pane or a lost ssh session
+    sends SIGHUP. Before the fix, the action died in the air at once, after arm, takeoff, climb."""
+    (tmp_path / "drone.yaml").write_text(json.dumps(CFG))
+    out = subprocess.run([sys.executable, "-c", SIGNAL_CHILD, str(Path(__file__).resolve().parent),
+                          str(tmp_path), name], cwd=tmp_path, env=project_env(tmp_path),
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, f"the action died on {name} (rc={out.returncode}): {out.stderr[-2000:]}"
+    result = json.loads(out.stdout.strip().splitlines()[-1])
+    assert result["rc"] == cf_hover.STOP_RC
+    assert result["calls"] == ["arm", "takeoff", "climb", "land", "stop_commander", "disarm", "close"]
+    assert result["land"] == [f"signal {name}"]
 
 
 def test_an_error_in_flight_lands_the_drone(env):

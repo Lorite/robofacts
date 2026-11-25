@@ -16,7 +16,8 @@ robots: [crazyflie]
 record_sources: [experiments/cflib_hover/runs/flight.jsonl]
 
 # The one foreground command that IS the trial. It runs in the project root. It refuses before
-# arming when the drone is not ready, and it lands on Ctrl+C, SIGTERM and the stop latch.
+# arming when the drone is not ready, and it lands on Ctrl+C, SIGTERM, SIGHUP, SIGQUIT and the
+# stop latch.
 action:
   command: "python3 experiments/cflib_hover/scripts/cf_hover.py --log experiments/cflib_hover/runs/flight.jsonl --hover-s {hover_s}"
 

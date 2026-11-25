@@ -13,8 +13,8 @@ In order:
    flew away): flow off on the floor (``motion.disable`` 1), ``stage1_m`` in ``stage1_s``,
    flow back on once the estimate passes ``flow_on_m`` (or at the end of the stage), then
    the climb to ``height_m``.
-3. Holds for ``--hover-s`` and LANDS (``land_m`` in ``land_s``) on SIGINT or SIGTERM or a
-   fresh stop latch (exit 5), when the estimate leaves the geofence (exit 6), when no state
+3. Holds for ``--hover-s`` and LANDS (``land_m`` in ``land_s``) on SIGINT, SIGTERM, SIGHUP or
+   SIGQUIT or a fresh stop latch (exit 5), when the estimate leaves the geofence (exit 6), when no state
    sample has arrived for ``stale_s`` (exit 7, the radio link is probably lost: the land
    command is still sent, and the operator is told to use the physical stop if the drone keeps
    hovering), at the end of the hover, and on any error (a ``finally``).
@@ -40,6 +40,10 @@ from robofacts.stop_latch_clear import STOP_LATCH_MAX_AGE_S, fresh_latch, latch_
 
 OK_RC, ERROR_RC, REFUSED_RC, STOP_RC, GEOFENCE_RC, STALE_RC = 0, 1, 2, 5, 6, 7
 POLL_S = 0.02
+#: The signals that land the drone. The default action of SIGHUP and SIGQUIT ends the process at
+#: once, in the air. A closed terminal, a killed tmux pane or a lost ssh session sends SIGHUP,
+#: and Ctrl+\ sends SIGQUIT (2026-11-25).
+LANDING_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)
 
 
 def say(text: str) -> None:
@@ -222,8 +226,8 @@ def main(argv=None, drone_factory=CflibDrone) -> int:
     since = time.time()
     latch = latch_path()
     stop = Stop(latch, since)
-    signal.signal(signal.SIGINT, stop.on_signal)
-    signal.signal(signal.SIGTERM, stop.on_signal)
+    for signum in LANDING_SIGNALS:
+        signal.signal(signum, stop.on_signal)
     log = JsonlLog(args.log)
     log.write("event", event="start", uri=cfg["uri"], hover_s=args.hover_s)
 
