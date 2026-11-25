@@ -37,6 +37,12 @@ cd ~/ros2_ws && colcon build --packages-select robofacts robofacts_ros2 && sourc
 trials --help                         # or: ros2 run robofacts_ros2 trials --help
 ```
 
+`robofacts_ros2` declares `robofacts` as a dependency, but `robofacts` has no `package.xml` and no rosdep key. To install the other dependencies, tell rosdep to skip it, because colcon builds `robofacts` from the same clone:
+
+```bash
+rosdep install --from-paths src --ignore-src -y --skip-keys robofacts
+```
+
 colcon builds `robofacts` as a plain Python package and before `robofacts_ros2`. A project names its backend in `trials.yaml`: `backend: process` without ROS, `backend: ros2` with it.
 
 ## Quickstart
