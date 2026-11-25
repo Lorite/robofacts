@@ -2249,6 +2249,10 @@ def shut_down(runs_mgr: Optional["RunManager"], cause: BaseException) -> int:
                   f"flight lands first, then the recorder and the stack stop. Ctrl-C again exits "
                   f"at once.", file=sys.stderr)
             from robofacts.remote_exec_utils import LAND_WAIT_S, end_current_action
+            # A second interrupt during the landing kills the action and comes back out of
+            # end_current_action, so the server exits at once, as the line above says. Until
+            # the third review of 2026-11-25 it was consumed there, and the server then
+            # waited up to 210 s for the verify and slim steps.
             end_current_action(cause)
             deadline = time.monotonic() + LAND_WAIT_S + 120
             while runs_mgr.busy() and time.monotonic() < deadline:

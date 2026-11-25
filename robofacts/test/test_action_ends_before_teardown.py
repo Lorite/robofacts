@@ -748,3 +748,60 @@ time.sleep(30)
     assert rex.terminate_current_foreground() is True
     worker.join(timeout=20)
     assert results[0].returncode == -signal.SIGTERM
+
+
+# --------------------------------------------------------------------------- #
+# Round 3 (A3-7): a second interrupt while the web interface's shutdown waits for a landing
+# --------------------------------------------------------------------------- #
+class SecondInterrupt:
+    """The time module of remote_exec_utils, except that its ``after``-th sleep raises
+    KeyboardInterrupt: a second Ctrl-C that arrives while the runner waits for a landing,
+    without a real signal to the test process."""
+
+    def __init__(self, after: int):
+        self.calls, self.after = 0, after
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, seconds):
+        self.calls += 1
+        if self.calls == self.after:
+            raise KeyboardInterrupt
+        time.sleep(seconds)
+
+
+#: An action that does not land: it ignores Ctrl-C and SIGTERM until it is killed.
+STUBBORN = """\
+import signal, sys, time
+from pathlib import Path
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+Path(sys.argv[1]).write_text("started\\n")
+time.sleep(60)
+"""
+
+
+def start_stubborn_action(tmp_path: Path) -> threading.Thread:
+    mark, script = tmp_path / "stubborn.txt", tmp_path / "stubborn.py"
+    script.write_text(STUBBORN, encoding="utf-8")
+    worker = threading.Thread(target=lambda: rex.run_action(
+        [sys.executable, str(script), str(mark)], None, cwd=tmp_path), daemon=True)
+    worker.start()
+    _wait_for(mark, "started")
+    return worker
+
+
+@pytest.mark.real_sleep
+def test_a_second_interrupt_during_the_landing_comes_back_out_of_end_current_action(tmp_path, monkeypatch):
+    """A3-7: end_current_action consumed the second Ctrl-C (it killed the action and
+    returned), so the web interface then waited up to 210 s although it had said "Ctrl-C
+    again exits at once". The second interrupt is now raised again after the kill."""
+    worker = start_stubborn_action(tmp_path)
+    monkeypatch.setattr(rex, "time", SecondInterrupt(after=5))
+    t0 = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        rex.end_current_action(KeyboardInterrupt())
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "the action was not killed"
+    assert time.monotonic() - t0 < 10

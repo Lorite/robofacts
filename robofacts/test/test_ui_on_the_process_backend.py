@@ -566,3 +566,33 @@ time.sleep(30)
     assert ui.shut_down(runs, rex.RunnerSignal(signal.SIGTERM)) == 0
     assert mark.read_text(encoding="utf-8") == "landed on SIGTERM\n"
     assert runs.aborted == ["r1"]
+
+
+@pytest.mark.real_sleep
+def test_a_second_interrupt_during_the_shutdown_exits_at_once(tmp_path, monkeypatch, capsys):
+    """A3-7: "Ctrl-C again exits at once" was false. The second Ctrl-C was consumed while the
+    shutdown waited for the landing, and the server then waited for the verify and slim
+    steps (here: a run that stays busy for 25 s after its action ended)."""
+    from types import SimpleNamespace
+    pytest.importorskip("flask")
+    from robofacts import remote_exec_utils as rex
+    from robofacts.ui import app as ui
+    from test_action_ends_before_teardown import SecondInterrupt, start_stubborn_action
+    start_stubborn_action(tmp_path)
+    busy_until = time.monotonic() + 25
+
+    class Runs:
+        def busy(self):
+            return time.monotonic() < busy_until
+
+        def current(self):
+            return SimpleNamespace(run_id="r1")
+
+        def abort(self, run_id):
+            pass
+
+    monkeypatch.setattr(rex, "time", SecondInterrupt(after=5))
+    t0 = time.monotonic()
+    assert ui.shut_down(Runs(), KeyboardInterrupt()) == 1
+    assert time.monotonic() - t0 < 10, "the shutdown waited after the second interrupt"
+    assert "WARNING: a campaign run was ACTIVE" in capsys.readouterr().err

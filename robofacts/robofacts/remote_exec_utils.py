@@ -442,7 +442,10 @@ def end_current_action(reason: BaseException) -> bool:
     its server is stopped with Ctrl-C: the worker thread that runs the trial gets no signal,
     and before the second review of 2026-11-25 the server exited with the action still
     flying. When nothing runs yet (the settle time, the gate), the stop is noted for the
-    trial in progress like the web interface's stop (see _STOP_PENDING)."""
+    trial in progress like the web interface's stop (see _STOP_PENDING).
+
+    A second interrupt while it waits for the landing kills the action at once and is raised
+    again afterwards, so the caller stops waiting too (see _end_interrupted)."""
     with _STOP_LOCK:
         holds = list(_HOLDS)
         running = [p for p in _CURRENT_FOREGROUND if _running(p)]
@@ -451,7 +454,9 @@ def end_current_action(reason: BaseException) -> bool:
     for event in holds:
         event.set()
     for proc in running:
-        _end_interrupted(proc, reason, action=getattr(proc, "_robofacts_action", False))
+        second = _end_interrupted(proc, reason, action=getattr(proc, "_robofacts_action", False))
+        if second is not None:
+            raise second
     return bool(holds or running)
 
 
@@ -490,7 +495,7 @@ def _drain(proc: subprocess.Popen, captured: list) -> threading.Thread:
 
 
 def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool,
-                     signalled: bool = False) -> None:
+                     signalled: bool = False) -> BaseException | None:
     """The runner leaves a foreground process early (Ctrl-C, SIGTERM, SIGHUP, an error).
 
     An action must END before the runner's teardown stops the recorder and the stack: a
@@ -508,9 +513,13 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
     exits leaves the flight in the group (second review of 2026-11-25).
 
     ``signalled``: the group already got its stop (terminate_current_foreground), so the
-    first signal is not sent again: a second SIGTERM can restart a landing."""
+    first signal is not sent again: a second SIGTERM can restart a landing.
+
+    Returns the second interrupt when one cut the wait short (the action was killed then),
+    else None, so a caller that waits on its own afterwards can stop waiting too (third
+    review of 2026-11-25: the web interface consumed it here and then waited up to 210 s)."""
     if not _running(proc):
-        return
+        return None
     # A Ctrl-C goes on as SIGINT, which the action got from the terminal before it led its own
     # group. Any other cause gets SIGTERM, the signal an action lands on (a closed terminal's
     # SIGHUP would end most scripts without a landing).
@@ -525,6 +534,7 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
         print(f"[runner] waiting up to {wait_s:.0f} s for the action to end (a flight lands) "
               f"before the stack stops; Ctrl-C again kills it now", flush=True)
     t0 = time.monotonic()
+    second: BaseException | None = None
     try:
         while _running(proc) and time.monotonic() - t0 < wait_s:
             time.sleep(0.1)
@@ -535,7 +545,8 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
             t1 = time.monotonic()
             while _running(proc) and time.monotonic() - t1 < TERM_GRACE_S:
                 time.sleep(0.1)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as again:
+        second = again
         print("[runner] second interrupt: the action is killed now", flush=True)
     if _running(proc):
         print(f"[runner] the action did not end within {time.monotonic() - t0:.0f} s: SIGKILL",
@@ -547,6 +558,7 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
             pass
         if proc.pid in _OWN_GROUP:
             _await_group(proc.pid, 2.0)
+    return second
 
 
 def _end_stopped_leftovers(proc: subprocess.Popen) -> None:
