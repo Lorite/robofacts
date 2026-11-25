@@ -2011,6 +2011,11 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
         probe.close()
 
     user = os.environ.get("EXPERIMENTS_UI_USER") or None
+    # The whole server works on this one experiments root: a setting, the backend and the
+    # commands it starts come from this project, not from the project around the working
+    # directory (second review of 2026-11-25; `trials run` does the same, see
+    # roots.exported_experiments_root).
+    os.environ[roots.ENV_EXPERIMENTS_ROOT] = str(Path(args.experiments_root).resolve())
     app = create_app(args.experiments_root, password, user=user, view_only=view_only,
                      cache_dir=args.cache_dir)
     if view_only:

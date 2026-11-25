@@ -413,6 +413,28 @@ def test_the_settings_come_from_the_given_experiments_root_not_the_working_direc
     assert "TRIALS_EXPERIMENTS_ROOT" not in os.environ, "the export is restored"
 
 
+def test_the_project_root_and_trials_roots_follow_the_given_experiments_root(
+        tmp_path, monkeypatch, capsys):
+    """Second review of 2026-11-25: inside another project (`trials init` writes
+    `project_root: .`), the project root of the given experiments root was the other one's,
+    for `trials roots` and for the web interface."""
+    from robofacts import cli, roots
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n"
+                                       "backend: process\n", encoding="utf-8")
+    monkeypatch.chdir(other)
+    for var in ("TRIALS_PROJECT_ROOT", "TRIALS_EXPERIMENTS_ROOT"):
+        monkeypatch.delenv(var, raising=False)
+    assert roots.project_root(None, experiments=experiments) == root.resolve()
+    assert cli.main(["roots", "--experiments-root", str(experiments)]) == 0
+    out = capsys.readouterr().out
+    assert f"project root     : {root.resolve()}" in out, out
+    assert str(root.resolve() / "trials.yaml") in out, out
+
+
 @pytest.mark.real_sleep
 def test_a_run_started_inside_another_project_reads_its_own_project(tmp_path, monkeypatch, capsys):
     """Found 2026-11-25: from a directory of another project, the gate of the given project

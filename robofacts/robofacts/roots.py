@@ -129,12 +129,19 @@ def project_root(explicit: Optional[PathLike] = None, *,
                  experiments: Optional[PathLike] = None,
                  start: Optional[PathLike] = None) -> Path:
     """Resolve the project root: explicit, environment, trials.yaml, else the
-    parent of the experiments root."""
+    parent of the experiments root.
+
+    The trials.yaml is the one of the given experiments root when ``start`` is not given:
+    the project whose experiments run, not the project around the working directory. Before
+    the second review of 2026-11-25, ``trials ui --experiments-root X`` and ``trials roots``
+    started inside another project took that project's root and backend."""
     if explicit:
         return Path(explicit).expanduser().resolve()
     env = os.environ.get(ENV_PROJECT_ROOT)
     if env:
         return Path(env).expanduser().resolve()
+    if start is None and experiments:
+        start = Path(experiments).expanduser()
     found = _from_project_file("project_root", start)
     if found is not None:
         return found

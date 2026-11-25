@@ -208,10 +208,12 @@ def _roots(argv):
     except roots.RootNotFound as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    project_file = roots.find_project_file()
+    # The project file in force for this experiments root, not the one around the working
+    # directory (the same rule the runner follows, see roots.project_root).
+    project_file = roots.find_project_file(args.experiments_root)
     print(f"experiments root : {args.experiments_root}")
     print(f"project root     : {args.project_root}")
-    print(f"{roots.PROJECT_FILE:<17}: {project_file or '(none above the working directory)'}")
+    print(f"{roots.PROJECT_FILE:<17}: {project_file or '(none above the experiments root)'}")
     print(f"environment      : {roots.ENV_EXPERIMENTS_ROOT}={os.environ.get(roots.ENV_EXPERIMENTS_ROOT, '')!s} "
           f"{roots.ENV_PROJECT_ROOT}={os.environ.get(roots.ENV_PROJECT_ROOT, '')!s}")
     return 0
