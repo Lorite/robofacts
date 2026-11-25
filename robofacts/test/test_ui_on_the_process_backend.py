@@ -209,10 +209,12 @@ def wait_until_ended(run, timeout: float = 20.0):
 
 def test_a_dry_run_during_an_executed_campaign_does_not_take_the_rig(bare, held_runner, monkeypatch):
     """C2-1: a dry run took the single run slot, so a second EXECUTE was accepted and the stop
-    button aborted the dry run instead of the campaign that flew."""
+    button aborted the dry run instead of the campaign that flew. Since A3-5 (round 3) the
+    dry run is refused while the campaign runs."""
     executed = bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth())))
-    dry = wait_until_ended(bare.runs.get(run_id_of(bare.c.post("/run", data=DRY, headers=auth()))))
-    assert dry.state == "finished" and not dry.executed
+    dry = bare.c.post("/run", data=DRY, headers=auth())
+    assert dry.status_code == 409 and "one at a time, a dry run too" in dry.get_data(as_text=True)
+    assert not [r for r in bare.runs.all() if not r.executed]
     assert bare.runs.busy() and bare.runs.current() is executed
     second = bare.c.post("/run", data=EXECUTE, headers=auth())
     assert second.status_code == 409 and "already running" in second.get_data(as_text=True)
@@ -242,7 +244,8 @@ def test_the_run_slot_is_claimed_inside_start_under_its_lock(bare, held_runner):
     first = bare.runs.start(executed=True, **args)
     with pytest.raises(bare.ui.RunSlotBusy):
         bare.runs.start(executed=True, **args)
-    wait_until_ended(bare.runs.start(executed=False, **args))
+    with pytest.raises(bare.ui.RunInProgress):   # A3-5: not even a dry run beside it
+        bare.runs.start(executed=False, **args)
     assert bare.runs.current() is first and bare.runs.busy()
 
 
@@ -596,3 +599,42 @@ def test_a_second_interrupt_during_the_shutdown_exits_at_once(tmp_path, monkeypa
     assert ui.shut_down(Runs(), KeyboardInterrupt()) == 1
     assert time.monotonic() - t0 < 10, "the shutdown waited after the second interrupt"
     assert "WARNING: a campaign run was ACTIVE" in capsys.readouterr().err
+
+
+def test_one_run_at_a_time_a_dry_run_too_so_the_logs_never_mix(bare, monkeypatch):
+    """A3-5: each run's log is a redirect of the process-wide stdout. A dry run that overlapped
+    an executed run nested the redirects in the wrong order: the executed run's log stopped
+    getting lines, and sys.stdout stayed on a finished run's tee. A run, dry or executed, is
+    refused while another one is in progress, and the stop still targets the executed run."""
+    import threading
+    from robofacts import trial_runner as tr
+    release = {True: threading.Event(), False: threading.Event()}
+
+    def run_plan(plan, config, bags_dir, *, dry_run=True, **kwargs):
+        print("dry line" if dry_run else "executed line", flush=True)
+        release[not dry_run].wait(timeout=30)
+        return []
+
+    monkeypatch.setattr(tr, "run_plan", run_plan)
+    stdout = sys.stdout
+    try:
+        dry = bare.runs.get(run_id_of(bare.c.post("/run", data=DRY, headers=auth())))
+        refused = bare.c.post("/run", data=EXECUTE, headers=auth())
+        assert refused.status_code == 409, refused.get_data(as_text=True)[:500]
+        assert "a dry run of grid" in refused.get_data(as_text=True)
+        assert not bare.runs.busy(), "a dry run never holds the rig"
+        release[False].set()
+        wait_until_ended(dry)
+        executed = bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth())))
+        refused = bare.c.post("/run", data=DRY, headers=auth())
+        assert refused.status_code == 409 and "an executed run of grid" in refused.get_data(as_text=True)
+        assert bare.runs.busy() and bare.runs.current() is executed
+        release[True].set()
+        wait_until_ended(executed)
+    finally:
+        release[True].set()
+        release[False].set()
+    dry_log, executed_log = ([l["text"] for l in r.log] for r in (dry, executed))
+    assert "dry line" in dry_log and "executed line" not in dry_log, dry_log
+    assert "executed line" in executed_log and "dry line" not in executed_log, executed_log
+    assert sys.stdout is stdout, "sys.stdout stayed on a run's tee"

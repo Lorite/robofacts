@@ -241,6 +241,21 @@ class RunSlotBusy(RuntimeError):
     """An executed run or an exploration was refused: another one holds the rig."""
 
 
+class RunInProgress(RunSlotBusy):
+    """A run was refused because another run of this interface is in progress, a dry run
+    included (see RunManager._claim)."""
+
+
+def one_run_at_a_time(other: "ActiveRun") -> str:
+    """What the routes answer (409) when ``other`` is still in progress."""
+    what = ("a dry run" if not other.executed else
+            "an exploration" if other.kind == "explore" else "an executed run")
+    return (f"Another run is still in progress in this interface: {what} of {other.campaign} "
+            f"({other.run_id}). The interface runs one at a time, a dry run too: a run's log is "
+            f"what the server prints while it runs, and two runs at once would mix their logs. "
+            f"Wait for it to end, or stop it first.")
+
+
 class RunManager:
     """Runs a campaign off the request thread so the page can show progress.
 
@@ -256,6 +271,12 @@ class RunManager:
     flight. The check also lives inside ``start`` and ``start_explore``, under
     the lock that claims the slot, so two EXECUTE posts at the same moment
     cannot both pass it.
+
+    No run starts while another one is in progress, a dry run included (third
+    review of 2026-11-25): each run's log is a redirect of the process-wide
+    stdout (see _Tee), and two at once broke the executed run's log. ``busy()``
+    still counts only the run that holds the rig, so the stop always targets
+    the executing run.
     """
 
     def __init__(self):
@@ -265,15 +286,22 @@ class RunManager:
         self._current: Optional[str] = None
 
     def _claim(self, run: ActiveRun, after: Optional[ActiveRun] = None) -> None:
-        """Give the rig's slot to ``run``, or raise RunSlotBusy. The caller holds the lock.
+        """Let ``run`` start, or raise RunSlotBusy. The caller holds the lock. An executed
+        run or an exploration takes the rig's slot, a dry run does not.
 
         ``after`` is an exploration that ``run`` replaces: it is being stopped,
         and the new one waits for its stack to come down before it starts.
         """
+        live = ("running", "aborting")
         holder = self._runs.get(self._current) if self._current else None
-        if holder is not None and holder is not after and holder.state in ("running", "aborting"):
+        if (run.executed and holder is not None and holder is not after
+                and holder.state in live):
             raise RunSlotBusy(SLOT_BUSY)
-        self._current = run.run_id
+        other = next((r for r in self._runs.values() if r is not after and r.state in live), None)
+        if other is not None:
+            raise RunInProgress(one_run_at_a_time(other))
+        if run.executed:
+            self._current = run.run_id
 
     def current(self) -> Optional[ActiveRun]:
         with self._lock:
@@ -329,8 +357,7 @@ class RunManager:
                         executed=executed, operator_steps=list(operator_steps or []),
                         live_steps=list(live_steps or []))
         with self._lock:
-            if executed:
-                self._claim(run)
+            self._claim(run)
             self._runs[run_id] = run
 
         def record(result) -> None:
@@ -351,11 +378,13 @@ class RunManager:
 
             Caveat: ``redirect_stdout`` swaps the process-wide ``sys.stdout``,
             so anything else printing while a run is active also lands in that
-            run's log. Tolerable only because RunManager permits exactly one
-            executed run at a time and nothing else here writes to stdout (a
-            dry run beside it prints only its plan, which may then show in
-            both logs); if either stops being true, pass an explicit log
-            callback into run_plan instead.
+            run's log, and two runs at once nest their redirects in the wrong
+            order: the later one's log stopped getting lines, and ``sys.stdout``
+            stayed on a finished run's tee (a dry run during an executed run,
+            third review of 2026-11-25). RunManager therefore starts one run at
+            a time, a dry run too, and nothing else here writes to stdout. If
+            either stops being true, pass an explicit log callback into
+            run_plan instead.
             """
 
             def __init__(self, stream, sink):
@@ -1687,6 +1716,8 @@ def create_app(experiments_root: Optional[Path] = None,
                                       operator_steps=annotate_steps(campaign.operator_steps),
                                       layouts=cache.get(experiment).layouts, picker=picker,
                                       after=after)
+        except RunInProgress as exc:
+            return error(str(exc), 409, crumbs)
         except RunSlotBusy:
             return error("A campaign or an exploration is already running. Stop it first: "
                          "two stacks on one graph would fight over every topic.", 409, crumbs)
