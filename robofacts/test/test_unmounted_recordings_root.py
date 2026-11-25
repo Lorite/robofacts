@@ -60,3 +60,30 @@ def test_a_slim_copy_or_a_deleted_recording_is_not_an_unmounted_disk(tmp_path):
     os.symlink(gone / "t2", recordings / "t2")
     assert ti.unmounted_recordings(experiments, "plant") == {}
     ti.require_recordings_mounted(experiments, "plant")
+
+
+def test_the_web_interface_and_the_mcp_server_show_no_plan_while_the_disk_is_away(
+        tmp_path, monkeypatch):
+    """The campaign page, /api/plan, /run and the MCP server's plan computed coverage without
+    the recordings of the missing disk (merge of round 2)."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    rd = backend.record_dirs(experiments)
+    os.symlink(tmp_path / "disk" / "plant" / rd["recordings"] / "t1",
+               experiments / "plant" / rd["recordings"] / "t1")
+    from robofacts.mcp import queries
+    with pytest.raises(queries.ToolInputError, match="is not mounted"):
+        queries.plan_campaign("plant", "rates")
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        pytest.skip("the web interface needs Flask")
+    from robofacts.ui.app import create_app
+    client = create_app(experiments, None).test_client()
+    page = client.get("/e/plant/c/rates")
+    assert page.status_code == 409 and b"is not mounted" in page.data
+    api = client.get("/api/plan/plant/rates.json")
+    assert api.status_code == 409 and "is not mounted" in api.get_json()["error"]
+    run = client.post("/run", data={"experiment": "plant", "campaign": "rates", "go": "dry"})
+    assert run.status_code == 409 and b"is not mounted" in run.data

@@ -87,6 +87,23 @@ def _tail(text: str, lines: int = TAIL_LINES) -> List[str]:
     return [line for line in text.strip().splitlines()[-lines:]] if text.strip() else []
 
 
+def _unmounted(root: Path, experiment: str) -> str:
+    """Why no plan can be computed because recordings lie on a disk that is not mounted
+    (review B2-8: they would read as missing cells), else ""."""
+    from .. import trial_index as ti
+    try:
+        ti.require_recordings_mounted(root, experiment)
+    except ti.RecordingsNotMounted as exc:
+        return str(exc)
+    return ""
+
+
+def _require_mounted(root: Path, experiment: str) -> None:
+    why = _unmounted(root, experiment)
+    if why:
+        raise ToolInputError(why)
+
+
 def experiments_root() -> Path:
     try:
         return roots.experiments_root()
@@ -247,7 +264,7 @@ def list_campaigns(experiment: str) -> Dict[str, Any]:
             "preflight_checklist": campaign.preflight_checklist or "config/preflight_checklist.json",
             "order": campaign.order or None,
         })
-        refusal = cs.contract_refusal(campaign, root)
+        refusal = cs.contract_refusal(campaign, root) or _unmounted(root, experiment)
         if refusal:
             entry["error"] = refusal
         else:
@@ -262,6 +279,7 @@ def plan_campaign(experiment: str, campaign: str,
                   include_unverified: bool = False) -> Dict[str, Any]:
     from .. import campaign_plan as cp, trial_index as ti
     root, path, loaded = _load_campaign(experiment, campaign, factor_levels)
+    _require_mounted(root, loaded.experiment)
     plan = cp.build_plan(loaded, ti.load_trials(root, loaded.experiment), include_unverified)
     result = plan.to_dict()
     result["schedule"] = [{"values": item.cell.values, "repetition": item.repetition,
@@ -292,6 +310,7 @@ def dry_run_campaign(experiment: str, campaign: str,
     problems = tr.gate_factor_problems(loaded, config, "")
     if problems:
         raise ToolInputError("; ".join(problems))
+    _require_mounted(root, loaded.experiment)
     plan = cp.build_plan(loaded, ti.load_trials(root, loaded.experiment), include_unverified)
     recordings = root / loaded.experiment / backend.record_dirs(root)["recordings"]
     with quiet() as log:

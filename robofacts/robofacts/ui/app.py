@@ -1295,6 +1295,11 @@ def create_app(experiments_root: Optional[Path] = None,
         except cs.SpecError as exc:
             return error(str(exc), 400, crumbs, title=f"Campaign {name} does not load. "
                          f"`trials plan` refuses it for the same reason:")
+        try:
+            # Recordings on a disk that is not mounted would read as missing cells (B2-8).
+            ti.require_recordings_mounted(root(), experiment)
+        except ti.RecordingsNotMounted as exc:
+            return error(str(exc), 409, crumbs, title="The plan cannot be computed:")
         data = cache.get(experiment)
         plan = cp.build_plan(campaign, data.trials, include_unverified)
         warnings = cs.validate_against_metadata_contract(campaign, root())
@@ -1569,6 +1574,10 @@ def create_app(experiments_root: Optional[Path] = None,
             config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
             return error(str(exc), 400)
+        try:
+            ti.require_recordings_mounted(root(), experiment)
+        except ti.RecordingsNotMounted as exc:
+            return error(str(exc), 409)
 
         plan = cp.build_plan(campaign, ti.load_trials(root(), experiment), include_unverified)
 
@@ -2051,6 +2060,10 @@ def create_app(experiments_root: Optional[Path] = None,
             campaign = cs.load_campaign(path, root())
         except cs.SpecError as exc:
             return {"error": str(exc)}, 400
+        try:
+            ti.require_recordings_mounted(root(), experiment)
+        except ti.RecordingsNotMounted as exc:
+            return {"error": str(exc)}, 409
         plan = cp.build_plan(campaign, ti.load_trials(root(), experiment),
                              request.args.get("include_unverified") == "1")
         return plan.to_dict()
