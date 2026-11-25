@@ -244,3 +244,41 @@ def test_the_run_slot_is_claimed_inside_start_under_its_lock(bare, held_runner):
         bare.runs.start(executed=True, **args)
     wait_until_ended(bare.runs.start(executed=False, **args))
     assert bare.runs.current() is first and bare.runs.busy()
+
+
+ROBOTS = """
+version: 1
+robots:
+  demo_bot:
+    host: local
+    estop: "echo estop demo_bot"
+    soft_stop: "echo soft demo_bot"
+    actions:
+      wave: {description: "wave", command: "echo wave"}
+"""
+
+
+def test_the_stop_and_action_buttons_name_the_robots_file_of_the_interface(bare, tmp_path, monkeypatch):
+    """C2-2: estop.sh and robot_action.sh looked for robots.yaml from the server's working
+    directory. With `trials ui --experiments-root X` started elsewhere, the stop bar listed X's
+    robots and the stop failed with "Robot config not found". The scripts are stubbed here."""
+    robots = bare.root / "common" / "config" / "robots.yaml"
+    robots.unlink()
+    robots.write_text(ROBOTS, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "", ""
+
+    monkeypatch.setattr(bare.ui.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    assert "demo_bot" in bare.c.get("/", headers=auth()).get_data(as_text=True)
+    assert bare.c.post("/stop", data={"action": "estop", "robot": "demo_bot"}, headers=auth()).status_code == 200
+    assert bare.c.post("/robot_action", data={"robot": "demo_bot", "action": "wave"},
+                       headers=auth()).status_code == 200
+    stop, act = calls
+    assert stop[0].endswith("estop.sh") and stop[1:3] == ["--config", str(robots)]
+    assert stop[3:] == ["--robot", "demo_bot"]
+    assert act[0].endswith("robot_action.sh") and act[1:] == ["--config", str(robots), "demo_bot", "wave"]

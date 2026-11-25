@@ -436,7 +436,7 @@ def test_a_failed_stop_says_use_the_physical_switch(client, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Robot actions are the same narrow allowlist (2026-08-10)
 # --------------------------------------------------------------------------- #
-def test_declared_action_invokes_the_action_script(client, monkeypatch):
+def test_declared_action_invokes_the_action_script(client, root, monkeypatch):
     calls = []
 
     class Done:
@@ -448,7 +448,8 @@ def test_declared_action_invokes_the_action_script(client, monkeypatch):
     body = client.post("/robot_action", headers=auth(),
                        data={"robot": "spot", "action": "ready"}).get_data(as_text=True)
     assert calls and calls[0][0].endswith("tools/robot_action.sh")
-    assert calls[0][1:] == ["spot", "ready"]
+    # The interface names its own robots.yaml (C2-2, 2026-11-25), then the robot and the action.
+    assert calls[0][1:] == ["--config", str(root / "common" / "config" / "robots.yaml"), "spot", "ready"]
     assert "OK" in body
 
 

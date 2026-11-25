@@ -1774,7 +1774,11 @@ def create_app(experiments_root: Optional[Path] = None,
         """Soft-stop or e-stop, via scripts/estop.sh — a narrow allowlist."""
         action = request.form.get("action", "estop")
         robot = request.form.get("robot", "")
-        cmd = [str(tools.path("estop.sh"))]
+        # The robots.yaml this interface lists in its stop bar, named explicitly: estop.sh
+        # otherwise looks for one from the server's working directory, and a UI started
+        # elsewhere with --experiments-root listed one project's robots and failed to stop
+        # them ("Robot config not found"), or stopped another project's.
+        cmd = [str(tools.path("estop.sh")), "--config", str(robots_config(app))]
         if action == "soft":
             cmd.append("--soft")
         if robot:
@@ -1819,7 +1823,8 @@ def create_app(experiments_root: Optional[Path] = None,
         if robot not in declared or action not in {a["name"] for a in declared[robot]}:
             journal.add("robot_action", f"REFUSED undeclared {robot}.{action}")
             return error(f"{robot!r}.{action!r} is not a declared action", 400)
-        cmd = [str(tools.path("robot_action.sh")), robot, action]
+        # The same robots.yaml the allowlist above was read from (see /stop).
+        cmd = [str(tools.path("robot_action.sh")), "--config", str(robots_config(app)), robot, action]
         completed = subprocess.run(cmd, capture_output=True, text=True)
         ok = completed.returncode == 0
         journal.add("robot_action", f"{robot}.{action}: {'OK' if ok else 'FAILED'}",
@@ -1911,6 +1916,12 @@ def create_app(experiments_root: Optional[Path] = None,
     return app
 
 
+def robots_config(app) -> Path:
+    """The robots.yaml of this interface's experiments root: the stop bar, the robot actions,
+    the clean slate and the scripts the stop and action buttons run all read this one file."""
+    return app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
+
+
 def robot_hosts(app) -> List[Dict[str, str]]:
     """Distinct {host, container, shell} the robots are reachable on.
 
@@ -1918,7 +1929,7 @@ def robot_hosts(app) -> List[Dict[str, str]]:
     kill-all button can only ever reach machines this project already drives.
     """
     import yaml
-    path = app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
+    path = robots_config(app)
     if not path.is_file():
         return []
     from robofacts import host_registry
@@ -1955,7 +1966,7 @@ def archive_status(experiments_root: Path) -> Optional[Dict[str, Any]]:
 
 def load_robots(app) -> List[str]:
     import yaml
-    path = app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
+    path = robots_config(app)
     if not path.is_file():
         return []
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -1986,7 +1997,7 @@ def load_robot_actions(app) -> Dict[str, List[Dict[str, str]]]:
     and nothing else. scripts/robot_action.sh re-validates on its side too.
     """
     import yaml
-    path = app.config["EXPERIMENTS_ROOT"] / "common" / "config" / "robots.yaml"
+    path = robots_config(app)
     if not path.is_file():
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
