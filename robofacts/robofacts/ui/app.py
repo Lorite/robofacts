@@ -1109,6 +1109,28 @@ def create_app(experiments_root: Optional[Path] = None,
     def known_experiment(experiment: str) -> bool:
         return experiment in experiment_names(root())
 
+    def campaign_file(experiment: str, name: str) -> Optional[Path]:
+        """The campaign file ``name`` of ``experiment``, or None when the pair names no such place.
+
+        The experiment must be one this root holds, the name a plain name (no
+        separator, not hidden), and the resolved file must lie in that
+        experiment's campaigns/ folder. Before 2026-11-25 the form fields were
+        joined onto the path as given, so ``../../../../outside/planted`` loaded
+        any YAML on the host as a campaign, and /operator_step and /run executed
+        its commands. The file need not exist: loading it says why it does not.
+        """
+        if not known_experiment(experiment):
+            return None
+        if not name or "/" in name or "\\" in name or "\0" in name or name.startswith("."):
+            return None
+        folder = (root() / experiment / "campaigns").resolve()
+        path = (folder / f"{name}.yaml").resolve()
+        try:
+            path.relative_to(folder)
+        except ValueError:
+            return None
+        return path
+
     def error(message: str, status: int = 400, crumbs=None, title: str = ""):
         return render_template("error.html", message=message, crumbs=crumbs or [],
                                title=title), status
@@ -1239,9 +1261,9 @@ def create_app(experiments_root: Optional[Path] = None,
     @app.route("/e/<experiment>/c/<name>")
     @requires_auth
     def campaign_view(experiment: str, name: str):
-        path = root() / experiment / "campaigns" / f"{name}.yaml"
+        path = campaign_file(experiment, name)
         crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
-        if not path.is_file():
+        if path is None or not path.is_file():
             return error(f"No campaign {name!r} in {experiment}", 404, crumbs)
         include_unverified = request.args.get("include_unverified") == "1"
         try:
@@ -1508,9 +1530,13 @@ def create_app(experiments_root: Optional[Path] = None,
         if confirm and runs.busy():
             return error(SLOT_BUSY, 409)
 
+        path = campaign_file(experiment, name)
+        if path is None:
+            return error(f"No campaign {name!r} in experiment {experiment!r} under {root()}", 404)
         try:
-            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root(),
-                                        overrides)
+            campaign = cs.load_campaign(path, root(), overrides)
+            # The experiment the campaign names, as the CLI does (trial_runner._main).
+            experiment = campaign.experiment
             config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
             return error(str(exc), 400)
@@ -1581,8 +1607,10 @@ def create_app(experiments_root: Optional[Path] = None,
         Returns the new run, or an error response.
         """
         crumbs = [(experiment, url_for("experiment_view", experiment=experiment)), (name, None)]
+        path = campaign_file(experiment, name)
+        if path is None:
+            return error(f"No campaign {name!r} in experiment {experiment!r}", 404, crumbs)
         try:
-            path = root() / experiment / "campaigns" / f"{name}.yaml"
             campaign = cs.load_campaign(path, root(), pin.split() if pin else [])
             base = cs.load_campaign(path, root(), [])
             config = tr.RunnerConfig.load(experiment, root())
@@ -1729,6 +1757,9 @@ def create_app(experiments_root: Optional[Path] = None,
             return error(
                 "A campaign is running — the gate may restart a middleware daemon and "
                 "must not run mid-trial. Wait or abort first.", 409, crumbs)
+        if not known_experiment(experiment):
+            # Never a path segment such as "..": the script path below is built from it.
+            return error(f"No experiment {experiment!r} under {root()}", 404, crumbs)
         script = root() / experiment / "scripts" / "preflight.sh"
         if not script.is_file():
             return error(f"{experiment} has no scripts/preflight.sh", 404, crumbs)
@@ -1777,8 +1808,13 @@ def create_app(experiments_root: Optional[Path] = None,
             index = int(request.form["index"])
         except (KeyError, ValueError):
             return Response("bad step index", status=400, mimetype="text/plain")
+        # Only a campaign file of a known experiment is the allowlist (see campaign_file).
+        path = campaign_file(experiment, name)
+        if path is None:
+            return Response(f"no campaign {name!r} in experiment {experiment!r}", status=404,
+                            mimetype="text/plain")
         try:
-            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root())
+            campaign = cs.load_campaign(path, root())
             config = tr.RunnerConfig.load(experiment, root())
         except (cs.SpecError, tr.RunnerError) as exc:
             return Response(str(exc), status=400, mimetype="text/plain")
@@ -1975,8 +2011,11 @@ def create_app(experiments_root: Optional[Path] = None,
     @app.route("/api/plan/<experiment>/<name>.json")
     @requires_auth
     def api_plan(experiment: str, name: str):
+        path = campaign_file(experiment, name)
+        if path is None:
+            return {"error": f"no campaign {name!r} in experiment {experiment!r}"}, 404
         try:
-            campaign = cs.load_campaign(root() / experiment / "campaigns" / f"{name}.yaml", root())
+            campaign = cs.load_campaign(path, root())
         except cs.SpecError as exc:
             return {"error": str(exc)}, 400
         plan = cp.build_plan(campaign, ti.load_trials(root(), experiment),

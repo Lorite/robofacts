@@ -347,3 +347,34 @@ def test_a_post_from_the_interface_itself_or_from_a_script_passes(bare, held_run
                     {"Origin": "https://lab.example", "X-Forwarded-Host": "lab.example"}):
         response = bare.c.post("/run", data=DRY, headers={**auth(), **headers})
         assert response.status_code == 302, (headers, response.get_data(as_text=True)[:400])
+
+
+def test_a_campaign_field_cannot_leave_the_experiments_campaigns_folder(bare, tmp_path, held_runner):
+    """C2-5: the experiment and campaign fields were joined onto the path as given, so any YAML
+    on the host became a campaign, and /operator_step ran its `run:` with bash."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "MARKER"
+    (outside / "planted.yaml").write_text(
+        "experiment: demo_log_recorder\n"
+        "operator_live_steps:\n"
+        f"  - text: harmless marker\n    run: touch {marker}\n", encoding="utf-8")
+    campaigns = bare.root / "demo_log_recorder" / "campaigns"
+    (campaigns / "linked.yaml").symlink_to(outside / "planted.yaml")
+    rel = os.path.relpath(outside / "planted", campaigns)
+    for name in (rel, "linked"):
+        step = bare.c.post("/operator_step", headers=auth(), data={
+            "experiment": "demo_log_recorder", "campaign": name, "kind": "live", "index": "0"})
+        assert step.status_code == 404, (name, step.get_data(as_text=True))
+        assert not marker.exists(), name
+        assert bare.c.post("/run", data={**DRY, "campaign": name}, headers=auth()).status_code == 404
+        explore = bare.c.post("/explore", data={"experiment": "demo_log_recorder", "campaign": name},
+                              headers=auth())
+        assert explore.status_code == 404 and "No campaign" in explore.get_data(as_text=True)
+        assert bare.c.get(f"/e/demo_log_recorder/c/{name}", headers=auth()).status_code == 404
+    assert bare.runs.all() == []
+    assert bare.c.get("/api/plan/demo_log_recorder/linked.json", headers=auth()).status_code == 404
+    assert bare.c.get("/api/plan/nosuch/grid.json", headers=auth()).status_code == 404
+    # The campaign files of a known experiment still load.
+    assert bare.c.get("/api/plan/demo_log_recorder/grid.json", headers=auth()).status_code == 200
+    assert bare.c.post("/run", data=DRY, headers=auth()).status_code == 302
