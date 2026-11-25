@@ -130,7 +130,7 @@ def test_new_from_leaves_out_what_no_declaration_names(project, capsys):
     # A launch file outside the experiment may load a config file, so it is copied and listed.
     assert (target / "config" / "cyclonedds_local_sim.xml").is_file()
     assert "  config/cyclonedds_local_sim.xml" in out.split("Copied, but no declaration names them")[1]
-    # The camera the trial cards show (#138) is a declaration: copied, not listed for review.
+    # The camera the trial cards show is a declaration: copied, not listed for review.
     assert (target / "config" / "trial_media.yaml").is_file()
     assert "trial_media.yaml" not in out.split("Copied, but no declaration names them")[1]
     assert validate.validate("demo_copy", experiments(project)).ready

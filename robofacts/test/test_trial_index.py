@@ -1,4 +1,4 @@
-"""Tests for the cross-experiment trial index and coverage report (#96 Phase 1)."""
+"""Tests for the cross-experiment trial index and coverage report."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def test_unreadable_metadata_is_skipped_not_fatal(root):
 
 def test_slim_copies_are_not_counted_as_trials(root):
     """Regression: the glob was `bags*`, which also matched bags_slim/. Slim bags
-    carry a COPY of trial_metadata.json (#94), so every slimmed trial was counted
+    carry a COPY of trial_metadata.json, so every slimmed trial was counted
     twice and coverage was silently doubled — 179 'trials' where there were 108."""
     make_trial(root, "expA", "t1", BASE)
     slim = root / "expA" / rdir("bags_slim") / "t1_slim"

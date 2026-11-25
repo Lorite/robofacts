@@ -27,7 +27,7 @@ FAILS on a usable trial is recorded and reported, but it does not exclude the
 trial: a slim copy may lack a topic a step reads, so exclusion stays a person's
 decision (``trials exclude``).
 
-Run it where the trial's record lives, the host that recorded it (the Orin's
+Run it where the trial's record lives, the host that recorded it (the robot computer's
 container for the rig trials), inside the dev container (the steps read bags
 with the backend's reader). The archive and the laptop's staging copy mirror that host
 with ``rsync --delete``, so a ``reverification.json`` written into a copy is

@@ -19,7 +19,7 @@
 # So the gate asserts WHICH interface holds the address, turning a silent
 # degradation into a refusal to fly.
 #
-#   address_on_interface.sh addr=192.168.0.20 iface=wlx58044ff1255d [why=...]
+#   address_on_interface.sh addr=192.0.2.20 iface=wlan1 [why=...]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="address_on_interface.sh addr=<ip> iface=<name> [why=<one-line reason>]"
 pf_parse_args "$@"

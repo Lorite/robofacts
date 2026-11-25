@@ -1,4 +1,4 @@
-"""Tests for named analyses as a headless API (#96 Phase 4b)."""
+"""Tests for named analyses as a headless API."""
 
 from __future__ import annotations
 

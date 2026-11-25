@@ -1,4 +1,4 @@
-"""Tests for the code-version stamp (#96, 2026-08-04).
+"""Tests for the code-version stamp (2026-08-04).
 
 The parser is shared by the local and remote probes on purpose (see
 ``code_version._script``), so exercising it against real ``git status

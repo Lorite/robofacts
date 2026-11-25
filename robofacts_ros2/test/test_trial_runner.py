@@ -1,4 +1,4 @@
-"""Tests for the trial runner (#96 Phase 4).
+"""Tests for the trial runner.
 
 No hardware and no ROS: commands are built purely and executed through an
 injected executor, so every ordering and safety property is asserted offline.
@@ -611,7 +611,7 @@ def test_trial_id_is_the_bag_directory_name(root, pieces):
 
 
 # --------------------------------------------------------------------------- #
-# Setup steps and auxiliary launches (#96 Phase 6)
+# Setup steps and auxiliary launches
 #
 # The real experiments are not "one launch + one action". The spot run notebook
 # sets Spot's arm-camera mode over the SDK, brings the stack up, runs a

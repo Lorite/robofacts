@@ -82,7 +82,7 @@ def test_clip_removes_the_bell_and_collapses_whitespace():
 
 def test_the_target_comes_from_the_environment_with_safe_defaults():
     assert ov.target({}) == ("127.0.0.1", 47900)
-    assert ov.target({ov.ENV_HOST: "192.168.0.30", ov.ENV_PORT: "47901"}) == ("192.168.0.30", 47901)
+    assert ov.target({ov.ENV_HOST: "192.0.2.30", ov.ENV_PORT: "47901"}) == ("192.0.2.30", 47901)
     assert ov.target({ov.ENV_PORT: "not-a-port"}) == ("127.0.0.1", 47900)
     assert ov.target({ov.ENV_PORT: "70000"}) == ("127.0.0.1", 47900)
     assert ov.enabled({}) and not ov.enabled({ov.ENV_SWITCH: "off"})

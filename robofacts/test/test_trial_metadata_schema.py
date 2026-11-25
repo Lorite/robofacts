@@ -1,4 +1,4 @@
-"""Tests for the trial-metadata contract (#96 Phase 0)."""
+"""Tests for the trial-metadata contract."""
 
 from __future__ import annotations
 

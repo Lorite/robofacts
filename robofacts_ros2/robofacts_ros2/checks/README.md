@@ -82,7 +82,7 @@ The core checks live in `checks/`. A check that only makes sense for one robot f
 | `node_present` | a node is in `ros2 node list` | deliberately weak, prefer a health/data check. Substring by default. `exact=true` requires the full node name (e.g. `/detector_node`): use it whenever the target has similarly-named neighbours, after the substring `detector` was satisfied by a pose bridge node while the detector had failed to load (2026-08-12) |
 | `file_exists` | a required artifact is present (and big enough) | TensorRT `.plan` engines, meshes, calibration maps |
 | `host_reachable` | another machine answers, link not degraded | a passing ping does **not** certify DDS |
-| `address_on_interface` | an IP is carried by the interface we *think* it is | the rig reaches mocap over either radio and **both carry `192.168.0.20`**, so a fallback is invisible: the internal Realtek chip stalls its downlink ~59 ms every 8.000 s and that lands in the bags as 50–160 mm mocap teleports). Uses `ip`, falls back to python3, and **fails** if it can enumerate neither |
+| `address_on_interface` | an IP is carried by the interface we *think* it is | the rig reaches mocap over either radio and **both carry the same address**, so a fallback is invisible: the internal Realtek chip stalls its downlink ~59 ms every 8.000 s and that lands in the bags as 50–160 mm mocap teleports). Uses `ip`, falls back to python3, and **fails** if it can enumerate neither |
 | `gpu_memory` | enough free VRAM for the GPU nodes | a leftover node holding VRAM is the usual cause |
 | `dds_socket_buffer` | the kernel can give CycloneDDS the receive buffer its **active** config demands | `net.core.rmem_max` is not persistent across reboots. When the rig rebooted on 2026-08-19 it reverted to the 212992 default, Cyclone's `min="16MB"` became unsatisfiable, and **every node died at `rmw_create_node`** — the gate then reported seven absent-node/dead-topic failures and none of them was the cause. Reads `$CYCLONEDDS_URI` so it speaks for the DDS the stack will really use; compares the **doubled** `SO_RCVBUF` the kernel actually grants (`2 × min(requested, rmem_max)`), because comparing the raw ceiling would NO-GO a working rig. Also FAILs the ignored-since-renamed `<MinimumSocketReceiveBufferSize>` spelling |
 | `mem_available` | enough free memory on the recording host, now (`MemAvailable`) | 2026-10-01: the laptop at 29 of 30 GiB used and a load of 21 corrupted a camera latency run, while every stream still "flowed". Inside a container it reads the host's memory, which is the number that matters |
@@ -109,7 +109,7 @@ The mode: `--concurrency sequential|concurrent`, else `$TRIALS_PREFLIGHT_CONCURR
 A checklist declares its own `${...}` defaults, so the wrapper does not repeat them and the test suite can validate every placeholder without a hardcoded list:
 
 ```json
-"variables": { "robot": "robot1", "robot_host": "192.168.80.3" },
+"variables": { "robot": "robot1", "robot_host": "192.0.2.80" },
 ```
 
 `--var name=value` overrides at run time. A placeholder that is used but not declared — or declared but no longer used — fails the test suite.

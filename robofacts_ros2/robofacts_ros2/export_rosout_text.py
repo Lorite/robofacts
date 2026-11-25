@@ -3,7 +3,7 @@
 
 The runner writes ``rosout.txt`` beside every recorded bag after the metadata, so the
 slim copy carries it too (2026-10-14). Before that, only the run notebooks exported it, and
-no runner-written bag had one, although experiments/AGENTS.md asks for it.
+no runner-written bag had one, although the trial rules of the project that grew this framework ask for it.
 """
 
 from __future__ import annotations

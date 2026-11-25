@@ -1,4 +1,4 @@
-"""Live lifecycle test for the trial runner, with no robot (#96 Phase 4).
+"""Live lifecycle test for the trial runner, with no robot.
 
 Uses ``demo_nodes_cpp talker`` as a stand-in "stack" and records ``/chatter``,
 which exercises the part that pure unit tests cannot: real background processes,

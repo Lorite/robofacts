@@ -21,8 +21,7 @@ regex, so the result is deterministic and the script prints exactly what it kept
     python3 .../slim_bag.py <bag> --exclude rosout --dry-run
 
 Then either copy the slim bag to the laptop, or leave it on the rig and play it
-there while RViz runs on the laptop (see
-``docs/development/cross_host_ros2_dds_discovery.md`` -> "Remote bag inspection").
+there while RViz runs on the laptop, which needs ROS 2 discovery between the two machines.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""First and repeat trials of one runner invocation (2026-11-04, the lab's #159).
+"""First and repeat trials of one runner invocation (2026-11-04).
 
 A repeated trial of a campaign rarely needs the whole setup again (a fresh battery and a
 re-placement of the drone for a 16 s square), but it may need a reset between trials (the

@@ -1,4 +1,4 @@
-"""Tests for trial_records: the per-trial join behind `trials records` and the web UI's table (#131).
+"""Tests for trial_records: the per-trial join behind `trials records` and the web UI's table.
 
 Each test builds the on-disk shapes the runner and the analyses really write (bags,
 slim copies, the attempt ledger, the gate log, run logs, result folders) and checks
@@ -288,7 +288,7 @@ def test_every_record_has_the_papers_class_or_none_for_an_attempt(root):
 
 
 # --------------------------------------------------------------------------- #
-# Poster frames of the card view (#137)
+# Poster frames of the card view
 # --------------------------------------------------------------------------- #
 needs_ffmpeg = pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None,
                                   reason="poster frames need ffmpeg (present in the dev container)")
@@ -383,7 +383,7 @@ def test_trials_records_posters_makes_them_ahead_of_the_ui(root, capsys):
 
 
 # --------------------------------------------------------------------------- #
-# Stills, the camera video and the plot fallback of the card view (#138)
+# Stills, the camera video and the plot fallback of the card view
 # --------------------------------------------------------------------------- #
 from types import SimpleNamespace  # noqa: E402
 

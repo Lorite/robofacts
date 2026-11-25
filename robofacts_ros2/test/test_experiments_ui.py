@@ -1,4 +1,4 @@
-"""Tests for the experiments control surface (#96 Phase 5).
+"""Tests for the experiments control surface.
 
 Flask's test client exercises every route without a browser, so the properties
 that matter — auth, the two-step run, the stop allowlist, and the UI never being
@@ -562,7 +562,7 @@ def test_viewers_page_links_slim_bags_via_foxglove(client, root):
 
 
 def test_viewers_page_lists_slim_scratch_bags(client, root):
-    """#130: a slim copy of a scratch flight (bags_scratch/*_slim) is listed like a campaign's."""
+    """A slim copy of a scratch flight (bags_scratch/*_slim) is listed like a campaign's."""
     fat = root / "expA" / "bags_scratch" / "t9_scratch_x"
     slim = root / "expA" / "bags_scratch" / "t9_scratch_x_slim"
     for b in (fat, slim):
@@ -574,7 +574,7 @@ def test_viewers_page_lists_slim_scratch_bags(client, root):
 
 
 def test_viewers_page_lists_per_experiment_foxglove_layouts(client, root):
-    """#130: a layout an experiment ships as config/foxglove*.json is listed with a download
+    """A layout an experiment ships as config/foxglove*.json is listed with a download
     link, and the download route serves it (and only it) behind auth."""
     layout = root / "expA" / "config" / "foxglove_demo.json"
     layout.write_text('{"configById": {}, "layout": null}', encoding="utf-8")
@@ -867,7 +867,7 @@ def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# The rework (#131): one row per trial, every trial, everything about it
+# The rework: one row per trial, every trial, everything about it
 # --------------------------------------------------------------------------- #
 def _slim(root: Path, name: str, folder: str = "bags_slim") -> None:
     slim = root / "expA" / folder / f"{name}_slim"
@@ -1174,7 +1174,7 @@ def test_explore_on_hardware_needs_the_arm(client, root):
 
 
 def test_the_explore_run_page_drives_actions_records_and_notes(client, root, monkeypatch):
-    """#133: Foxglove opens by itself, action buttons, a live table, record and notes."""
+    """Foxglove opens by itself, action buttons, a live table, record and notes."""
     import json as _json
     from types import SimpleNamespace
     from robofacts_ros2 import explore as ex
@@ -1278,7 +1278,7 @@ def test_the_explore_run_page_drives_actions_records_and_notes(client, root, mon
 
 
 def test_restart_with_another_condition_waits_for_the_old_stack(client, root, monkeypatch):
-    """#133: the run page's picker stops this exploration, then explores the picked cell."""
+    """The run page's picker stops this exploration, then explores the picked cell."""
     from robofacts_ros2 import explore as ex
     _simulated(root)
     conditions, stopped = [], []
@@ -1327,7 +1327,7 @@ def test_restart_with_another_condition_waits_for_the_old_stack(client, root, mo
 
 
 # --------------------------------------------------------------------------- #
-# Table or cards (#137): the same records, one card each, with the video's still
+# Table or cards: the same records, one card each, with the video's still
 # --------------------------------------------------------------------------- #
 def _video(path: Path, seconds: float = 4.0) -> Path:
     import shutil
@@ -1442,7 +1442,7 @@ def test_no_id_is_used_twice_on_the_trials_pages(client, root):
 
 
 # --------------------------------------------------------------------------- #
-# Stills, the camera video and the plot fallback (#138)
+# Stills, the camera video and the plot fallback
 # --------------------------------------------------------------------------- #
 def _camera_trial(root: Path, name: str, n_stills: int = 3, video: bool = True) -> Path:
     """A trial whose declared camera was already turned into stills (trial_media's cache)."""

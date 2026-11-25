@@ -1,4 +1,4 @@
-"""Tests for the campaign expander (#96 Phase 3)."""
+"""Tests for the campaign expander."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ factors:
     metadata_key: execution_host
     maps_to: {kind: host}
     aliases:
-      laptop: [local, lori-ThinkPad-P15-Gen-2i]
+      laptop: [local, lab-laptop-2]
   trajectory:
     levels: [hover, circle]
     default: hover
@@ -208,7 +208,7 @@ def test_a_fixed_factor_does_narrow_the_match(root):
 def test_aliases_let_historical_values_match(root):
     """Host names were written ad hoc before the factor file existed; without
     aliases every historical bag is permanently unmatchable."""
-    add_trial(root, "expA", "t1", dict(GOOD, execution_host="lori-ThinkPad-P15-Gen-2i",
+    add_trial(root, "expA", "t1", dict(GOOD, execution_host="lab-laptop-2",
                                        trajectory="hover"))
     plan = plan_for(root, ["execution_host=laptop"])
     assert plan.covered == 1

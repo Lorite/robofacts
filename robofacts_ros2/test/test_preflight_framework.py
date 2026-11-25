@@ -1,4 +1,4 @@
-"""Tests for the modular pre-flight check framework (#87).
+"""Tests for the modular pre-flight check framework.
 
 The important one is ``test_every_experiment_checklist_is_coherent``: it is what
 stops the machine gate and the human checklist from drifting apart. If someone
@@ -543,7 +543,7 @@ def test_ros_param_equals_undeclared_expected_fails(tmp_path: Path):
     ("String values are: ['a', 'B']\n", "['A', 'b']"),
 ])
 def test_ros_param_equals_compares_arrays_element_by_element(tmp_path: Path, reply, expected):
-    """2026-11-09 (#170): the teleop box is a double array, which Humble prints as `values are:`."""
+    """2026-11-09: the teleop box is a double array, which Humble prints as `values are:`."""
     result = _run_param_check_against(tmp_path, reply, f"expected={expected}")
     assert result.returncode == 0 and result.stdout.startswith("PASS:"), result.stdout
 

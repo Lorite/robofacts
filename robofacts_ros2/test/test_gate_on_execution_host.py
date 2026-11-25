@@ -1,5 +1,5 @@
 """The gate runs where the trial runs, and a host's setup files apply wherever the runner is
-(2026-10-14, the handheld VIO experiment of the lab's #122).
+(2026-10-14, a handheld VIO experiment).
 
 Two defects found the same day. A laptop-driven trial with ``execution_host=orin`` ran its T-0
 gate on the laptop, so the laptop's processes, disk, network and stop latch (which the stop

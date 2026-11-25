@@ -310,10 +310,10 @@ def test_unconfirmed_operator_steps_launch_nothing(tmp_path):
 
 
 def test_a_remote_host_gets_a_tunnel_and_the_installed_logger(tmp_path):
-    root = make_root(tmp_path, RUNNER_SIM + "  orin: {host: orin-rig, container: ros2_jetson_dev}\n")
+    root = make_root(tmp_path, RUNNER_SIM + "  orin: {host: robot-host, container: ros2_jetson_dev}\n")
     campaign, config = load(root, ["execution_host=orin"])
     result = ex.run_explore(campaign, config, tmp_path, dry_run=True)
-    assert result.connect["tunnel"] == "ssh -N -L 8765:localhost:8765 orin-rig"
+    assert result.connect["tunnel"] == "ssh -N -L 8765:localhost:8765 robot-host"
     assert result.commands[1] == ["python3", "-m", "robofacts_ros2.explore_params"]
 
 
@@ -405,7 +405,7 @@ def test_a_viewer_without_a_command_refuses_to_load(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# The run page's controls (#133, 2026-10-17): actions, set back, record, notes
+# The run page's controls (2026-10-17): actions, set back, record, notes
 # --------------------------------------------------------------------------- #
 ACTIONS = ("explore:\n  actions:\n"
            "    - {name: take_off, command: 'python3 fly.py --mode take_off --gain {gain}'}\n"
@@ -668,7 +668,7 @@ def test_parameter_changes_lists_the_notes_and_recordings(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# The jog pad (explore.jog, #133): a velocity for a moment, from the runner
+# The jog pad (explore.jog): a velocity for a moment, from the runner
 # --------------------------------------------------------------------------- #
 JOG = "explore:\n  jog: {topic: /cmd_vel, max_speed_mps: 0.3, step_s: 1.5}\n"
 
@@ -726,7 +726,7 @@ def test_a_remote_jog_runs_the_installed_module():
 
 
 # --------------------------------------------------------------------------- #
-# Analyze a recording (#133): the experiment's per-bag analyses, on a scratch bag
+# Analyze a recording: the experiment's per-bag analyses, on a scratch bag
 # --------------------------------------------------------------------------- #
 ANALYSES = """
 analyses:
@@ -784,7 +784,7 @@ def test_a_remote_recording_is_not_analyzed_here(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Keep a value: where it is declared, and the edit that would keep it (#133)
+# Keep a value: where it is declared, and the edit that would keep it
 # --------------------------------------------------------------------------- #
 LAUNCH = """
 from launch.actions import DeclareLaunchArgument

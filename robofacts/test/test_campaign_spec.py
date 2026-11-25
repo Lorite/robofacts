@@ -1,4 +1,4 @@
-"""Tests for the declarative trial/campaign spec (#96 Phase 2)."""
+"""Tests for the declarative trial/campaign spec."""
 
 from __future__ import annotations
 

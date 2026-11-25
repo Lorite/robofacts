@@ -161,7 +161,7 @@ build_command() {
 
     # WHERE ARE WE? The config names the host as seen FROM THE LAPTOP, but the
     # e-stop gets typed wherever the operator happens to be standing, and on
-    # 2026-08-14 that was a tmux pane ON THE RIG: `ssh orin-rig` does not
+    # 2026-08-14 that was a tmux pane ON THE RIG: `ssh <robot host>` does not
     # resolve there (the alias lives in the laptop's ssh config, and the rig
     # router has no DNS), so the e-stop FAILED during a real flyaway. Detect the
     # two on-rig cases and skip the hops that would fail — fewer hops is also

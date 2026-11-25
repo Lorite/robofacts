@@ -2,7 +2,7 @@
 """Spoken operator cues: the client side (2026-10-13).
 
 The laptop speaks, the trial runner does not: the runner lives in a dev
-container without audio (on the laptop or on the Orin), so a cue travels as one
+container without audio (on the laptop or on the robot computer), so a cue travels as one
 UDP datagram to ``scripts/operator_voice_daemon.py`` on the laptop host, which
 speaks it with ``spd-say``. This module is the sending half, stdlib only and
 Free of middleware, importable by every framework script.
@@ -20,8 +20,8 @@ Two promises the trial depends on:
 Environment:
 
 * ``TRIALS_VOICE_HOST``: where the daemon listens (default ``127.0.0.1``, the
-  laptop's own container, which shares the host network). On the Orin, the
-  laptop on the rig router: ``192.168.0.30``.
+  laptop's own container, which shares the host network). On the robot computer, the
+  laptop's address on the robot network, for example ``192.0.2.30``.
 * ``TRIALS_VOICE_PORT``: default 47900.
 * ``TRIALS_VOICE=off`` (or 0, false, no): print only, send nothing.
   ``TRIALS_VOICE=on`` forces sending. Unset means on, EXCEPT inside a pytest

@@ -8,7 +8,7 @@
 # IP-fragmented UDP datagram while small ICMP passes fine. Use this to
 # catch a dead link, not to certify the middleware's transport.
 #
-#   host_reachable.sh host=192.168.50.3 [max_rtt_ms=0] [count=3]
+#   host_reachable.sh host=192.0.2.3 [max_rtt_ms=0] [count=3]
 source "${PF_LIB:-$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh}"
 PF_HELP="host_reachable.sh host=<hostname|ip> [max_rtt_ms=0 (0=any)] [count=3]"
 pf_parse_args "$@"
