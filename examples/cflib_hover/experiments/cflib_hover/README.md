@@ -14,7 +14,7 @@ One Crazyflie hovers on its Flow deck for 10 s, commanded with [cflib](https://g
 
 The scripts:
 
-- `scripts/cf_hover.py`, the action. It refuses before arming on a fresh stop latch, a missing Flow deck, a low battery, an estimator that does not settle, or a ground position away from the origin. It takes off in two stages (flow off on the floor, 0.20 m in 1.0 s, flow back on at 0.10 m, then to 0.50 m), holds, and lands on the end of the hover, on Ctrl+C or SIGTERM, on the stop latch, when the estimate leaves the geofence, and on any error. A latch whose last line starts with `estop` cuts the motors.
+- `scripts/cf_hover.py`, the action. It refuses before arming on a fresh stop latch, a missing Flow deck, a low battery, an estimator that does not settle, no state sample, or a ground position away from the origin. It takes off in two stages (flow off on the floor, 0.20 m in 1.0 s, flow back on at 0.10 m, then to 0.50 m), holds, and lands on the end of the hover, on Ctrl+C or SIGTERM, on the stop latch, when the estimate leaves the geofence, when no state sample has arrived for 0.5 s (exit 7, the link is probably lost, the land command is still sent), and on any error. A latch whose last line starts with `estop` cuts the motors at any time, also during the landing and after a Ctrl+C.
 - `scripts/cf_link.py`, read-only questions for the gate (battery, Flow deck) and the reset. It never arms.
 - `scripts/verify_hover.py`, the verify step: the recorded height (the range sensor) was above 0.15 m for at least 3 s, and the recording ends on the ground.
 - `scripts/cflib_drone.py`, everything that touches the radio, behind a small interface that the tests replace with a fake drone.
@@ -41,4 +41,4 @@ With a drone: `pip install cflib`, plug in a Crazyradio, set `uri` in `config/dr
 6. After a stop, the next trial is refused for 120 s. When the drone is safe: `rm /tmp/trial_stop_latch`.
 7. `trials index --experiment cflib_hover --summary` lists the trial. A stopped or refused trial does not count.
 
-When the radio link is lost in the air, the drone keeps hovering on its last setpoint (the high-level commander of the firmware). cflib can arm the firmware's emergency-stop watchdog, which cuts the motors 1 s after the last message. This example does not use it.
+When the radio link is lost in the air, the action notices it (no state sample for 0.5 s), prints `STALE STATE`, and sends the land command, which the drone may not receive. The firmware's high-level commander then keeps the drone hovering on its last setpoint, and only the physical stop helps. cflib can arm the firmware's emergency-stop watchdog, which cuts the motors 1 s after the last message. This example does not use it.

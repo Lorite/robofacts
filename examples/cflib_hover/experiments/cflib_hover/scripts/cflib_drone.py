@@ -34,6 +34,7 @@ class CflibDrone:
     def __init__(self, uri: str):
         self.uri = uri
         self.state: Dict[str, float] = {}
+        self._t_rx: Optional[float] = None   # time.monotonic() of the newest sample
         self._lock = threading.Lock()
         self._scf = None
         self._sink: Optional[Callable[[Dict], None]] = None
@@ -89,7 +90,7 @@ class CflibDrone:
                       "z": data["stateEstimate.z"], "range_m": data["range.zrange"] / 1000.0,
                       "vbat": data["pm.vbat"], "squal": data["motion.squal"]}
             with self._lock:
-                self.state = sample
+                self.state, self._t_rx = sample, time.monotonic()
             sink(sample)
 
         conf.data_received_cb.add_callback(on_data)
@@ -99,6 +100,12 @@ class CflibDrone:
     def latest(self) -> Dict[str, float]:
         with self._lock:
             return dict(self.state)
+
+    def age_s(self) -> Optional[float]:
+        """Seconds since the newest sample arrived, None before the first one. A growing age
+        in the air means the radio link is lost: the last sample is then frozen, not current."""
+        with self._lock:
+            return None if self._t_rx is None else time.monotonic() - self._t_rx
 
     def battery_v(self, samples: int = 5, timeout_s: float = 3.0) -> Optional[float]:
         """The median of a few pm.vbat samples, or None."""

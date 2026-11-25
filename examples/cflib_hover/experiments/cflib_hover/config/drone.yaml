@@ -19,5 +19,6 @@ height_m: 0.50
 max_hover_s: 60
 fence_xy_m: 0.50        # land when the estimate is farther than this from the takeoff point
 fence_z_m: 0.90
+stale_s: 0.5            # land when no state sample arrived for this long (20 Hz: 10 missing samples)
 land_m: 0.05
 land_s: 3.0

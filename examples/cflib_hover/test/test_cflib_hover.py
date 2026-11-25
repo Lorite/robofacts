@@ -87,10 +87,11 @@ class FakeDrone:
     """Records every command. Its height follows the commands, its xy can drift."""
 
     def __init__(self, uri, *, deck=True, vbat=4.0, settles=True, ground_xy=0.0, drift=0.0,
-                 fail_on=None, on_tick=None):
+                 fail_on=None, on_tick=None, on_land=None, no_samples=False):
         self.uri, self.deck, self.vbat, self.settles = uri, deck, vbat, settles
         self.xy, self.drift, self.fail_on, self.on_tick = ground_xy, drift, fail_on, on_tick
         self.z, self.calls, self.params, self.sink, self.ticks = 0.0, [], [], None, 0
+        self.on_land, self.no_samples, self.frozen_at = on_land, no_samples, None
 
     def __enter__(self):
         return self
@@ -115,7 +116,14 @@ class FakeDrone:
     def start_log(self, sink):
         self.sink = sink
 
+    def age_s(self):
+        if self.no_samples:
+            return None
+        return 0.0 if self.frozen_at is None else time.monotonic() - self.frozen_at
+
     def latest(self):
+        if self.no_samples:
+            return {}
         self.ticks += 1
         if self.z > 0.1:
             self.xy += self.drift
@@ -143,6 +151,8 @@ class FakeDrone:
     def land(self, height, duration):
         self._do("land")
         self.z = height
+        if self.on_land:
+            self.on_land(self)
 
     def stop_commander(self):
         self._do("stop_commander")
@@ -154,7 +164,8 @@ class FakeDrone:
 
 CFG = {"uri": NO_RADIO_URI, "min_vbat": 3.85, "min_squal": 50, "ground_guard_m": 0.05,
        "stage1_m": 0.2, "stage1_s": 0.05, "flow_on_m": 0.1, "stage2_s": 0.05, "height_m": 0.5,
-       "max_hover_s": 60, "fence_xy_m": 0.5, "fence_z_m": 0.9, "land_m": 0.05, "land_s": 0.0}
+       "max_hover_s": 60, "fence_xy_m": 0.5, "fence_z_m": 0.9, "land_m": 0.05, "land_s": 0.05,
+       "stale_s": 0.1}
 
 
 @pytest.fixture
@@ -240,6 +251,62 @@ def test_leaving_the_geofence_lands_the_drone(env):
     assert "fence 0.5 m" in [e for e in log if e.get("event") == "land"][0]["reason"]
 
 
+def test_a_lost_link_lands_with_its_own_reason_and_tells_the_operator(env, capsys):
+    """Review finding 1 (2026-11-25): the last sample freezes when the link dies in the air."""
+    def lose_link(drone):
+        if drone.z >= 0.5 and drone.ticks > 3 and drone.frozen_at is None:
+            drone.frozen_at = time.monotonic()
+
+    rc, drone, _, log = hover(env, hover_s="30", on_tick=lose_link)
+    assert rc == cf_hover.STALE_RC
+    assert drone.calls[-4:] == ["land", "stop_commander", "disarm", "close"], "the land command is still sent"
+    reason = [e for e in log if e.get("event") == "land"][0]["reason"]
+    assert reason.startswith("no state sample for") and "radio link is probably lost" in reason
+    out = capsys.readouterr().out
+    assert "STALE STATE" in out and "use the physical stop" in out
+
+
+def test_a_dead_link_that_refuses_the_land_command_still_disarms(env):
+    rc, drone, _, log = hover(env, fail_on="land")
+    assert drone.calls[-3:] == ["stop_commander", "disarm", "close"]
+    assert [e["command"] for e in log if e.get("event") == "command_failed"] == ["land"]
+
+
+def test_an_estop_during_the_landing_cuts_the_motors(env):
+    """Review finding 2: the landing wait reads the latch."""
+    rc, drone, events, _ = hover(env, on_land=lambda d: env["latch"].write_text("estop crazyflie now\n"))
+    assert drone.calls[-4:] == ["land", "emergency_stop", "disarm", "close"]
+    assert "stop_commander" not in drone.calls and events[-2:] == ["emergency_stop", "end"]
+
+
+def test_an_estop_after_ctrl_c_is_not_hidden_by_the_signal(env):
+    """Review finding 2: Ctrl+C starts the landing, a later estop line still cuts the motors."""
+    def ctrl_c(drone):
+        if drone.z >= 0.5 and drone.ticks > 3:
+            cf_hover.signal.raise_signal(cf_hover.signal.SIGINT)
+
+    rc, drone, _, log = hover(env, hover_s="30", on_tick=ctrl_c,
+                              on_land=lambda d: env["latch"].write_text("estop crazyflie now\n"))
+    assert rc == cf_hover.STOP_RC
+    assert [e["reason"] for e in log if e.get("event") == "land"] == ["signal SIGINT"]
+    assert "emergency_stop" in drone.calls and "stop_commander" not in drone.calls
+
+
+def test_an_estop_line_wins_over_a_signal_that_came_first(env, tmp_path):
+    stop = cf_hover.Stop(env["latch"], time.time())
+    stop.on_signal(cf_hover.signal.SIGINT, None)
+    assert stop.reason() == "signal SIGINT"
+    env["latch"].write_text("soft_stop crazyflie\n")
+    assert stop.reason() == "signal SIGINT" and stop.estop() == ""
+    env["latch"].write_text("estop crazyflie\n")
+    assert stop.reason() == stop.estop() == "operator stop latch: estop crazyflie"
+
+
+def test_an_empty_state_is_outside_the_fence():
+    """Review finding 3: no sample is never a pass."""
+    assert cf_hover.outside_fence({}, CFG) == "no state sample"
+
+
 def test_a_closed_output_pipe_does_not_stop_the_landing(env, monkeypatch):
     """Ctrl+C stops the runner too, and the pipe to the action closes while it lands."""
     class ClosedPipe:
@@ -259,6 +326,7 @@ def test_a_closed_output_pipe_does_not_stop_the_landing(env, monkeypatch):
     ({"vbat": 3.70}, "battery 3.70 V below 3.85 V"),
     ({"settles": False}, "did not settle"),
     ({"ground_xy": 0.08}, "ground position 0.080 m"),
+    ({"no_samples": True}, "the state is not streaming (no state sample from the drone yet)"),
 ])
 def test_refusals_before_arming(env, fake, words):
     rc, drone, events, log = hover(env, **fake)
