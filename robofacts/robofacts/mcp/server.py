@@ -209,18 +209,12 @@ def build_server() -> MCPServer:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    import argparse
     import os
     import sys
 
-    ap = argparse.ArgumentParser(
-        prog="trials mcp",
-        description="an MCP server over stdio with read-only tools: validate, plan, dry run, "
-                    "coverage index, explain a trial. It never runs a trial.")
-    roots.add_root_arguments(ap, project=True)
-    ap.add_argument("--list-tools", action="store_true",
-                    help="print the tools and the project in force, then exit (no server)")
-    args = ap.parse_args(argv)
+    from .arguments import build_parser
+
+    args = build_parser().parse_args(argv)
     # Explicit roots go to the environment, so every module of the package agrees on them.
     if args.experiments_root:
         os.environ[roots.ENV_EXPERIMENTS_ROOT] = str(args.experiments_root.expanduser().resolve())

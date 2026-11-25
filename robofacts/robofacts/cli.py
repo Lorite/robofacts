@@ -123,7 +123,12 @@ def _ui(argv):
 
 
 def _mcp(argv):
-    # The parser lives in the server module, so the help needs the SDK too. Say how to get it.
+    # The parser lives apart from the server, so the help needs no SDK (as for `trials ui`).
+    # Without the SDK, the server itself says how to get it.
+    from .mcp.arguments import build_parser
+    if any(a in ("-h", "--help") for a in argv):
+        build_parser().print_help()
+        return 0
     try:
         from .mcp import server
     except ImportError as exc:

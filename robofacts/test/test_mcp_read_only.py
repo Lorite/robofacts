@@ -403,3 +403,16 @@ def test_trials_mcp_says_how_to_install_the_sdk_when_it_is_missing(monkeypatch, 
     monkeypatch.delattr(robofacts.mcp, "server", raising=False)
     assert cli.main(["mcp", "--list-tools"]) == 2
     assert "pip install 'robofacts[mcp]'" in capsys.readouterr().err
+
+
+def test_trials_mcp_help_needs_no_sdk(monkeypatch, capsys):
+    """`trials ui --help` works without Flask, and `trials mcp --help` said "needs the MCP
+    Python SDK" instead of the help (2026-11-25). The parser lives apart from the server."""
+    import robofacts.mcp
+    from robofacts import cli
+    monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
+    monkeypatch.delitem(sys.modules, "robofacts.mcp.server", raising=False)
+    monkeypatch.delattr(robofacts.mcp, "server", raising=False)
+    assert cli.main(["mcp", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("usage: trials mcp") and "--list-tools" in out and "--experiments-root" in out
