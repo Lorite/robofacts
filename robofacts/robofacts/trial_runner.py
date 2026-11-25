@@ -1029,7 +1029,7 @@ DEFAULT_STEPS = {"setup": True, "launch": True, "record": True,
                  "action": True, "livestream": False}
 
 
-def tally(statuses: Iterable[str]) -> Dict[str, Any]:
+def tally(statuses: Iterable[str], unverified: int = 0) -> Dict[str, Any]:
     """The closing count every surface shows, computed in ONE place.
 
     Leads with the successes on purpose (the operator, 2026-08-12: "1 blocked,
@@ -1037,14 +1037,40 @@ def tally(statuses: Iterable[str]) -> Dict[str, Any]:
     prints ``line`` and exits on ``bad``, and the web UI shows the same
     ``line`` on its run page, so the two can never disagree about how a batch
     went.
+
+    ``unverified`` is how many of the trials that ran recorded metadata with contract
+    problems (:func:`contract_problems`). Such a trial is recorded but never counts, and the
+    next run records it again, so it is counted apart and not called OK (2026-11-25). It
+    does not make the batch ``bad``: the exit code stays what it was.
     """
     statuses = list(statuses)
-    ok = sum(1 for s in statuses if s == "ran")
+    ran = sum(1 for s in statuses if s == "ran")
+    unverified = min(max(int(unverified), 0), ran)
+    ok = ran - unverified
     blocked = sum(1 for s in statuses if s == "blocked")
     failed = sum(1 for s in statuses if s == "failed")
-    return {"total": len(statuses), "ok": ok, "blocked": blocked, "failed": failed,
+    parts = [f"{ok} OK"]
+    if unverified:
+        parts.append(f"{unverified} recorded but unverified (contract problems)")
+    parts += [f"{blocked} blocked", f"{failed} failed"]
+    return {"total": len(statuses), "ok": ok, "unverified": unverified,
+            "blocked": blocked, "failed": failed,
             "bad": bool(blocked or failed),
-            "line": f"{len(statuses)} trial(s): {ok} OK, {blocked} blocked, {failed} failed"}
+            "line": f"{len(statuses)} trial(s): " + ", ".join(parts)}
+
+
+def contract_problems(result: "TrialResult") -> List[str]:
+    """The contract problems (``_schema_problems``) that a trial which ran wrote into its
+    ``trial_metadata.json``: the index calls such a trial unverified. Empty when there are
+    none, and when the file is not on this machine (a trial recorded on another host)."""
+    if result.status != "ran" or result.bag_dir is None:
+        return []
+    try:
+        metadata = json.loads((Path(result.bag_dir) / "trial_metadata.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    problems = metadata.get("_schema_problems") if isinstance(metadata, dict) else None
+    return [str(p) for p in problems] if isinstance(problems, list) else []
 
 
 def speak_gate_reasons(result: Any, limit: int = 3) -> List[str]:
@@ -3144,17 +3170,30 @@ def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print("Nothing to run — the campaign is already covered.")
         return 0
 
+    unverified = 0
     for result in results:
         colour = {"blocked": "31;1", "failed": "31"}.get(result.status, "32")
-        print(f"\n[{_c(colour, result.status)}] {result.trial.describe()}")
+        label = _c(colour, result.status)
+        # A trial with contract problems ran and is recorded, but it never counts and the
+        # next run records it again: "OK" used to say the opposite (2026-11-25).
+        problems = contract_problems(result)
+        if problems:
+            unverified += 1
+            label = _c("33;1", "ran, unverified")
+        print(f"\n[{label}] {result.trial.describe()}")
         if result.detail:
             print(f"    {result.detail}")
+        if problems:
+            print(f"    recorded but unverified: {len(problems)} contract problem(s) in "
+                  f"trial_metadata.json, the first: {problems[0]}. It does not count as "
+                  f"coverage, and the next run records the trial again.")
         for cmd in result.commands:
             print(f"    $ {shlex.join(cmd)}")
 
     # The shared closing count (tally() above) — the web UI shows the same line.
-    counts = tally(r.status for r in results)
-    print("\n" + _c("31;1" if counts["bad"] else "32;1", counts["line"]))
+    counts = tally((r.status for r in results), unverified=unverified)
+    colour = "31;1" if counts["bad"] else ("33;1" if counts["unverified"] else "32;1")
+    print("\n" + _c(colour, counts["line"]))
     return 1 if counts["bad"] else 0
 
 
