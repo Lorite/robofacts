@@ -1,0 +1,76 @@
+name: release
+
+# Publishes the general package, robofacts/, to PyPI when a version tag (v*) is pushed.
+# Authentication is PyPI trusted publishing (OpenID Connect): no token or password is stored in
+# this repository. PyPI trusts exactly this file name (release.yaml), this repository and the
+# environment `pypi`, so renaming the file or the environment needs the same change on pypi.org.
+# A manual run (workflow_dispatch) builds and checks the distributions and never publishes.
+# The ROS 2 package robofacts_ros2 is not published here: it needs rclpy, which is not on PyPI.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and check the distributions of robofacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build robofacts --outdir dist
+          ls -l dist
+      - name: twine check, warnings fail it
+        run: twine check --strict dist/*
+      - name: The tag names the version that was built
+        if: github.ref_type == 'tag'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test -f "dist/robofacts-${version}.tar.gz" && test -f "dist/robofacts-${version}-py3-none-any.whl" \
+            || { echo "tag ${GITHUB_REF_NAME} does not match the built version:"; ls dist; exit 1; }
+      - name: The wheel installs alone and a generated project passes lint, plan and one trial
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install "$(ls dist/*.whl)[test]"
+          export PATH="/tmp/wheel-env/bin:$PATH"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "$(trials --version)" = "${GITHUB_REF_NAME#v}"; fi
+          cd "$(mktemp -d)" && trials init myproject --experiment my_experiment && cd myproject
+          trials lint
+          trials plan experiments/my_experiment/campaigns/baseline.yaml
+          trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1 --execute --no-pause
+          trials index --experiment my_experiment --summary
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/robofacts
+    permissions:
+      id-token: write   # trusted publishing: the job asks GitHub for an OIDC token that PyPI checks
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
