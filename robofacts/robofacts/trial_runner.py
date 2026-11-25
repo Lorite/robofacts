@@ -2625,6 +2625,55 @@ def gate_factor_problems(campaign: "cs.Campaign", config: RunnerConfig,
     return problems
 
 
+def plan_command_problems(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
+                          extra_verify: Optional[List[Dict[str, Any]]] = None,
+                          steps: Optional[Dict[str, bool]] = None) -> List[str]:
+    """Why a command of a planned attempt cannot be rendered, once per distinct problem.
+
+    A verify step is rendered only after its trial recorded, because it gets the recording's
+    directory. A placeholder typo in one (``{rates}`` for ``{rate}``) therefore passed
+    ``trials validate`` and the dry run, and then stopped every executed trial after the
+    stack had run and the recorder had recorded (2026-11-25). Here every attempt of the plan
+    is rendered before the first one starts, with a stand-in recording directory: only the
+    placeholder names matter, and the ``{arg_*}`` of a launch argument can differ from one
+    combination to the next. The action, the setup steps and the aux launches are rendered
+    the same way, as ``_run_trial`` renders them, so a placeholder that only a later
+    combination lacks fails here too.
+    """
+    steps = {**DEFAULT_STEPS, **(steps or {})}
+    campaign = plan.campaign
+    setup = list(config.setup_steps) + list(getattr(campaign, "setup_steps", None) or [])
+    if getattr(campaign, "robot_reset", True):
+        setup += list(config.robot_resets)
+    verify = list(config.verify_steps) + list(extra_verify or [])
+    stand_in = Path(bags_dir) / "recording"
+    found: Dict[str, str] = {}
+    for item in cp.execution_order(plan):
+        trial = cs.TrialSpec(campaign.experiment, dict(item.cell.values),
+                             list(item.cell.non_defaults), repetition=item.repetition)
+        arg_ph = {f"arg_{k}": v for k, v in trial.launch_args(campaign.factors).items()}
+        recording = recording_placeholders(stand_in, trial.values)
+        renders: List[Callable[[], Any]] = []
+        if steps["setup"]:
+            renders += [lambda s=s: templated_command(s["command"], trial, f"setup step {s['name']}",
+                                                      **arg_ph) for s in setup]
+        if steps["launch"]:
+            renders += [lambda a=a: templated_command(a["command"], trial, f"aux launch {a['name']}",
+                                                      **{**recording, **arg_ph})
+                        for a in config.aux_launches]
+        if steps["action"]:
+            renders.append(lambda: action_command(trial, config, extra={**recording, **arg_ph}))
+        if steps["record"]:
+            renders += [lambda v=v: templated_command(v["command"], trial, f"verify step {v['name']}",
+                                                      **recording, **arg_ph) for v in verify]
+        for render in renders:
+            try:
+                render()
+            except RunnerError as exc:
+                found.setdefault(str(exc), trial.describe().strip())
+    return [f"{problem} (first in the attempt {where})" for problem, where in found.items()]
+
+
 def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
              gate=None, dry_run: bool = True, limit: Optional[int] = None,
              hooks: Optional[ProcessHooks] = None, slim: bool = True,
@@ -2671,6 +2720,12 @@ def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
     # reads their cells as missing, and running it would record them again. Raised as
     # trial_index.RecordingsNotMounted, which `trials` prints as an ERROR line.
     ti.require_recordings_mounted(Path(bags_dir).resolve().parents[1], plan.campaign.experiment)
+    # Every command of every attempt, rendered before the first one starts (2026-11-25): a
+    # placeholder typo in a verify step otherwise surfaces after a trial has run and recorded.
+    problems = plan_command_problems(plan, config, bags_dir, extra_verify=extra_verify, steps=steps)
+    if problems:
+        raise RunnerError("a command of the plan cannot be rendered, so no trial runs: "
+                          + "; ".join(problems))
     if stop_on_block is None:
         gate_named = any(n in plan.campaign.sweep or n in plan.campaign.fixed
                          for n in cs.gate_factors(factors))
