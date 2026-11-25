@@ -315,3 +315,35 @@ def test_an_execute_with_no_gate_at_all_says_so(bare, held_runner):
     assert "run the T-0 gate" not in page and "runs UNGATED" in page
     run = bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth())))
     assert run.campaign.endswith(" ⚠UNGATED"), run.campaign
+
+
+EVIL = {"Origin": "https://evil.example", "Referer": "https://evil.example/page.html"}
+
+
+def test_a_post_from_another_site_is_refused(bare, held_runner):
+    """C2-4: no POST action had any protection against cross-site request forgery. A form on
+    any page could start a run or exclude a trial with the browser's cached credentials."""
+    for headers in (EVIL, {"Referer": "https://evil.example/page.html"}, {"Origin": "null"},
+                    {"Origin": "http://localhost:9999"}):
+        response = bare.c.post("/run", data=DRY, headers={**auth(), **headers})
+        assert response.status_code == 403, headers
+        assert "another site" in response.get_data(as_text=True)
+    response = bare.c.post("/exclude/demo_log_recorder/nonexistent", headers={**auth(), **EVIL},
+                           data={"reason": "x", "category": "other"})
+    assert response.status_code == 403
+    assert bare.runs.all() == [], "nothing may start"
+    # --no-auth: the origin check does not depend on the password.
+    from robofacts.ui import app as ui
+    open_app = ui.create_app(bare.root, password=None)
+    open_app.config["TESTING"] = True
+    assert open_app.test_client().post("/run", data=DRY, headers=EVIL).status_code == 403
+
+
+def test_a_post_from_the_interface_itself_or_from_a_script_passes(bare, held_runner):
+    """The interface's own pages (same host:port, also behind a proxy that names the
+    host it served) and requests with no Origin or Referer (curl, scripts) pass."""
+    for headers in ({}, {"Origin": "http://localhost"}, {"Origin": "http://LOCALHOST:80"},
+                    {"Referer": "http://localhost/e/demo_log_recorder/c/grid"},
+                    {"Origin": "https://lab.example", "X-Forwarded-Host": "lab.example"}):
+        response = bare.c.post("/run", data=DRY, headers={**auth(), **headers})
+        assert response.status_code == 302, (headers, response.get_data(as_text=True)[:400])

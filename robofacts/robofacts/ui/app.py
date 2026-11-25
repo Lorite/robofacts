@@ -51,6 +51,7 @@ from functools import wraps
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, redirect, render_template, request, send_file, url_for
 from jinja2 import ChoiceLoader, FileSystemLoader
@@ -960,6 +961,46 @@ class ExperimentCache:
             self._entries.clear()
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _host_port(netloc: str, scheme: str) -> Optional[Tuple[str, int]]:
+    """(host, port) of a ``host[:port]``, the port defaulted from the scheme, or None."""
+    try:
+        parts = urlsplit(f"//{netloc}")
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.hostname:
+        return None
+    return parts.hostname.lower(), port if port is not None else _DEFAULT_PORTS.get(scheme, -1)
+
+
+def foreign_origin(origin: Optional[str], referer: Optional[str], host: str) -> str:
+    """The origin a POST came from when it is not ``host`` (this interface), else "".
+
+    The Origin header decides, the Referer only when there is no Origin, and a
+    request with neither is not refused: it does not come from a browser form.
+    An origin that names no host (``null``, from a sandboxed frame or a file)
+    is foreign. The port of either side defaults from the origin's scheme, the
+    way a browser leaves the default port out of both headers.
+    """
+    source = (origin or "").strip() or (referer or "").strip()
+    if not source:
+        return ""
+    try:
+        parts = urlsplit(source)
+    except ValueError:
+        return source
+    if parts.scheme not in _DEFAULT_PORTS or not parts.netloc:
+        return source
+    theirs = _host_port(parts.netloc, parts.scheme)
+    ours = _host_port(host, parts.scheme)
+    if theirs is None or ours is None or theirs != ours:
+        return f"{parts.scheme}://{parts.netloc}"
+    return ""
+
+
 def experiment_names(root: Path) -> List[str]:
     """Framework experiments: a folder with campaigns or a runner.yaml (offline studies have neither)."""
     names = {p.parents[1].name for p in root.glob("*/campaigns/*.yaml")}
@@ -1032,12 +1073,31 @@ def create_app(experiments_root: Optional[Path] = None,
         A view-only app does not register it at all, so the URL answers 404 rather
         than relying on a hidden button. Templates guard their forms with
         ``view_only``, and a url_for() of an unregistered action fails loudly in
-        the view-only page tests.
+        the view-only page tests. A registered action refuses (403) a POST that
+        a browser sent from a page of another site (``foreign_origin``).
         """
         def register(view):
             if app.config["VIEW_ONLY"]:
                 return view
-            return app.route(rule, methods=["POST"])(view)
+
+            @wraps(view)
+            def same_site_only(*args, **kwargs):
+                # Cross-site request forgery (2026-11-25): a page on any other site could
+                # post a form here, and the browser added the cached Basic credentials,
+                # so a link could start a run or a stop. A browser names the page a POST
+                # comes from; a request from another host:port is refused. A POST with
+                # neither header (curl, scripts, the tests) is not a browser form.
+                expected = (request.headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+                source = foreign_origin(request.headers.get("Origin"),
+                                        request.headers.get("Referer"), expected or request.host)
+                if source:
+                    return error(f"Refused: this request came from {source}, not from this "
+                                 f"interface ({expected or request.host}). A page on another site "
+                                 f"cannot run, stop or move anything here, even while your browser "
+                                 f"holds the password. Open the interface itself and use its "
+                                 f"buttons.", 403)
+                return view(*args, **kwargs)
+            return app.route(rule, methods=["POST"])(same_site_only)
         return register
 
     def root() -> Path:
