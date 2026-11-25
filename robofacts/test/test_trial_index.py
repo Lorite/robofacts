@@ -207,6 +207,18 @@ def test_report_shows_all_three_buckets_and_the_gap(root):
     assert "have no bag at all" in report, "an empty combination must be called out"
 
 
+def test_the_grid_shows_the_axes_that_vary_before_a_constant_one(root):
+    """Three varying axes and one constant axis (every trial ran on the same host): the grid
+    must not spend one of its three places on the constant axis."""
+    import itertools
+    for i, (a, b, c) in enumerate(itertools.product(["x", "y"], ["p", "q"], ["m", "n"])):
+        make_trial(root, "expA", f"t{i}", dict(BASE, axis_a=a, axis_b=b, axis_c=c))
+    report = ti.render_report(ti.load_trials(root), root)
+    axes_line = next(line for line in report.splitlines() if "Axes:" in line)
+    assert all(f"`{axis}`" in axes_line.split("_(")[0] for axis in ("axis_a", "axis_b", "axis_c")), axes_line
+    assert "--factors" in axes_line
+
+
 def test_report_flags_contract_violations(root):
     make_trial(root, "expA", "t1", {"backend": "x"})
     report = ti.render_report(ti.load_trials(root), root, ["backend"])
