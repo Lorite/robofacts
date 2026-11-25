@@ -378,3 +378,17 @@ def test_a_campaign_field_cannot_leave_the_experiments_campaigns_folder(bare, tm
     # The campaign files of a known experiment still load.
     assert bare.c.get("/api/plan/demo_log_recorder/grid.json", headers=auth()).status_code == 200
     assert bare.c.post("/run", data=DRY, headers=auth()).status_code == 302
+
+
+@pytest.mark.parametrize("hold", ["nan", "inf", "-5", "3601", "1e9", "soon"])
+def test_a_manual_window_that_is_not_0_to_3600_seconds_is_refused(bare, held_runner, hold):
+    """C2-6b: /run accepted any hold_s, so "nan", a negative or a huge window reached the runner."""
+    response = bare.c.post("/run", data={**EXECUTE, "hold_s": hold}, headers=auth())
+    assert response.status_code == 400, hold
+    assert "manual window" in response.get_data(as_text=True)
+    assert bare.runs.all() == []
+
+
+@pytest.mark.parametrize("hold", ["", "0", "60", "3600"])
+def test_a_manual_window_from_0_to_3600_seconds_is_accepted(bare, held_runner, hold):
+    assert bare.c.post("/run", data={**DRY, "hold_s": hold}, headers=auth()).status_code == 302

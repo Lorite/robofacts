@@ -36,6 +36,7 @@ Deliberate design constraints
 from __future__ import annotations
 
 import errno
+import math
 import re
 import os
 import secrets
@@ -224,6 +225,9 @@ class ActiveRun:
                 "tally": tr.tally(r["status"] for r in self.results),
                 "log": list(self.log), "error": self.error}
 
+
+#: The longest manual window (hold_s) /run accepts, in seconds.
+MAX_HOLD_S = 3600.0
 
 #: What the routes answer (409) when the rig's single run slot is taken.
 SLOT_BUSY = ("A campaign or an exploration is already running. Two stacks sharing one rig "
@@ -1511,10 +1515,15 @@ def create_app(experiments_root: Optional[Path] = None,
         if request.form.get("steps_present") == "1":
             steps = {k: request.form.get(f"step_{k}") == "1"
                      for k in ("setup", "launch", "record", "action", "livestream")}
+        # The manual window holds a live stack open, so it is bounded: before
+        # 2026-11-25 any float was accepted, "nan", "-5" or 1e9 seconds included.
         try:
             hold_s = float(request.form.get("hold_s") or 60)
         except ValueError:
-            hold_s = 60.0
+            hold_s = math.nan
+        if not math.isfinite(hold_s) or not 0 <= hold_s <= MAX_HOLD_S:
+            return error(f"The manual window must be a number of seconds from 0 to {MAX_HOLD_S:g} "
+                         f"(got {request.form.get('hold_s')!r}).", 400)
         # The pose pause between the T-0 gate and the recorder (b0b42729ac):
         # on by default in the FORM (a missed pose window costs a reflight),
         # off when the field is absent so scripted POSTs never park a run on
