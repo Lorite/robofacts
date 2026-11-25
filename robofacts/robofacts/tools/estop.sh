@@ -82,19 +82,55 @@ done
 
 [ -f "$CONFIG" ] || { echo "Robot config not found: $CONFIG" >&2; exit 2; }
 
-# Emit one TAB-separated line per robot:
-# name, host, container, shell, verified, command, description, why this host,
-# the hostname inside the target's container ("-" when unknown)
+# Write one record per robot to stdout: ten fields, each ended by a NUL byte (2026-11-25).
+# The fields: kind (ROBOT, SKIP, BAD or ERROR), name, host, container, shell, verified, command,
+# description, why this host, and the hostname inside the target's container ("-" when unknown).
+# A SKIP or BAD record carries its reason in the third field, an ERROR record its message in the
+# second. Before 2026-11-25 the records were TAB-separated lines: a multi-line command ran only
+# its first line, its second line became a robot of its own, and a stop written as a plain
+# string (the form the skeleton robots.yaml documents) crashed the reader, so the robots after it
+# got no stop while the script reported success.
 read_config() {
     python3 - "$CONFIG" "$ACTION" "$ROBOT" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
 import sys, yaml
 config_path, action, only, level, pkg = sys.argv[1:6]
-with open(config_path) as fh:
-    data = yaml.safe_load(fh) or {}
-robots = data.get("robots") or {}
+out = sys.stdout.buffer
+
+
+def emit(kind, *fields):
+    record = [kind, *(str(f) for f in fields)]
+    record += ["-"] * (10 - len(record))
+    for field in record:
+        out.write(field.replace("\0", " ").encode("utf-8", "replace") + b"\0")
+    out.flush()
+
+
+def stop_entry(entry):
+    """The command and the description of a stop entry, in either documented form."""
+    if isinstance(entry, str):
+        command, description = entry, ""
+    elif isinstance(entry, dict):
+        command, description = entry.get("command"), entry.get("description")
+    else:
+        raise ValueError(f"expected a command string or a mapping with 'command', "
+                         f"got {type(entry).__name__}")
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError("it has no command")
+    return command.strip(), str(description or "").strip() or "-"
+
+
+try:
+    with open(config_path) as fh:
+        data = yaml.safe_load(fh) or {}
+    robots = data.get("robots") or {}
+    if not isinstance(robots, dict):
+        raise ValueError(f"'robots' must map each robot to its settings, got {type(robots).__name__}")
+except Exception as exc:  # a config that cannot be read must stop the script, loudly
+    emit("ERROR", f"cannot read {config_path} ({type(exc).__name__}: {exc})")
+    sys.exit(0)
 if only:
     if only not in robots:
-        print(f"__ERROR__\tunknown robot {only!r}; configured: {', '.join(sorted(robots))}")
+        emit("ERROR", f"unknown robot {only!r}; configured: {', '.join(sorted(map(str, robots)))}")
         sys.exit(0)
     robots = {only: robots[only]}
 try:
@@ -104,29 +140,47 @@ try:
     marker = run_marker.read_live(root) if root else None
     targets = hr.robot_targets(config_path, robots, level=level or None, marker=marker)
 except Exception as exc:  # an unresolvable target must stop the script, loudly
-    print(f"__ERROR__\tcannot resolve where the robots run ({type(exc).__name__}: {exc})")
+    emit("ERROR", f"cannot resolve where the robots run ({type(exc).__name__}: {exc})")
     sys.exit(0)
 for name, spec in robots.items():
-    entry = (spec or {}).get(action)
-    if not entry or not entry.get("command"):
-        print(f"__SKIP__\t{name}\tno {action} configured")
-        continue
-    # Never emit an EMPTY field: bash `read` with IFS=tab collapses consecutive
-    # tabs (tab is whitespace), so a robot with no container would silently
-    # shift every later field left - which produced `docker exec zsh ...`.
-    target = targets[name]
-    print("\t".join([
-        name,
-        target.host or "local",
-        target.container or "-",
-        target.shell or "zsh",
-        "yes" if spec.get("verified") else "NO",
-        entry["command"].strip(),
-        str(entry.get("description", "")).strip() or "-",
-        target.source.replace("\t", " ") or "-",
-        target.container_hostname or "-",
-    ]))
+    name = str(name)
+    try:
+        if spec is None or (isinstance(spec, dict) and spec.get(action) is None):
+            emit("SKIP", name, f"no {action} configured")
+            continue
+        if not isinstance(spec, dict):
+            raise ValueError(f"the robot entry must be a mapping, got {type(spec).__name__}")
+        command, description = stop_entry(spec[action])
+        target = targets[name]
+        emit("ROBOT", name, target.host or "local", target.container or "-", target.shell or "zsh",
+             "yes" if spec.get("verified") else "NO", command, description,
+             target.source or "-", target.container_hostname or "-")
+    except Exception as exc:  # this robot gets no stop, and the script reports a failure
+        emit("BAD", name, f"its {action} entry cannot be used ({type(exc).__name__}: {exc})")
 PY
+}
+
+# Read one record of read_config into the array REC. Returns 1 at the end of the records, and
+# then REC holds the fields of a record that was cut short (none at a clean end).
+read_record() {
+    local field
+    REC=()
+    while [ "${#REC[@]}" -lt 10 ]; do
+        IFS= read -r -d '' field || return 1
+        REC+=("$field")
+    done
+}
+
+# Quote one argument for the next shell. printf %q writes a line break as $'\n', which a POSIX sh
+# does not read, so a multi-line command is single-quoted instead, which every shell reads. A
+# one-line command keeps the printf %q form.
+quote() {
+    local q
+    q="$(printf '%q' "$1")"
+    case "$q" in
+        *"\$'"*) printf "'%s'" "${1//\'/\'\\\'\'}" ;;
+        *) printf '%s' "$q" ;;
+    esac
 }
 
 # Build the full command for one robot, honouring host + container.
@@ -201,7 +255,7 @@ build_command() {
         # restarts. The inner limit ends 2 s before the outer one, so a hung stop
         # still exits with 124 and the FAIL line keeps its explanation. `-k 2`
         # sends SIGKILL to a command that ignores SIGTERM.
-        wrapped="docker exec $container timeout -k 2 $INNER_TIMEOUT $shell -lc $(printf '%q' "$inner")"
+        wrapped="docker exec $container timeout -k 2 $INNER_TIMEOUT $shell -lc $(quote "$inner")"
         if docker container inspect "$container" >/dev/null 2>&1; then
             printf '%s' "$wrapped"
             return
@@ -210,7 +264,7 @@ build_command() {
     if [ "$host" != "local" ]; then
         # ForwardX11=no: an ssh config with X11 forwarding prints xauth warnings
         # into the captured output, burying the real error under pressure.
-        wrapped="ssh -o ConnectTimeout=5 -o BatchMode=yes -o ForwardX11=no $host $(printf '%q' "$wrapped")"
+        wrapped="ssh -o ConnectTimeout=5 -o BatchMode=yes -o ForwardX11=no $host $(quote "$wrapped")"
     fi
     printf '%s' "$wrapped"
 }
@@ -221,22 +275,57 @@ if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [ "$TIMEOUT" -lt 1 ]; then
 fi
 INNER_TIMEOUT=$(( TIMEOUT > 3 ? TIMEOUT - 2 : 1 ))
 
-MAPFILE=$(read_config)
-if [ -z "$MAPFILE" ]; then
-    echo "No robots configured in $CONFIG" >&2
+TMPDIR_RUN="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_RUN"' EXIT
+
+read_config >"$TMPDIR_RUN/records"
+READER_RC=$?
+KIND=(); NAME=(); HOST=(); CONTAINER=(); SHELL_IN=(); VERIFIED=(); COMMAND=(); DESC=(); SOURCE=(); CHOST=()
+while read_record; do
+    KIND+=("${REC[0]}"); NAME+=("${REC[1]}"); HOST+=("${REC[2]}"); CONTAINER+=("${REC[3]}")
+    SHELL_IN+=("${REC[4]}"); VERIFIED+=("${REC[5]}"); COMMAND+=("${REC[6]}"); DESC+=("${REC[7]}")
+    SOURCE+=("${REC[8]}"); CHOST+=("${REC[9]}")
+done <"$TMPDIR_RUN/records"
+# A record cut short means that the reader died while it wrote it.
+if [ "${#REC[@]}" -gt 0 ] && [ "$READER_RC" -eq 0 ]; then READER_RC=1; fi
+
+ERRORS=0
+for i in "${!KIND[@]}"; do
+    if [ "${KIND[$i]}" = "ERROR" ]; then echo "${NAME[$i]}" >&2; ERRORS=1; fi
+done
+[ "$ERRORS" -eq 1 ] && exit 2
+if [ "${#KIND[@]}" -eq 0 ]; then
+    if [ "$READER_RC" -ne 0 ]; then
+        echo "Could not read the robots in $CONFIG (the reader exited with $READER_RC)" >&2
+    else
+        echo "No robots configured in $CONFIG" >&2
+    fi
     exit 2
 fi
-if grep -q '^__ERROR__' <<<"$MAPFILE"; then
-    echo "$(grep '^__ERROR__' <<<"$MAPFILE" | cut -f2)" >&2
-    exit 2
+# The reader died after some robots: those still get their stop, and the script reports a
+# failure, because the robots after them got none.
+READER_FAILED=0
+if [ "$READER_RC" -ne 0 ]; then
+    READER_FAILED=1
+    echo "The robot config reader failed (exit $READER_RC) after ${#KIND[@]} robot(s): any robot after them gets NO stop." >&2
 fi
+# Robots whose stop entry cannot be used (2026-11-25): they get no stop, and each one counts
+# as a failed stop, in --list, in --dry-run and in the real stop.
+BAD=()
+for i in "${!KIND[@]}"; do
+    [ "${KIND[$i]}" = "BAD" ] && BAD+=("$i")
+done
 
 if [ "$LIST" -eq 1 ]; then
     echo "Configured robots ($CONFIG):"
-    while IFS=$'\t' read -r name host container shell verified command desc source chost; do
-        [ "$name" = "__SKIP__" ] && { echo "  - $host: $container"; continue; }
+    for i in "${!KIND[@]}"; do
+        name="${NAME[$i]}" host="${HOST[$i]}" container="${CONTAINER[$i]}"
+        case "${KIND[$i]}" in
+            SKIP) echo "  - $name: $host"; continue ;;
+            BAD) echo "  $name  [$ACTION]  NO STOP: $host"; continue ;;
+        esac
         # The route from HERE, from the same function that builds the real stop.
-        probe="$(build_command "$host" "$container" "$shell" "PROBE" "$chost")"
+        probe="$(build_command "$host" "$container" "${SHELL_IN[$i]}" "PROBE" "${CHOST[$i]}")"
         case "$probe" in
             PROBE) route="runs directly here, in this container" ;;
             docker\ exec*) route="docker exec $container on this machine" ;;
@@ -245,50 +334,60 @@ if [ "$LIST" -eq 1 ]; then
         esac
         # The host that will actually be dialled and why, so --list cannot reassure
         # you about an alias that RIG_HOST or a running trial has replaced.
-        echo "  $name  [$ACTION]  host=$host container=$([ "$container" = "-" ] && echo none || echo "$container") verified=$verified"
-        echo "      target: $source"
+        echo "  $name  [$ACTION]  host=$host container=$([ "$container" = "-" ] && echo none || echo "$container") verified=${VERIFIED[$i]}"
+        echo "      target: ${SOURCE[$i]}"
         echo "      route:  $route"
-        echo "      $desc"
-        echo "      $command"
-    done <<<"$MAPFILE"
+        echo "      ${DESC[$i]}"
+        printf '%s\n' "${COMMAND[$i]}" | sed 's/^/      /'
+    done
+    [ "${#BAD[@]}" -gt 0 ] || [ "$READER_FAILED" -eq 1 ] && exit 1
     exit 0
 fi
 
 echo "=== ${ACTION^^} ==="
 FAILED=0
 PIDS=()
-NAMES=()
-TMPDIR_RUN="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR_RUN"' EXIT
+SENT=()
 
-while IFS=$'\t' read -r name host container shell verified command desc source chost; do
-    if [ "$name" = "__SKIP__" ]; then
-        echo "  SKIP  $host ($container)"
-        continue
-    fi
-    full="$(build_command "$host" "$container" "$shell" "$command" "$chost")"
-    if [ "$verified" = "NO" ]; then
+for i in "${!KIND[@]}"; do
+    name="${NAME[$i]}" host="${HOST[$i]}" container="${CONTAINER[$i]}"
+    case "${KIND[$i]}" in
+        SKIP) echo "  SKIP  $name ($host)"; continue ;;
+        BAD) echo "  !!    $name: $host, NO STOP SENT"; continue ;;
+    esac
+    full="$(build_command "$host" "$container" "${SHELL_IN[$i]}" "${COMMAND[$i]}" "${CHOST[$i]}")"
+    if [ "${VERIFIED[$i]}" = "NO" ]; then
         echo "  ⚠ $name: this entry is NOT verified against the real robot (robots.yaml)"
     fi
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "  [$name] $full"
         continue
     fi
-    # Run robots in PARALLEL: one hanging ssh must not delay stopping the others.
-    ( timeout "$TIMEOUT" bash -c "$full" >"$TMPDIR_RUN/$name.out" 2>&1; echo $? >"$TMPDIR_RUN/$name.rc" ) &
+    # Run robots in PARALLEL: one hanging ssh must not delay stopping the others. The files
+    # are named by the record's index, because a robot's name may hold any character.
+    ( timeout "$TIMEOUT" bash -c "$full" >"$TMPDIR_RUN/$i.out" 2>&1; echo $? >"$TMPDIR_RUN/$i.rc" ) &
     PIDS+=("$!")
-    NAMES+=("$name")
-    echo "  ... $name ($desc) -> $host$([ "$container" = "-" ] || echo "/$container"), $source"
-done <<<"$MAPFILE"
-
-[ "$DRY_RUN" -eq 1 ] && { echo ""; echo "--dry-run: nothing sent."; exit 0; }
-
-for i in "${!PIDS[@]}"; do
-    wait "${PIDS[$i]}"
+    SENT+=("$i")
+    echo "  ... $name (${DESC[$i]}) -> $host$([ "$container" = "-" ] || echo "/$container"), ${SOURCE[$i]}"
 done
 
-for name in "${NAMES[@]}"; do
-    rc="$(cat "$TMPDIR_RUN/$name.rc" 2>/dev/null || echo 1)"
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo ""
+    echo "--dry-run: nothing sent."
+    if [ "${#BAD[@]}" -gt 0 ] || [ "$READER_FAILED" -eq 1 ]; then
+        echo "$((${#BAD[@]} + READER_FAILED)) problem(s) above: the real stop would NOT reach every robot." >&2
+        exit 1
+    fi
+    exit 0
+fi
+
+for pid in "${PIDS[@]}"; do
+    wait "$pid"
+done
+
+for i in "${SENT[@]}"; do
+    name="${NAME[$i]}"
+    rc="$(cat "$TMPDIR_RUN/$i.rc" 2>/dev/null || echo 1)"
     if [ "$rc" = "0" ]; then
         echo "  OK    $name"
     else
@@ -300,14 +399,22 @@ for name in "${NAMES[@]}"; do
         # hunting for a fault on a robot that was never powered. It still
         # counts as NOT CONFIRMED: this cannot prove the robot is safe, only
         # that nothing answered.
-        if [ "$rc" = "124" ] && grep -q "waiting for service" "$TMPDIR_RUN/$name.out" 2>/dev/null; then
+        if [ "$rc" = "124" ] && grep -q "waiting for service" "$TMPDIR_RUN/$i.out" 2>/dev/null; then
             echo "  FAIL  $name (rc=124: no service — driver not running, robot likely powered OFF)"
         else
             echo "  FAIL  $name (rc=$rc)"
         fi
-        sed 's/^/          /' "$TMPDIR_RUN/$name.out" 2>/dev/null | tail -4
+        sed 's/^/          /' "$TMPDIR_RUN/$i.out" 2>/dev/null | tail -4
     fi
 done
+for i in "${BAD[@]}"; do
+    FAILED=$((FAILED + 1))
+    echo "  FAIL  ${NAME[$i]} (no stop sent: ${HOST[$i]})"
+done
+if [ "$READER_FAILED" -eq 1 ]; then
+    FAILED=$((FAILED + 1))
+    echo "  FAIL  the robot config reader (exit $READER_RC): a robot after the ones above got no stop"
+fi
 
 echo "==="
 if [ "$FAILED" -gt 0 ]; then
