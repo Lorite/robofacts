@@ -83,7 +83,9 @@ for name, spec in (data.get("robots") or {}).items():
         continue
     print(f"{name}:")
     for act, entry in actions.items():
-        print(f"  {act:<8} {entry.get('description', '-')}")
+        # An action may be a plain command string, the form estop.sh also reads.
+        description = entry.get("description", "-") if isinstance(entry, dict) else "-"
+        print(f"  {act:<8} {description}")
 PY
     exit 0
 fi
@@ -95,24 +97,65 @@ fi
 ROBOT="${ARGS[0]}"
 ACTION="${ARGS[1]}"
 
-# One TAB-separated line: host, container, shell, command (same emit rules as
-# estop.sh — never an empty field, tabs collapse under IFS).
-LINE=$(python3 - "$CONFIG" "$ROBOT" "$ACTION" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
+# Write the action's record to stdout: six fields, each ended by a NUL byte (2026-11-25, the
+# reader of estop.sh): kind (ACTION or ERROR), host, container, shell, command, and the hostname
+# inside the target's container ("-" when unknown). An ERROR record carries its message in the
+# second field. Before 2026-11-25 the record was one TAB-separated line read with
+# `IFS=$'\t' read`: a multi-line action ran only its first line, and its container_hostname was
+# lost with the rest of the line, so inside any container the action ran right there, in a twin
+# of the robot's container. An action written as a plain string crashed the reader.
+read_action() {
+    python3 - "$CONFIG" "$ROBOT" "$ACTION" "$HOST_LEVEL" "$PKG_PARENT" <<'PY'
 import sys, yaml
 config_path, robot, action, level, pkg = sys.argv[1:6]
-with open(config_path) as fh:
-    data = yaml.safe_load(fh) or {}
-robots = data.get("robots") or {}
-spec = robots.get(robot)
-if spec is None:
-    print(f"__ERROR__\tunknown robot {robot!r}; configured: {', '.join(sorted(robots))}")
+out = sys.stdout.buffer
+
+
+def emit(kind, *fields):
+    record = [kind, *(str(f) for f in fields)]
+    record += ["-"] * (6 - len(record))
+    for field in record:
+        out.write(field.replace("\0", " ").encode("utf-8", "replace") + b"\0")
+    out.flush()
     sys.exit(0)
+
+
+def action_command(entry):
+    """The command of an action entry, in either documented form."""
+    if isinstance(entry, str):
+        command = entry
+    elif isinstance(entry, dict):
+        command = entry.get("command")
+    else:
+        raise ValueError(f"expected a command string or a mapping with 'command', "
+                         f"got {type(entry).__name__}")
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError("it has no command")
+    return command.strip()
+
+
+try:
+    with open(config_path) as fh:
+        data = yaml.safe_load(fh) or {}
+    robots = data.get("robots") or {}
+    if not isinstance(robots, dict):
+        raise ValueError(f"'robots' must map each robot to its settings, got {type(robots).__name__}")
+except Exception as exc:  # a config that cannot be read stops the script, loudly
+    emit("ERROR", f"cannot read {config_path} ({type(exc).__name__}: {exc})")
+if robot not in robots:
+    emit("ERROR", f"unknown robot {robot!r}; configured: {', '.join(sorted(map(str, robots)))}")
+spec = robots[robot]
+if not isinstance(spec, dict):
+    emit("ERROR", f"robot {robot!r}: its entry must be a mapping, got {type(spec).__name__}")
 actions = spec.get("actions") or {}
-entry = actions.get(action)
-if not entry or not entry.get("command"):
-    have = ", ".join(sorted(actions)) or "none"
-    print(f"__ERROR__\trobot {robot!r} has no action {action!r}; declared: {have}")
-    sys.exit(0)
+if not isinstance(actions, dict) or action not in actions:
+    have = ", ".join(sorted(map(str, actions))) if isinstance(actions, dict) else "none"
+    emit("ERROR", f"robot {robot!r} has no action {action!r}; declared: {have or 'none'}")
+try:
+    command = action_command(actions[action])
+except Exception as exc:
+    emit("ERROR", f"robot {robot!r}: its action {action!r} cannot be used "
+                  f"({type(exc).__name__}: {exc})")
 try:
     sys.path.insert(0, pkg)
     from robofacts import host_registry as hr, run_marker
@@ -121,23 +164,37 @@ try:
     target = hr.robot_targets(config_path, {robot: spec}, level=level or None,
                               marker=marker)[robot]
 except Exception as exc:
-    print(f"__ERROR__\tcannot resolve where {robot!r} runs ({type(exc).__name__}: {exc})")
-    sys.exit(0)
-print("\t".join([
-    target.host or "local",
-    target.container or "-",
-    target.shell or "zsh",
-    entry["command"].strip(),
-    target.container_hostname or "-",
-]))
+    emit("ERROR", f"cannot resolve where {robot!r} runs ({type(exc).__name__}: {exc})")
+emit("ACTION", target.host or "local", target.container or "-", target.shell or "zsh", command,
+     target.container_hostname or "-")
 PY
-)
+}
 
-case "$LINE" in
-    __ERROR__*) echo "${LINE#__ERROR__	}" >&2; exit 2 ;;
-esac
+# Quote one argument for the next shell, as estop.sh does: printf %q writes a line break as
+# $'\n', which a POSIX sh does not read, so a multi-line command is single-quoted instead,
+# which every shell reads. A one-line command keeps the printf %q form.
+quote() {
+    local q
+    q="$(printf '%q' "$1")"
+    case "$q" in
+        *"\$'"*) printf "'%s'" "${1//\'/\'\\\'\'}" ;;
+        *) printf '%s' "$q" ;;
+    esac
+}
 
-IFS=$'\t' read -r HOST CONTAINER SHELL_BIN COMMAND CHOST <<<"$LINE"
+REC=()
+while IFS= read -r -d '' field; do
+    REC+=("$field")
+done < <(read_action)
+if [ "${#REC[@]}" -ne 6 ]; then
+    echo "Could not read the action $ROBOT.$ACTION from $CONFIG (the reader failed)" >&2
+    exit 2
+fi
+if [ "${REC[0]}" = "ERROR" ]; then
+    echo "${REC[1]}" >&2
+    exit 2
+fi
+HOST="${REC[1]}" CONTAINER="${REC[2]}" SHELL_BIN="${REC[3]}" COMMAND="${REC[4]}" CHOST="${REC[5]}"
 
 wrapped="$COMMAND"
 [ "$CONTAINER" = "-" ] && CONTAINER=""
@@ -147,7 +204,7 @@ DOCKERENV="${TRIALS_DOCKERENV:-/.dockerenv}"
 if [ -n "$CONTAINER" ] && [ -f "$DOCKERENV" ] \
     && { [ "${CHOST:--}" = "-" ] || [ "$(hostname)" = "$CHOST" ]; }; then
     # Still a login zsh: a container may default its middleware configuration only in /etc/zsh/zshenv.
-    wrapped="timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
+    wrapped="timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(quote "$COMMAND")"
     CONTAINER=""
     HOST="local"
 fi
@@ -156,10 +213,10 @@ if [ -n "$CONTAINER" ]; then
     # documented false-dead trap).
     # The inner `timeout` bounds the command inside the container, because the
     # outer one only kills the local docker or ssh client (see estop.sh).
-    wrapped="docker exec $CONTAINER timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(printf '%q' "$COMMAND")"
+    wrapped="docker exec $CONTAINER timeout -k 2 $INNER_TIMEOUT $SHELL_BIN -lc $(quote "$COMMAND")"
 fi
 if [ "$HOST" != "local" ] && [ "$(hostname)" != "$HOST" ]; then
-    wrapped="ssh -o ConnectTimeout=5 -o BatchMode=yes -o ForwardX11=no $HOST $(printf '%q' "$wrapped")"
+    wrapped="ssh -o ConnectTimeout=5 -o BatchMode=yes -o ForwardX11=no $HOST $(quote "$wrapped")"
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
