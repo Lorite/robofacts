@@ -4,7 +4,9 @@
 #
 #   docker build -t trials-quickstart -f docker/Dockerfile .
 #   docker run --rm trials-quickstart                 # the whole loop on the example
-#   docker run --rm trials-quickstart pytest -q test  # the test suite
+#   docker run --rm trials-quickstart python3 -m pytest -q robofacts_ros2/test robofacts/test
+#                                                     # both test suites, from the copy of the
+#                                                     # repository in /opt/robofacts
 # Stage 1: the dependencies only (`--target deps`), for CI runs that build the
 # package themselves with colcon.
 FROM ros:humble AS deps
