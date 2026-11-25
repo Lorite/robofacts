@@ -852,6 +852,15 @@ def validate(campaign: Campaign) -> List[str]:
                     problems.append(f"{BLOCKED_MARKER}: {source} {name}={level!r} cannot be run. "
                                     f"{reason}")
 
+    # A level listed twice doubled the cells that want it, so the campaign asked for twice
+    # the trials of that level and could never be covered as written (found 2026-11-25).
+    for name, value in campaign.sweep.items():
+        levels = value if isinstance(value, list) else [value]
+        twice = sorted({str(level) for level in levels if levels.count(level) > 1})
+        if twice:
+            problems.append(f"sweep: {name} lists the level(s) {', '.join(twice)} more than once. "
+                            f"List each level once, `repetitions` sets how many trials each gets")
+
     overlap = set(campaign.sweep) & set(campaign.fixed)
     if overlap:
         problems.append(f"factor(s) both swept and fixed: {', '.join(sorted(overlap))}")

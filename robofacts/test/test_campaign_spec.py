@@ -178,6 +178,16 @@ def test_cross_product_size_and_repetitions(root):
     assert len(list(campaign.combinations())) == 6
 
 
+def test_a_level_listed_twice_in_a_sweep_is_refused(root):
+    """sweep: {trajectory: [hover, hover]} doubled the hover cells: the plan wanted two hover
+    trials per repetition, and an --set override with a repeated level did the same."""
+    body = "name: c\nexperiment: expA\nsweep:\n  trajectory: [hover, hover, circle]\n"
+    with pytest.raises(cs.SpecError, match="trajectory lists the level.s. hover more than once"):
+        cs.load_campaign(campaign_file(root, body), root)
+    with pytest.raises(cs.SpecError, match="more than once"):
+        cs.load_campaign(campaign_file(root, BASIC), root, ["trajectory=circle,circle"])
+
+
 def test_unswept_factors_take_their_default(root):
     trial = next(cs.load_campaign(campaign_file(root, BASIC), root).combinations())
     assert trial.values["execution_host"] == "orin"
