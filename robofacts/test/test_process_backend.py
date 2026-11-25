@@ -296,9 +296,49 @@ def test_a_dry_run_shows_the_launcher_and_the_recorder_commands(project, capsys)
     rc, out = _run(project, capsys, "--limit", "1")
     assert rc == 0
     assert re.search(r"\$ python3 experiments/plant/scripts/plant\.py --rate (slow|fast) --log", out), out
-    assert "$ python3 -m robofacts.backends.process_recorder --out" in out
+    assert "-m robofacts.backends.process_recorder" in out
+    assert f"process_recorder {sys.executable} --out" in out
     assert "ros2" not in out
     assert not any((project / "plant" / "recordings").iterdir())
+
+
+def test_the_recorder_runs_with_the_interpreter_of_trials(tmp_path):
+    """With pipx, or a virtual environment called without activating it, the ``python3`` on
+    PATH has no robofacts: the recorder runs with the interpreter that runs ``trials``
+    (2026-11-25). On a host where that path does not exist, ``python3`` runs it."""
+    command = pb.ProcessRecorder().command(tmp_path / "rec", ["a.log"])
+    assert sys.executable in command and "python3 -m" not in " ".join(command)
+    assert command[-3:] == ["--out", str(tmp_path / "rec"), "a.log"]
+    # The fallback for another host: a `python3` that prints the arguments it was given.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python3").write_text('#!/bin/sh\necho "python3 $*"\n', encoding="utf-8")
+    (bin_dir / "python3").chmod(0o755)
+    remote = [str(tmp_path / "no" / "such" / "python") if part == sys.executable else part for part in command]
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    out = subprocess.run(remote, capture_output=True, text=True, env=env, timeout=10)
+    assert out.stdout.strip() == (f"python3 -m robofacts.backends.process_recorder --out "
+                                  f"{tmp_path / 'rec'} a.log"), out.stderr
+
+
+@pytest.mark.real_sleep
+def test_a_trial_records_when_the_python3_on_path_has_no_robofacts(project, capsys, monkeypatch, tmp_path):
+    """The pipx case: `trials` runs in its own environment, and the ``python3`` on PATH runs
+    the stand-in scripts but cannot import robofacts. The recorder still records."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # -I ignores PYTHONPATH and the current directory, -S the site-packages: no robofacts.
+    (bin_dir / "python3").write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n', encoding="utf-8")
+    (bin_dir / "python3").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    probe = subprocess.run(["python3", "-c", "import robofacts"], capture_output=True, text=True)
+    assert probe.returncode != 0 and "robofacts" in probe.stderr
+    rc, out = _run(project, capsys, "--execute", "--limit", "1")
+    assert rc == 0, out
+    assert "No module named 'robofacts'" not in out
+    assert "1 trial(s): 1 OK" in out
+    (trial,) = ti.load_trials(project, "plant")
+    assert trial.status == "usable" and trial.has_bag_data
 
 
 @pytest.mark.real_sleep

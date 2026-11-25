@@ -20,6 +20,7 @@ while the recorder ran) and ``recording.json``, written last, which marks it fin
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -66,12 +67,28 @@ class ProcessLauncher:
         return {}
 
 
+#: Starts the recorder with the interpreter given as the first argument when that file exists
+#: on the machine that runs the trial, else with ``python3``. ``exec`` keeps one process, so
+#: the runner stops the recorder itself and not a shell around it.
+RECORDER_SCRIPT = ('py="$1"; shift; [ -x "$py" ] || py=python3; '
+                   'exec "$py" -m robofacts.backends.process_recorder "$@"')
+
+
 class ProcessRecorder:
     noun = "recording"
 
     def command(self, directory: Path, sources: List[str],
                 options: Optional[Dict[str, Any]] = None) -> List[str]:
-        return ["python3", "-m", "robofacts.backends.process_recorder",
+        """The recorder runs with the interpreter that runs ``trials`` (``sys.executable``).
+
+        It used to run with the ``python3`` on PATH. With pipx, or a virtual environment whose
+        ``trials`` is called without activating it, that interpreter has no robofacts:
+        ``trials validate`` said READY and every executed trial failed with "No module named
+        'robofacts'" and no recording (2026-11-25). A trial on another host runs this command
+        there, where the path of this interpreter usually does not exist: there ``python3``
+        runs the installed package, as before.
+        """
+        return ["sh", "-c", RECORDER_SCRIPT, "process_recorder", sys.executable,
                 "--out", str(directory), *[str(s) for s in sources]]
 
     def holds_data(self, directory: Path) -> bool:
