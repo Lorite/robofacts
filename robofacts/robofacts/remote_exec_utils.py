@@ -835,6 +835,32 @@ def _stop_group_survivors(pgid: int, name: str, after: str, t0: float,
               f'{time.monotonic() - t0:.1f} s in total')
 
 
+def _process_group(proc: subprocess.Popen) -> int:
+    """The process group to signal for ``proc``.
+
+    Every process that start_background starts leads its own group (setsid), so its pid is the
+    group id. os.getpgid asks the kernel only while the process is not yet reaped: after
+    that it raises ProcessLookupError, and the pid may already belong to another process
+    (third review of 2026-11-25: the stop of a stack whose ssh client had died and been
+    polled raised there, and the remote pkill that should have reached the launch in the
+    container never left)."""
+    if proc.poll() is None:
+        try:
+            return os.getpgid(proc.pid)
+        except ProcessLookupError:
+            pass
+    return proc.pid
+
+
+def _killpg(pgid: int, sig: int) -> None:
+    """``sig`` to group ``pgid``, if it still exists. An empty group is not an error: the
+    remote pkill and the rest of the stop must still run."""
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def stop_remote_process(
     proc: subprocess.Popen,
     target: RemoteTarget | None,
@@ -861,25 +887,37 @@ def stop_remote_process(
     the local tree, and a guessed anchor (the old ``Path(proc.args[0]).parent``
     fallback could resolve to ``'.'``) turns the pkill regex into a match-anything
     pattern that kills every matching process on the machine.
+
+    The remote pkill leaves before anything touches the local group, and a local client that
+    has already exited (an ssh connection lost with the Wi-Fi) does not stop the stop: the
+    remote processes still get their signal, and the report says that their end could not
+    be watched (third review of 2026-11-25).
     """
     t_int, t_term, t_kill = timeouts
     _t0 = time.monotonic()   # 2026-09-11: report how long each stop took (post-flight profiling)
     if workspace is None and target is not None:
         workspace = target.workspace
-    pgid = os.getpgid(proc.pid)
     extra = _launch_file_pattern(proc)
+    client_gone = proc.poll() is not None
 
     if target is not None:
         # Signal the real remote processes first; the tunnel will exit naturally
         # once they terminate (TTY close propagates back via -tt).
         print(f'[{name}] SIGINT -> remote processes via pkill (kind={kind})')
         pkill_workspace_launches(target, workspace, 'INT', kind=kind, extra=extra)
+    pgid = _process_group(proc)
     # Signal first, then say so: after a hangup a print could fail before the signal left.
-    os.killpg(pgid, signal.SIGINT)
+    _killpg(pgid, signal.SIGINT)
     print(f'[{name}] SIGINT -> local process group {pgid}')
+    if client_gone and target is not None:
+        print(f'[{name}] its ssh client had already exited (rc={proc.returncode}) before the '
+              f'stop: the remote processes got SIGINT via pkill, but whether they ended '
+              f'cannot be watched from here')
     try:
         proc.wait(timeout=t_int)
-        _stop_group_survivors(pgid, name, f'stopped gracefully rc={proc.returncode}', _t0,
+        _stop_group_survivors(pgid, name, (f'had already exited rc={proc.returncode}'
+                                           if client_gone else
+                                           f'stopped gracefully rc={proc.returncode}'), _t0,
                               t_term, t_kill)
         return
     except subprocess.TimeoutExpired:
@@ -894,7 +932,7 @@ def stop_remote_process(
             kind=kind,
             extra=extra,
         )
-    os.killpg(pgid, signal.SIGTERM)
+    _killpg(pgid, signal.SIGTERM)
     try:
         proc.wait(timeout=t_term)
         _stop_group_survivors(pgid, name, f'stopped with SIGTERM rc={proc.returncode}', _t0,
@@ -905,7 +943,7 @@ def stop_remote_process(
 
     if workspace is not None:
         pkill_workspace_launches(target, workspace, 'KILL', kind=kind, extra=extra)
-    os.killpg(pgid, signal.SIGKILL)
+    _killpg(pgid, signal.SIGKILL)
     proc.wait(timeout=t_kill)
     print(f'[{name}] killed rc={proc.returncode}')
 
