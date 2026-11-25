@@ -2663,6 +2663,10 @@ def run_plan(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
                                   Path(source).resolve().parents[2] if source else None)
     if refusal:
         raise RunnerError(refusal)
+    # Recordings on a disk that is not mounted (2026-11-25, review B2-8): the plan in hand
+    # reads their cells as missing, and running it would record them again. Raised as
+    # trial_index.RecordingsNotMounted, which `trials` prints as an ERROR line.
+    ti.require_recordings_mounted(Path(bags_dir).resolve().parents[1], plan.campaign.experiment)
     if stop_on_block is None:
         gate_named = any(n in plan.campaign.sweep or n in plan.campaign.fixed
                          for n in cs.gate_factors(factors))
@@ -2916,7 +2920,9 @@ def main(argv=None) -> int:
                          "the experiment's recordings folder), 'external' (storage.yaml's "
                          "external_dest for the recording host), or a path. "
                          "Overrides runner.yaml. A symlink is left in the repo, so "
-                         "coverage, slimming and analyses are unaffected.")
+                         "coverage, slimming and analyses read the recording there while "
+                         "its disk is mounted. With the disk unmounted, `trials plan` and "
+                         "`trials run` stop with an error instead of planning without it.")
     ap.add_argument("--execute", action="store_true",
                     help="actually run. Without this the runner only prints commands.")
     ap.add_argument("--scratch", action="store_true",

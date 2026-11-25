@@ -396,6 +396,11 @@ def main(argv=None) -> int:
     if refusal:
         print(f"ERROR: {refusal}", file=sys.stderr)
         return 2
+    try:
+        ti.require_recordings_mounted(args.experiments_root, campaign.experiment)
+    except ti.RecordingsNotMounted as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     warnings: List[str] = []
     trials = ti.load_trials(args.experiments_root, campaign.experiment)
     plan = build_plan(campaign, trials, args.include_unverified)

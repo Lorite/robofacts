@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -218,6 +219,66 @@ def refuse_another_backends_stack(experiments_root: Optional[Path] = None,
             continue   # a broken file is reported by the commands that read it
         if isinstance(raw, dict):
             launcher.parse(raw, path)
+
+
+class RecordingsNotMounted(roots.RootNotFound):
+    """Recordings of an experiment are linked from a disk that is not mounted now."""
+
+
+def unmounted_recordings(experiments_root: Path, experiment: str) -> Dict[Path, List[Path]]:
+    """The recordings roots that recordings of ``experiment`` link into and that do not exist
+    now, each with the links of the repo that point into it.
+
+    A trial recorded to external storage (``--bags-root``, runner.yaml ``bags_root``) is a
+    symlink in the repo's recording folder. With the disk unmounted the link dangles, the
+    index cannot read the trial, and its cell reads as missing. Not counted: a link whose
+    slim copy (with its metadata) is in the repo, which keeps the trial in the coverage,
+    and a link to a single recording deleted on a disk that is there (its folder exists).
+    """
+    from . import backend
+    exp_dir = Path(experiments_root) / experiment
+    rd = backend.record_dirs(experiments_root)
+    missing: Dict[Path, List[Path]] = {}
+    for full, slim in ((rd["recordings"], rd["slim"]), (rd["issues"], rd["issues_slim"])):
+        try:
+            entries = sorted((exp_dir / full).iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_symlink() or entry.exists():
+                continue
+            if (exp_dir / slim / f"{entry.name}_slim" / "trial_metadata.json").is_file():
+                continue
+            try:
+                target = Path(os.path.normpath(entry.parent / os.readlink(entry)))
+            except OSError:
+                continue
+            if target.parent.exists():
+                continue
+            top = target.parent
+            while top.parent != top and not top.parent.exists():
+                top = top.parent
+            missing.setdefault(top, []).append(entry)
+    return missing
+
+
+def require_recordings_mounted(experiments_root: Path, experiment: str) -> None:
+    """Raise RecordingsNotMounted when recordings of ``experiment`` lie on a disk that is not
+    mounted (2026-11-25, review B2-8). Coverage computed without them reads covered cells as
+    missing, and a run would record those cells again. ``trials plan`` and the runner
+    (run_plan, which the CLI and the web interface share) call it before they plan."""
+    missing = unmounted_recordings(experiments_root, experiment)
+    if not missing:
+        return
+    lines = []
+    for root, links in sorted(missing.items()):
+        lines.append(f"the recordings root {root} is not mounted: {len(links)} recording(s) of "
+                     f"{experiment} link to it (for example {links[0]} -> "
+                     f"{os.readlink(links[0])})")
+    raise RecordingsNotMounted(
+        "; ".join(lines) + ". Coverage cannot be computed without them: covered cells would "
+        "read as missing, and a run would record them again. Mount it (or put the directory "
+        "back), then plan again. --bags-root only decides where new recordings go.")
 
 
 def load_trials(experiments_root: Optional[Path] = None,
