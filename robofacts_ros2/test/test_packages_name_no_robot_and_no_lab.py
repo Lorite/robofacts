@@ -23,7 +23,8 @@ ADAPTERS = ROS2 / "adapters"
 SUFFIXES = (".py", ".sh", ".md", ".html", ".js", ".yaml", ".json")
 
 #: Names of one lab, its people, its robots and its issue tracker: nowhere in the package.
-LAB = re.compile(r"lorite(?!/robofacts)|crazylori|spot_BD_|helix|LORITE_|lab'?s #|issue #|\(#\d+|(?<![&\w])#\d{2,3}\b",
+#: The author's name in its paper form (Lorite-Mora) is allowed: the README cites the paper.
+LAB = re.compile(r"lorite(?!/robofacts|-mora\b)|crazylori|spot_BD_|helix|LORITE_|lab'?s #|issue #|\(#\d+|(?<![&\w])#\d{2,3}\b",
                  re.IGNORECASE)
 
 #: Robot families and lab hardware that have (or would need) an adapter: not in the core.
@@ -62,6 +63,13 @@ def _hits(path: Path, pattern: re.Pattern):
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if pattern.search(line):
             yield f"{path.relative_to(REPO)}:{number}: {line.strip()[:100]}"
+
+
+def test_the_lab_pattern_allows_the_cited_author_and_still_catches_the_lab():
+    assert not LAB.search("Alejandro Lorite-Mora. RoboFACTS: A Declarative Experiment Design Framework")
+    assert not LAB.search("git clone https://github.com/Lorite/robofacts.git")
+    for lab in ("lorite_ros2_humble_phd", "lorite_experiments", "LORITE_STOP", "a.lorite.mora", "Lorite-Moral"):
+        assert LAB.search(lab), lab
 
 
 def test_no_lab_name_anywhere_in_the_package():
