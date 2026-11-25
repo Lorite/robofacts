@@ -403,3 +403,31 @@ def test_the_gate_button_for_an_undeclared_host_is_a_clear_400(bare, monkeypatch
     response = bare.c.post("/preflight/demo_log_recorder", data={"host": "nowhere"}, headers=auth())
     assert response.status_code == 400
     assert "nowhere" in response.get_data(as_text=True)
+
+
+FOREIGN_BACKS = ["https://evil.example/", "//evil.example/", "/\\evil.example", "javascript:alert(1)",
+                 "/\t/evil.example", " //evil.example", "evil.example"]
+
+
+def test_the_back_field_only_ever_leads_back_into_the_interface(bare, monkeypatch):
+    """C2-10b: /exclude and /restore redirected to any `back` value (an open redirect), and the
+    gate page rendered it as a link, so `javascript:` ran there. The decisions are stubbed."""
+    monkeypatch.setattr(bare.ui.td, "exclude", lambda *a, **kw: {"moved": []})
+    monkeypatch.setattr(bare.ui.td, "describe_exclusion", lambda record: "excluded")
+    monkeypatch.setattr(bare.ui.td, "restore", lambda *a, **kw: {"moved": []})
+
+    class Done:
+        returncode, stdout, stderr = 0, "PASS", ""
+
+    monkeypatch.setattr(bare.ui.subprocess, "run", lambda cmd, **kw: Done())
+    (bare.root / "demo_log_recorder" / "scripts" / "preflight.sh").write_text("echo PASS\n")
+    default = "/e/demo_log_recorder"
+    for back in FOREIGN_BACKS + ["/e/demo_log_recorder/t/x?status=usable"]:
+        expected = back if back.startswith("/e/") else default
+        for route in ("/exclude/demo_log_recorder/x", "/restore/demo_log_recorder/x"):
+            response = bare.c.post(route, data={"reason": "r", "category": "other", "back": back},
+                                   headers=auth())
+            assert response.status_code == 302 and response.headers["Location"] == expected, (route, back)
+        page = bare.c.post("/preflight/demo_log_recorder", data={"back": back},
+                           headers=auth()).get_data(as_text=True)
+        assert f'<a href="{expected}">' in page.replace("&amp;", "&"), back

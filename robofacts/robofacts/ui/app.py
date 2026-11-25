@@ -1005,6 +1005,26 @@ def foreign_origin(origin: Optional[str], referer: Optional[str], host: str) -> 
     return ""
 
 
+def local_path(value: Optional[str], default: str) -> str:
+    """``value`` when it is a path on this interface, else ``default``.
+
+    For the ``back`` field of a form, which the routes redirect to or render as a
+    link. Before 2026-11-25 any value was used, so ``https://evil.example`` made
+    /exclude and /restore an open redirect and ``javascript:...`` ran in the
+    gate page's back link. A local path starts with one '/', has no scheme and
+    no backslash or control character (a browser reads ``/\\host`` and a
+    path with a tab in it as ``//host``, another site).
+    """
+    value = value or ""
+    if (not value.startswith("/") or value.startswith("//") or "\\" in value
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
+        return default
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc:
+        return default
+    return value
+
+
 def experiment_names(root: Path) -> List[str]:
     """Framework experiments: a folder with campaigns or a runner.yaml (offline studies have neither)."""
     names = {p.parents[1].name for p in root.glob("*/campaigns/*.yaml")}
@@ -1794,7 +1814,7 @@ def create_app(experiments_root: Optional[Path] = None,
             ok, output = False, "the gate timed out after 360 s"
         journal.add("preflight", f"{experiment} on {host_level or 'local'}: "
                                  f"{'PASS — go' if ok else 'FAIL — no-go'}")
-        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
+        back = local_path(request.form.get("back"), url_for("experiment_view", experiment=experiment))
         return render_template("preflight.html", experiment=experiment,
                                host=host_level or "local", ok=ok, output=output,
                                back=back, crumbs=crumbs)
@@ -1999,7 +2019,7 @@ def create_app(experiments_root: Optional[Path] = None,
             journal.add("exclude", line)
         journal.add("exclude", f"{name}: {td.describe_exclusion(record)}")
         cache.clear()
-        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
+        back = local_path(request.form.get("back"), url_for("experiment_view", experiment=experiment))
         return redirect(back)
 
     @action("/restore/<experiment>/<name>")
@@ -2017,7 +2037,7 @@ def create_app(experiments_root: Optional[Path] = None,
         for line in result["moved"]:
             journal.add("restore", line)
         cache.clear()
-        back = request.form.get("back") or url_for("experiment_view", experiment=experiment)
+        back = local_path(request.form.get("back"), url_for("experiment_view", experiment=experiment))
         return redirect(back)
 
     # ------------------------------------------------------------------ api --
