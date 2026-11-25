@@ -8,8 +8,19 @@ experiment. The entry is now listed with its reason, and the other records with 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from robofacts import trial_records as trc
+
+
+def _quiet(method):
+    """``method`` as Python 3.14 has it: an OSError of the lookup answers False."""
+    def answer(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except OSError:
+            return False
+    return answer
 
 
 def test_a_ledger_label_too_long_for_the_file_system_is_listed_not_fatal(tmp_path, capsys):
@@ -29,3 +40,12 @@ def test_a_ledger_label_too_long_for_the_file_system_is_listed_not_fatal(tmp_pat
     assert "2 record(s)" in out
     (bad,) = [r for r in trc.load_records(tmp_path / "experiments", "demo") if r.name == long_label]
     assert bad.run_log is None and "run log cannot be looked up" in bad.reason
+
+
+def test_the_reason_does_not_depend_on_the_python_version(tmp_path, capsys, monkeypatch):
+    """On Python 3.14 ``Path.is_file`` and ``Path.is_dir`` return False for a name that is too
+    long, where 3.10 to 3.13 raise OSError, and the reason was lost (CI job core-no-ros
+    (3.14), 2026-11-25). The same answer on every version, here with the 3.14 behavior."""
+    monkeypatch.setattr(Path, "is_file", _quiet(Path.is_file))
+    monkeypatch.setattr(Path, "is_dir", _quiet(Path.is_dir))
+    test_a_ledger_label_too_long_for_the_file_system_is_listed_not_fatal(tmp_path, capsys)

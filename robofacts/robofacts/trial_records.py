@@ -29,13 +29,16 @@ replayed, and never coverage. Blocked attempts (a NO-GO gate records no bag) are
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from stat import S_ISDIR, S_ISREG
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import roots
@@ -510,21 +513,34 @@ def _started(name: str, ledger_row: Optional[Dict[str, Any]]) -> str:
     return ""
 
 
-def _lookup(check: Callable[[], bool]) -> Tuple[bool, str]:
-    """``(answer, "")`` of a file check, or ``(False, why)`` when the path cannot even be looked
-    up: a trial label over the file system's limit for a name (``File name too long``, left
-    in the ledger by an attempt whose recorder failed on it) must not stop the listing of the
-    whole experiment (2026-11-25)."""
+#: The errors under which a path is simply absent: ``Path.is_file`` answers False for these.
+_ABSENT = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+
+
+def _lookup(path: Path, kind: Callable[[int], bool]) -> Tuple[bool, str]:
+    """``(answer, "")`` of a file check (``kind`` is ``S_ISREG`` or ``S_ISDIR``), or
+    ``(False, why)`` when the path cannot even be looked up: a trial label over the file
+    system's limit for a name (``File name too long``, left in the ledger by an attempt whose
+    recorder failed on it) must not stop the listing of the whole experiment (2026-11-25).
+
+    It calls ``os.stat`` itself. ``Path.is_file`` raises that error on Python 3.10 to 3.13
+    and returns False on 3.14, so on 3.14 the reason was lost and the record read as a
+    trial without a run log (the CI job core-no-ros (3.14), 2026-11-25)."""
     try:
-        return bool(check()), ""
+        mode = os.stat(path).st_mode
     except OSError as exc:
+        if exc.errno in _ABSENT:
+            return False, ""
         return False, exc.strerror or str(exc)
+    except ValueError:      # a NUL byte in the name: no such file, as Path.is_file says
+        return False, ""
+    return bool(kind(mode)), ""
 
 
 def _run_log(exp_dir: Path, name: str) -> Tuple[Optional[Path], str]:
     """The trial's run log when it exists, and why it could not be looked up, if so."""
     log = exp_dir / "runs" / f"{name}.log"
-    found, why = _lookup(log.is_file)
+    found, why = _lookup(log, S_ISREG)
     return (log if found else None), (f"its run log cannot be looked up ({why})" if why else "")
 
 
@@ -535,7 +551,7 @@ def _with(reason: str, problem: str) -> str:
 def _slim_for(exp_dir: Path, name: str, roots_: Iterable[str]) -> Optional[Path]:
     for root_name in roots_:
         candidate = exp_dir / root_name / f"{name}_slim"
-        if _lookup(candidate.is_dir)[0] and ti.recording_holds_data(candidate):
+        if _lookup(candidate, S_ISDIR)[0] and ti.recording_holds_data(candidate):
             return candidate
     return None
 
