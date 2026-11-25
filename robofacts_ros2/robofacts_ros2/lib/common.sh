@@ -7,10 +7,16 @@
 # check as $PF_LIB when the project runs on the ROS 2 backend, so a project's own check
 # that sources $PF_LIB finds both sets.
 #
-# The core's helper file is $PF_CORE_LIB (set by the gate). Run by hand, python finds it.
+# The core's helper file is $PF_CORE_LIB (set by the gate). Run by hand, it is found next to
+# this package in a source checkout, else through Python.
 # =============================================================================
 if [ -z "${PF_CORE_LIB:-}" ]; then
-    PF_CORE_LIB="$(python3 -c 'import os, robofacts.preflight as p; print(os.path.join(os.path.dirname(p.__file__), "lib", "common.sh"))' 2>/dev/null)"
+    # A source checkout of the repository: the general package is next to this one.
+    PF_CORE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../robofacts/robofacts/preflight/lib/common.sh"
+    if [ ! -f "$PF_CORE_LIB" ]; then
+        # An installed package: Python knows where it is.
+        PF_CORE_LIB="$(python3 -c 'import os, robofacts.preflight as p; print(os.path.join(os.path.dirname(p.__file__), "lib", "common.sh"))' 2>/dev/null)"
+    fi
 fi
 if [ -z "${PF_CORE_LIB:-}" ] || [ ! -f "$PF_CORE_LIB" ]; then
     echo "FAIL: the core helpers of the pre-flight checks were not found (PF_CORE_LIB, or the robofacts package on the Python path)"
