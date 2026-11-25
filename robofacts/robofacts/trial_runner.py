@@ -900,18 +900,22 @@ class ProcessHooks:
     start_background: Callable[..., Any] = None
     run_foreground: Callable[..., Any] = None
     stop_process: Callable[..., Any] = None
+    #: The trial's action (remote_exec_utils.run_action: its own process group, and it ends
+    #: before the teardown when the runner is interrupted). None uses run_foreground.
+    run_action: Callable[..., Any] = None
 
     @classmethod
     def default(cls) -> "ProcessHooks":
-        from .remote_exec_utils import run_foreground, start_background, stop_remote_process
+        from .remote_exec_utils import (run_action, run_foreground, start_background,
+                                        stop_remote_process)
         return cls(start_background=start_background, run_foreground=run_foreground,
-                   stop_process=stop_remote_process)
+                   stop_process=stop_remote_process, run_action=run_action)
 
     def with_local_setup(self, shell: str, files: List[str]) -> "ProcessHooks":
         """These hooks, with every LOCAL command run after sourcing ``files``
         (RunnerConfig.local_setup). Remote commands are wrapped by their target."""
         from .remote_exec_utils import local_setup_command
-        start, run = self.start_background, self.run_foreground
+        start, run, act = self.start_background, self.run_foreground, self.run_action
 
         def start_background(cmd, target, **kwargs):
             return start(cmd if target is not None else local_setup_command(cmd, files, shell),
@@ -921,8 +925,13 @@ class ProcessHooks:
             return run(cmd if target is not None else local_setup_command(cmd, files, shell),
                        target, **kwargs)
 
+        def run_action(cmd, target, **kwargs):
+            return act(cmd if target is not None else local_setup_command(cmd, files, shell),
+                       target, **kwargs)
+
         return dataclasses.replace(self, start_background=start_background,
-                                   run_foreground=run_foreground)
+                                   run_foreground=run_foreground,
+                                   run_action=run_action if act is not None else None)
 
 
 @dataclass
@@ -1656,7 +1665,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 timer.daemon = True
                 timer.start()
             try:
-                completed = hooks.run_foreground(action_cmd, target, cwd=cwd, check=False)
+                completed = (hooks.run_action or hooks.run_foreground)(action_cmd, target,
+                                                                      cwd=cwd, check=False)
             finally:
                 if timer is not None:
                     timer.cancel()
@@ -1868,7 +1878,11 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         metadata.update(probed)
         if probed:
             print("[runner] metadata probes: " + ", ".join(f"{k}={v}" for k, v in probed.items()))
+    # An execution error (the action could not start, or the runner lost it) is a trial that
+    # did not happen either: written as aborted, it never counts (found 2026-11-25: such a
+    # trial was written with aborted false and counted as coverage).
     action_failed = (detail.startswith("action returned rc=")
+                     or detail.startswith("execution error")
                      or "verify step" in detail)
     if action_failed:
         # The trajectory never ran (or died part-way), so this is NOT a flight.
@@ -1891,6 +1905,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             else:
                 print("[runner] TRIAL FAILED - the action failed, so the trial did not happen as "
                       "planned; recorded as aborted, so it cannot count as coverage")
+        elif detail.startswith("execution error"):
+            print("[runner] TRIAL FAILED - the runner could not run the action as planned; "
+                  "recorded as aborted, so it cannot count as coverage")
         else:
             print("[runner] TRIAL FAILED - a verify step rejected the recorded trial; recorded "
                   "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")

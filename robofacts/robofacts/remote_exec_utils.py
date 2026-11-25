@@ -188,6 +188,40 @@ def start_background(
 #: Only one trial runs at a time, which is what makes a module-level handle
 #: safe here.
 _CURRENT_FOREGROUND: list = []
+#: The pids of those processes that lead their own process group (a local action).
+_OWN_GROUP: set = set()
+
+#: How long an interrupted action may take to end (a flight lands) before the runner kills
+#: it and stops the stack. The same bound as an exploration's stop.
+LAND_WAIT_S = 90.0
+#: How long an action may take to end after the forwarded Ctrl-C before it gets SIGTERM.
+SIGINT_GRACE_S = 5.0
+
+
+class RunnerSignal(KeyboardInterrupt):
+    """A stop signal other than Ctrl-C (SIGTERM, SIGHUP) that the runner turns into the
+    same path as a Ctrl-C: the action ends, the stack stops, the trial is written as
+    aborted. ``signum`` names the signal."""
+
+    def __init__(self, signum: int):
+        super().__init__(signal.Signals(signum).name)
+        self.signum = signum
+
+
+def interrupt_signal_name(exc: BaseException) -> str:
+    """SIGINT for a Ctrl-C, else the name of the signal a RunnerSignal carries."""
+    return signal.Signals(getattr(exc, "signum", signal.SIGINT)).name
+
+
+def _signal_process(proc: subprocess.Popen, sig: int) -> None:
+    """``sig`` to the process, or to its whole group when it leads one of its own."""
+    try:
+        if proc.pid in _OWN_GROUP:
+            os.killpg(proc.pid, sig)
+        else:
+            proc.send_signal(sig)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def terminate_current_foreground() -> bool:
@@ -196,14 +230,107 @@ def terminate_current_foreground() -> bool:
     Deliberately a TERMINATE of the action rather than a kill of the stack:
     run_trial's finally then stops the recorder first and the stack after, so
     the bag is finalised and nothing is orphaned. Killing the stack directly
-    would truncate the recording — the failure the teardown order exists to
-    avoid.
+    would truncate the recording, the failure the teardown order exists to
+    avoid. A local action leads its own process group, and the whole group gets
+    the signal: a wrapper (a shell script, a launcher) does not pass SIGTERM on
+    to the flight it started (found 2026-11-25).
     """
     for proc in list(_CURRENT_FOREGROUND):
         if proc.poll() is None:
-            proc.terminate()
+            _signal_process(proc, signal.SIGTERM)
             return True
     return False
+
+
+def _drain(proc: subprocess.Popen, captured: list) -> threading.Thread:
+    """Keep printing the output of a process whose reader was interrupted, so it never
+    blocks on a full pipe while it ends."""
+    def _pump():
+        try:
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+                captured.append(line)
+        except (OSError, ValueError):
+            pass
+    thread = threading.Thread(target=_pump, name="drain-foreground", daemon=True)
+    thread.start()
+    return thread
+
+
+def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool) -> None:
+    """The runner leaves a foreground process early (Ctrl-C, SIGTERM, SIGHUP, an error).
+
+    An action must END before the runner's teardown stops the recorder and the stack: a
+    flight still landing needs its stack up, and a live action must never be left behind
+    (found 2026-11-25: on Ctrl-C the stack went down during the landing, and after a
+    decoding error the action kept flying into the next trial). So: the signal that
+    interrupted the runner goes on to the action (a Ctrl-C at the terminal no longer
+    reaches an action that leads its own group), SIGTERM follows after SIGINT_GRACE_S, the
+    runner waits up to LAND_WAIT_S, and SIGKILL ends it last. A second Ctrl-C kills it at
+    once. Any other command gets SIGTERM, 5 s, then SIGKILL."""
+    if proc.poll() is not None:
+        return
+    first = getattr(exc, "signum", signal.SIGINT) if isinstance(exc, KeyboardInterrupt) else signal.SIGTERM
+    wait_s = LAND_WAIT_S if action else 5.0
+    _signal_process(proc, first)
+    if action:
+        print(f"[runner] waiting up to {wait_s:.0f} s for the action to end (a flight lands) "
+              f"before the stack stops; Ctrl-C again kills it now", flush=True)
+    t0 = time.monotonic()
+    termed = first == signal.SIGTERM
+    try:
+        while proc.poll() is None and time.monotonic() - t0 < wait_s:
+            if not termed and time.monotonic() - t0 >= SIGINT_GRACE_S:
+                _signal_process(proc, signal.SIGTERM)
+                termed = True
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("[runner] second interrupt: the action is killed now", flush=True)
+    if proc.poll() is None:
+        if action:
+            print(f"[runner] the action did not end within {time.monotonic() - t0:.0f} s: SIGKILL",
+                  flush=True)
+        _signal_process(proc, signal.SIGKILL)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, check: bool,
+                  action: bool) -> subprocess.CompletedProcess:
+    final = cmd if target is None else wrap_command(cmd, target)
+    kwargs: dict = {"cwd": str(cwd)} if target is None else {}
+    own_group = action and target is None
+    if own_group:
+        kwargs["start_new_session"] = True
+    # errors="replace": one byte that is not UTF-8 in the output must not end the reading
+    # and abandon a running action (found 2026-11-25).
+    proc = subprocess.Popen(final, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, errors="replace", bufsize=1, **kwargs)
+    if own_group:
+        _OWN_GROUP.add(proc.pid)
+    _CURRENT_FOREGROUND.append(proc)
+    captured: list[str] = []
+    assert proc.stdout is not None
+    try:
+        try:
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+                captured.append(line)
+            rc = proc.wait()
+        except BaseException as exc:
+            drain = _drain(proc, captured)
+            _end_interrupted(proc, exc, action=action)
+            drain.join(timeout=1.0)
+            raise
+    finally:
+        if proc in _CURRENT_FOREGROUND:
+            _CURRENT_FOREGROUND.remove(proc)
+        _OWN_GROUP.discard(proc.pid)
+    if check and rc != 0:
+        raise subprocess.CalledProcessError(rc, final, output="".join(captured))
+    return subprocess.CompletedProcess(final, rc, stdout="".join(captured), stderr="")
 
 
 def run_foreground(
@@ -218,26 +345,25 @@ def run_foreground(
     Streaming matters because the action is a flight: an operator watching the
     terminal must see it as it happens, not in one dump at the end. Capturing
     matters because whoever is watching the *web UI* only ever saw a return
-    code — when the trajectory script rejected its arguments (2026-07-29) the
+    code: when the trajectory script rejected its arguments (2026-07-29) the
     message existed solely in the terminal, so the UI reported a trial that
     never flew as a successful one.
     """
-    final = cmd if target is None else wrap_command(cmd, target)
-    kwargs = {"cwd": str(cwd)} if target is None else {}
-    proc = subprocess.Popen(final, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1, **kwargs)
-    _CURRENT_FOREGROUND.append(proc)
-    captured: list[str] = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="", flush=True)
-        captured.append(line)
-    rc = proc.wait()
-    if proc in _CURRENT_FOREGROUND:
-        _CURRENT_FOREGROUND.remove(proc)
-    if check and rc != 0:
-        raise subprocess.CalledProcessError(rc, final, output="".join(captured))
-    return subprocess.CompletedProcess(final, rc, stdout="".join(captured), stderr="")
+    return _run_streamed(cmd, target, cwd=cwd, check=check, action=False)
+
+
+def run_action(
+    cmd: list[str],
+    target: RemoteTarget | None,
+    *,
+    cwd: Path,
+    check: bool = False,
+) -> subprocess.CompletedProcess:
+    """run_foreground for the trial's action. Locally the action leads its own process
+    group, so a stop (the action timeout, the web interface's stop) reaches the whole
+    flight and not only a wrapper. When the runner is interrupted, the action ends first
+    (see _end_interrupted), then the runner's teardown stops the recorder and the stack."""
+    return _run_streamed(cmd, target, cwd=cwd, check=check, action=True)
 
 
 def remote_sh(target: RemoteTarget, script: str,
