@@ -12,6 +12,8 @@ robofacts_ros2/example_project/experiments/*/results/
 *.mcap
 *.db3
 robofacts/example_project/experiments/*/bags/*/
+robofacts/example_project/experiments/*/recordings/*/
+robofacts/example_project/experiments/*/recordings_*/
 robofacts/example_project/experiments/*/bags_slim/
 robofacts/example_project/experiments/*/bags_scratch/
 robofacts/example_project/experiments/*/runs/

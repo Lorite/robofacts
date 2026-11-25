@@ -65,7 +65,8 @@ def new_experiment(name: str, experiments_root: Path) -> List[Path]:
         destination = target / template.relative_to(source)
         _render(template, destination, name)
         written.append(destination)
-    for empty in ("bags", "runs", "results"):
+    from . import backend
+    for empty in (backend.record_dirs(experiments_root)["recordings"], "runs", "results"):
         (target / empty).mkdir(exist_ok=True)
         (target / empty / ".gitkeep").touch()
     return written
@@ -73,7 +74,10 @@ def new_experiment(name: str, experiments_root: Path) -> List[Path]:
 
 #: Top-level directories of a source experiment that hold its recorded data or
 #: its own history, never its declarations. ``--from`` copies none of them.
-DATA_DIRS = ("bags", "runs", "results", "notebooks")
+#: What a copy with --from leaves out: the recordings under both naming schemes (a copy may
+#: go to a project on another backend), the runs, the results and the notebooks.
+DATA_DIRS = ("bags", "recordings", "runs", "results", "notebooks")
+DATA_PREFIXES = ("bags_", "recordings_")
 #: Larger files are data or assets, not declarations, and are reported instead of copied.
 MAX_COPY_BYTES = 1_000_000
 #: The files the framework reads by name, and the per-experiment metadata templates. With the
@@ -128,7 +132,7 @@ def _name_pattern(name: str) -> "re.Pattern[str]":
 
 def _is_data_dir(rel: Path) -> bool:
     top = rel.parts[0]
-    return top in DATA_DIRS or top.startswith("bags_")
+    return top in DATA_DIRS or top.startswith(DATA_PREFIXES)
 
 
 def _source_entries(source: Path) -> Iterable[Path]:
@@ -299,7 +303,8 @@ def new_experiment_from(name: str, source_name: str, experiments_root: Path,
                                             date=datetime.date.today().isoformat()),
                       encoding="utf-8")
     report.written.append(readme)
-    for empty in ("bags", "runs", "results"):
+    from . import backend
+    for empty in (backend.record_dirs(experiments_root)["recordings"], "runs", "results"):
         (target / empty).mkdir(exist_ok=True)
         (target / empty / ".gitkeep").touch()
     return report

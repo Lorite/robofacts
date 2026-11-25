@@ -52,8 +52,28 @@ VERIFY_ABORT_PREFIX = "verify step "
 #: What kind of cause excluded a trial, so a reader can count them.
 CATEGORIES = ("infrastructure", "operator", "estimator", "other")
 #: Where a bag lives when it counts, and where it lives when excluded.
-INCLUDED_DIRS = ("bags", "bags_slim")
-EXCLUDED_DIRS = ("bags_issues", "bags_issues_slim")
+def included_dirs(root: Optional[Path] = None) -> Tuple[str, str]:
+    """The folders that count (the recordings and their slim copies), named by the backend."""
+    from . import backend
+    rd = backend.record_dirs(root)
+    return rd["recordings"], rd["slim"]
+
+
+def excluded_dirs(root: Optional[Path] = None) -> Tuple[str, str]:
+    """The folders of excluded trials, in the order of included_dirs."""
+    from . import backend
+    rd = backend.record_dirs(root)
+    return rd["issues"], rd["issues_slim"]
+
+
+def __getattr__(name):
+    """``INCLUDED_DIRS`` and ``EXCLUDED_DIRS``, the constants from before the backends named
+    the folders, resolved for the project in the working directory."""
+    if name == "INCLUDED_DIRS":
+        return included_dirs()
+    if name == "EXCLUDED_DIRS":
+        return excluded_dirs()
+    raise AttributeError(name)
 #: A bag with a file younger than this may still be written (the recorder, the
 #: metadata, the slim copy): refuse to move or amend it.
 WRITE_QUIET_S = 120
@@ -189,7 +209,7 @@ class TrialDirs:
 
     @property
     def excluded(self) -> bool:
-        return any(d.parent.name in EXCLUDED_DIRS for d in self.dirs)
+        return any(d.parent.name in excluded_dirs(d.parents[2]) for d in self.dirs)
 
     @property
     def metadata_dir(self) -> Path:
@@ -203,18 +223,19 @@ def locate(exp_dir: Path, trial: str) -> TrialDirs:
     if not name or "/" in name or name in (".", ".."):
         raise DecisionError(f"{trial!r} is not a trial name (the bag directory name, such as "
                             f"20261022T140606_rep01)")
-    full = [exp_dir / d / name for d in ("bags", "bags_issues") if (exp_dir / d / name).is_dir()]
-    slim = [exp_dir / d / n for d in ("bags_slim", "bags_issues_slim")
+    (recordings, slim_dir), (issues, issues_slim) = included_dirs(exp_dir.parent), excluded_dirs(exp_dir.parent)
+    full = [exp_dir / d / name for d in (recordings, issues) if (exp_dir / d / name).is_dir()]
+    slim = [exp_dir / d / n for d in (slim_dir, issues_slim)
             for n in (f"{name}_slim", name) if (exp_dir / d / n).is_dir()]
     if len(full) > 1 or len(slim) > 1:
         raise DecisionError(f"{name} is in more than one place ({', '.join(str(p.relative_to(exp_dir)) for p in full + slim)}). "
                             f"Resolve that by hand first: one copy must go.")
     if not full and not slim:
-        raise DecisionError(f"no trial {name!r} in {exp_dir} (looked in bags, bags_issues, "
-                            f"bags_slim, bags_issues_slim). `trials records "
+        raise DecisionError(f"no trial {name!r} in {exp_dir} (looked in {recordings}, {issues}, "
+                            f"{slim_dir}, {issues_slim}). `trials records "
                             f"{exp_dir.name}` lists the trial names.")
     dirs = TrialDirs(name=name, full=full[0] if full else None, slim=slim[0] if slim else None)
-    if len({d.parent.name in EXCLUDED_DIRS for d in dirs.dirs}) > 1:
+    if len({d.parent.name in excluded_dirs(exp_dir.parent) for d in dirs.dirs}) > 1:
         raise DecisionError(f"{name}: the bag and its slim copy disagree "
                             f"({', '.join(str(p.relative_to(exp_dir)) for p in dirs.dirs)}). "
                             f"Move one by hand so both are included or both excluded.")
@@ -331,7 +352,7 @@ def exclude(experiments_root: Path, experiment: str, trial: str, *, reason: str,
     moves: List[Tuple[Path, Path]] = []
     if not dirs.excluded:
         for d in dirs.dirs:
-            target_root = exp_dir / EXCLUDED_DIRS[INCLUDED_DIRS.index(d.parent.name)]
+            target_root = exp_dir / excluded_dirs(exp_dir.parent)[included_dirs(exp_dir.parent).index(d.parent.name)]
             target = target_root / d.name
             if target.exists():
                 raise DecisionError(f"{_rel(target, exp_dir)} already exists: resolve that by hand")
@@ -375,7 +396,7 @@ def restore(experiments_root: Path, experiment: str, trial: str, *, by: Optional
     history_name = f"exclusion_restored_{stamp}.json"
     moves = []
     for d in dirs.dirs:
-        target = exp_dir / INCLUDED_DIRS[EXCLUDED_DIRS.index(d.parent.name)] / d.name
+        target = exp_dir / included_dirs(exp_dir.parent)[excluded_dirs(exp_dir.parent).index(d.parent.name)] / d.name
         if target.exists():
             raise DecisionError(f"{_rel(target, exp_dir)} already exists: resolve that by hand")
         moves.append((d, target))

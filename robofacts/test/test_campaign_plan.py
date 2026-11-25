@@ -10,6 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
+from record_dirs import rdir
 from robofacts import campaign_plan as cp
 from robofacts import campaign_spec as cs
 from robofacts import trial_index as ti
@@ -63,7 +64,7 @@ def root(tmp_path: Path) -> Path:
 
 
 def add_trial(root: Path, experiment: str, name: str, metadata: dict, issues: bool = False):
-    bag = root / experiment / ("bags_issues" if issues else "bags") / name
+    bag = root / experiment / (rdir("bags_issues") if issues else rdir("bags")) / name
     bag.mkdir(parents=True)
     (bag / "trial_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
     # A real bag also has rosbag2's own files; without them the dir is not a trial.

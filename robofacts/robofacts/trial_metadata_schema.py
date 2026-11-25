@@ -216,7 +216,9 @@ def audit(experiments_root: Path, experiment: Optional[str] = None) -> Dict[str,
     # "bags*" would also match bags_slim/, whose metadata is a copy.
     prefix = f"{experiment}/" if experiment else "*/"
     meta_paths = []
-    for record_dir in ("bags", "bags_issues"):
+    from . import backend
+    rd = backend.record_dirs(experiments_root)
+    for record_dir in (rd["recordings"], rd["issues"]):
         meta_paths.extend(experiments_root.glob(f"{prefix}{record_dir}/*/trial_metadata.json"))
     for meta_path in sorted(meta_paths):
         exp = meta_path.parents[2].name

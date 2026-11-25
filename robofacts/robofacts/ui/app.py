@@ -686,8 +686,17 @@ def where_string(where: Dict[str, Any]) -> str:
 #: Files the /files route may serve from an experiment: its results, its run logs
 #: and ledgers, its declarations, and the small sidecars of its bags. Recordings
 #: themselves go through the public /bag route (slim only), never through here.
-FILE_ROOTS = ("results", "runs", "config", "campaigns", "bags", "bags_slim", "bags_issues",
-              "bags_issues_slim", "bags_scratch", "bags_scratch_slim")
+def file_roots(root: Optional[Path] = None) -> Tuple[str, ...]:
+    """The top folders of an experiment that the files route serves: the declarations, the
+    runs, the results and the recording folders, which the backend names."""
+    return ("results", "runs", "config", "campaigns") + tuple(backends.record_dirs(root).values())
+
+
+def __getattr__(name):
+    """``FILE_ROOTS``, the constant from before the backends named the folders."""
+    if name == "FILE_ROOTS":
+        return file_roots()
+    raise AttributeError(name)
 def recording_suffixes(root: Optional[Path] = None) -> Tuple[str, ...]:
     """The suffixes of the recorder's data files, which the files route does not serve to an
     operating interface (the recorder's optional ``data_suffixes``)."""
@@ -695,6 +704,14 @@ def recording_suffixes(root: Optional[Path] = None) -> Tuple[str, ...]:
         return tuple(getattr(backends.active(root).recorder, "data_suffixes", ()))
     except backends.BackendError:
         return ()
+
+
+def recording_noun(root: Optional[Path] = None) -> str:
+    """The backend's word for one recording (Recorder.noun), for the pages' text."""
+    try:
+        return backends.active(root).recorder.noun
+    except backends.BackendError:
+        return "recording"
 
 
 def ui_extension(root: Optional[Path] = None):
@@ -859,7 +876,7 @@ class ExperimentCache:
     def _signature(self, experiment: str) -> tuple:
         sig = []
         base = self.root / experiment
-        for sub in ("campaigns", "config", "runs", "results") + trec.RECORD_DIRS + trec.SCRATCH_DIRS:
+        for sub in ("campaigns", "config", "runs", "results") + trec.record_dirs_of(self.root) + trec.scratch_dirs_of(self.root):
             try:
                 sig.append((sub, (base / sub).stat().st_mtime_ns))
             except OSError:
@@ -994,6 +1011,8 @@ def create_app(experiments_root: Optional[Path] = None,
             "status_meaning": trec.STATUS_MEANING, "class_of": trec.CLASS_OF,
             **(extension.template_globals() if hasattr(extension, "template_globals") else {}),
             "explore_offered": explore_engine(root()) is not None,
+            # The folder names and the word for one recording, from the project's backend.
+            "dirs": backends.record_dirs(root()), "noun": recording_noun(root()),
             "base_url": base_url(), "code_cell": code_cell,
             "where_string": where_string,
             "poster_of": lambda record: record.poster(root()),
@@ -1181,9 +1200,9 @@ def create_app(experiments_root: Optional[Path] = None,
                 log_tail = ""
         on_disk = [d for d in (record.bag_dir, record.slim_dir) if d is not None]
         excludable = (record.kind == "campaign" and bool(on_disk)
-                      and all(d.parent.name in td.INCLUDED_DIRS for d in on_disk))
+                      and all(d.parent.name in td.included_dirs(root()) for d in on_disk))
         restorable = (record.kind == "campaign" and bool(on_disk)
-                      and all(d.parent.name in td.EXCLUDED_DIRS for d in on_disk))
+                      and all(d.parent.name in td.excluded_dirs(root()) for d in on_disk))
         return render_template(
             "trial.html", experiment=experiment, r=record, data=data,
             verify=trec.verify_report(record.run_log), log_tail=log_tail,
@@ -1240,7 +1259,7 @@ def create_app(experiments_root: Optional[Path] = None,
     def files(experiment: str, rel: str = ""):
         """Read-only view of an experiment's results, run logs, declarations and bag sidecars.
 
-        Resolved, then checked to stay inside one of FILE_ROOTS of this
+        Resolved, then checked to stay inside one of the file roots of this
         experiment, so ``..`` cannot leave it. Recordings are refused here: the
         slim ones are served by /bag, the heavy ones never, because a UI on a
         trial host shares the rig's network with the flights. In ``--view-only``
@@ -1256,9 +1275,10 @@ def create_app(experiments_root: Optional[Path] = None,
             inside = target.relative_to(base)
         except ValueError:
             return error("outside the experiment", 403, crumbs)
-        if not inside.parts or inside.parts[0] not in FILE_ROOTS:
+        served_roots = file_roots(root())
+        if not inside.parts or inside.parts[0] not in served_roots:
             if inside.parts:
-                return error(f"{inside.parts[0]}/ is not served (only {', '.join(FILE_ROOTS)})",
+                return error(f"{inside.parts[0]}/ is not served (only {', '.join(served_roots)})",
                              403, crumbs)
         if target.is_dir():
             entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name))
@@ -1269,7 +1289,7 @@ def create_app(experiments_root: Optional[Path] = None,
                                       and not app.config["VIEW_ONLY"])}
                        for p in entries]
             if not inside.parts:
-                listing = [e for e in listing if e["name"].rstrip("/") in FILE_ROOTS]
+                listing = [e for e in listing if e["name"].rstrip("/") in served_roots]
             parent = str(inside.parent) if inside.parts else None
             return render_template("files.html", experiment=experiment, rel=str(inside) if inside.parts else "",
                                    listing=listing, parent=parent, crumbs=crumbs)
@@ -1282,7 +1302,7 @@ def create_app(experiments_root: Optional[Path] = None,
             if video is not None:
                 try:
                     vparts = video.resolve().relative_to(base).parts
-                    served = vparts[0] in FILE_ROOTS and vparts[:2] != trec.POSTER_DIR.parts
+                    served = vparts[0] in served_roots and vparts[:2] != trec.POSTER_DIR.parts
                 except ValueError:
                     served = False
             made = trec.make_poster(base, video, cache_dir=app.config["CACHE_DIR"]) if served else None
@@ -1419,7 +1439,7 @@ def create_app(experiments_root: Optional[Path] = None,
         live_steps = annotate_steps(campaign.operator_live_steps)
         active = runs.start(experiment=experiment, campaign_name=f"{name}{suffix}",
                             campaign_file=name, plan=plan,
-                            config=config, bags_dir=root() / experiment / "bags",
+                            config=config, bags_dir=root() / experiment / backends.record_dirs(root())["recordings"],
                             executed=confirm, limit=limit, journal=journal,
                             gate=gate, steps=steps, hold_s=hold_s, keep_stack=keep_stack,
                             pause_before_action=pose_pause,

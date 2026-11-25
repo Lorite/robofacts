@@ -115,7 +115,11 @@ def test_every_module_of_the_core_imports_in_a_process_without_ros():
         f"sys.path.insert(0, {str(PROJECT)!r})\n"
         f"pattern = re.compile({ROS_MODULES.pattern!r})\n"
         f"for name in {modules!r}:\n"
-        "    importlib.import_module(name)\n"
+        "    try:\n"
+        "        importlib.import_module(name)\n"
+        "    except ModuleNotFoundError as exc:\n"
+        "        if exc.name != 'flask':   # the web interface's optional dependency\n"
+        "            raise\n"
         "loaded = sorted(m for m in sys.modules if pattern.match(m.split('.')[0]))\n"
         "print('LOADED:' + ','.join(loaded))\n")
     # The lint module resolves an experiments root when it is imported: the example's.

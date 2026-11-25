@@ -38,9 +38,9 @@
   {% if preview.error %}
   <div class="callout warnc">{{ preview.error }}</div>
   {% else %}
-  <p><b>{{ preview.bags|length }}</b> bag(s) selected (usable{{ ' and unverified' if include_unverified }} only: an aborted bag never enters a cohort).
+  <p><b>{{ preview.bags|length }}</b> {{ noun }}(s) selected (usable{{ ' and unverified' if include_unverified }} only: an aborted bag never enters a cohort).
     The results would go to <code>{{ preview.results_dir|relpath(experiment) }}</code> with an <code>analysis_metadata.json</code> naming exactly these bags.</p>
-  <details><summary class="small">the bags</summary><ul class="small mono">{% for b in preview.bags %}<li><a href="{{ url_for('trial_view', experiment=experiment, name=b[:-5] if b.endswith('_slim') else b) }}">{{ b }}</a></li>{% endfor %}</ul></details>
+  <details><summary class="small">the {{ noun }}s</summary><ul class="small mono">{% for b in preview.bags %}<li><a href="{{ url_for('trial_view', experiment=experiment, name=b[:-5] if b.endswith('_slim') else b) }}">{{ b }}</a></li>{% endfor %}</ul></details>
   <details><summary class="small">the commands ({{ preview.commands|length }})</summary><pre>{% for c in preview.commands %}$ {{ c }}
 {% endfor %}</pre></details>
   {% endif %}
@@ -55,7 +55,7 @@
 <h2 id="results">Results <small>every folder under <code>results/</code>, newest first</small></h2>
 {% if folders %}
 <div class="tablewrap tall"><table class="sortable">
-<thead><tr><th>folder</th><th>analysis</th><th class="num">bags</th><th>cohort</th><th class="num">failed</th><th>provenance</th></tr></thead>
+<thead><tr><th>folder</th><th>analysis</th><th class="num">{{ noun }}s</th><th>cohort</th><th class="num">failed</th><th>provenance</th></tr></thead>
 <tbody>{% for f in folders %}
 <tr><td class="trial"><a href="{{ url_for('files', experiment=experiment, rel='results/' ~ f.name ~ '/') }}">{{ f.name }}</a></td>
   <td><b>{{ f.analysis }}</b></td>

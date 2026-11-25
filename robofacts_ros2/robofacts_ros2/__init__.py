@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from robofacts.backend import Backend
+from robofacts.backend import BAG_DIRS, Backend
 from robofacts_ros2.launcher import Ros2Launcher
 from robofacts_ros2.recorder import Ros2Recorder
 
@@ -111,4 +111,5 @@ BACKEND = Backend(
     cli=("ros2", "run", "robofacts_ros2", "trials"),
     package="robofacts_ros2",
     build_workspaces=(".", "ros2_ws"), workspaces_setting="colcon_workspaces",
+    record_dirs=dict(BAG_DIRS),
 )

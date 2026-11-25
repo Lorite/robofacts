@@ -65,7 +65,7 @@ def client(tmp_path, monkeypatch):
     config = tr.RunnerConfig.load("demo_log_recorder", experiments)
     import robofacts.campaign_plan as cp
     plan = cp.build_plan(campaign, [], False)
-    results = tr.run_plan(plan, config, experiments / "demo_log_recorder" / "bags", dry_run=False,
+    results = tr.run_plan(plan, config, experiments / "demo_log_recorder" / "recordings", dry_run=False,
                           limit=1, pause_before_action=False, extra_verify=campaign.verify_steps)
     assert [r.status for r in results] == ["ran"], [r.detail for r in results]
     app = ui.create_app(experiments, password="pw")

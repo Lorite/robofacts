@@ -15,9 +15,9 @@
     },
     {
       "text": "[HARD] The recording directory is writable on the machine that records.",
-      "check": "bag_dir_writable",
+      "check": "recording_dir_writable",
       "args": {
-        "path": "experiments/demo_log_recorder/bags",
+        "path": "experiments/demo_log_recorder/recordings",
         "label": "recordings"
       }
     },

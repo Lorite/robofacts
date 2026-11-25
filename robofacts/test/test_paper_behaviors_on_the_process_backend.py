@@ -60,7 +60,7 @@ def plan_counts(experiments: Path):
 
 
 def recordings(experiments: Path) -> list:
-    bags = experiments / EXPERIMENT / "bags"
+    bags = experiments / EXPERIMENT / "recordings"
     return sorted(d for d in bags.iterdir() if d.is_dir()) if bags.is_dir() else []
 
 
@@ -85,7 +85,7 @@ def test_a_failed_hard_check_blocks_the_trial_and_leaves_no_recording(project, c
     assert "0 OK, 1 blocked" in out
     # No recording and no metadata: nothing for the index to count.
     assert not any(ti.recording_holds_data(d) for d in recordings(project))
-    assert not list(project.glob(f"{EXPERIMENT}/bags/*/trial_metadata.json"))
+    assert not list(project.glob(f"{EXPERIMENT}/recordings/*/trial_metadata.json"))
     assert ti.load_trials(project, EXPERIMENT) == []
     # The attempt is in the ledger and the verdict in the gate log, with the failed check.
     (attempt,) = ledger(project)
@@ -167,7 +167,7 @@ def test_a_trial_without_a_recording_gets_no_metadata(tmp_path, monkeypatch, cap
     use_project(root, monkeypatch)
     rc, out = run(experiments, capsys, "--limit", "1")
     assert rc == 1 and "no recording recorded" in out and "holds no data" in out
-    assert not list(experiments.glob(f"{EXPERIMENT}/bags/*/trial_metadata.json"))
+    assert not list(experiments.glob(f"{EXPERIMENT}/recordings/*/trial_metadata.json"))
     assert ti.load_trials(experiments, EXPERIMENT) == []
     (attempt,) = ledger(experiments)
     assert attempt["status"] == "failed" and attempt["metadata_written"] is False

@@ -185,12 +185,23 @@ def check_dirs(experiments_root: Optional[Path] = None) -> List[Path]:
     return [d for d in (project, *adapter_checks_dirs(), backend_dir, CHECKS_DIR) if d is not None]
 
 
+#: Second names of checks, for a project whose recordings are not called bags. The old
+#: name keeps working. A project's own script under the second name wins, as for any check.
+CHECK_ALIASES = {"recording_dir_writable": "bag_dir_writable"}
+
+
+def canonical_check(name: Optional[str]) -> Optional[str]:
+    return CHECK_ALIASES.get(name, name) if name else name
+
+
 def find_check(name: str, experiments_root: Optional[Path] = None) -> Optional[Path]:
-    """The script of the check ``name``: the project's own, then an enabled adapter's, then the core's."""
-    for directory in check_dirs(experiments_root):
-        script = directory / f"{name}.sh"
-        if script.is_file():
-            return script
+    """The script of the check ``name``: the project's own, then an enabled adapter's, then
+    the backend's, then the core's. A second name (CHECK_ALIASES) is tried under both names."""
+    for candidate in dict.fromkeys((name, canonical_check(name))):
+        for directory in check_dirs(experiments_root):
+            script = directory / f"{candidate}.sh"
+            if script.is_file():
+                return script
     return None
 
 
@@ -367,7 +378,7 @@ def runs_in_parallel(entry: Dict[str, Any]) -> bool:
     """
     if entry.get("parallel") is not None:
         return bool(entry["parallel"])
-    return entry.get("check") in parallel_safe_checks()
+    return canonical_check(entry.get("check")) in parallel_safe_checks()
 
 
 def plan_batches(machine: List[Dict[str, Any]], concurrency: str) -> List[List[int]]:
@@ -410,7 +421,7 @@ def validate(entries: List[Dict[str, Any]], variables: Dict[str, str]) -> List[s
             continue
 
         sequential = sequential_checks()
-        if entry.get("parallel") is True and check in sequential:
+        if entry.get("parallel") is True and canonical_check(check) in sequential:
             problems.append(f"check {check!r} cannot be declared parallel: "
                             f"{sequential[check]}")
 

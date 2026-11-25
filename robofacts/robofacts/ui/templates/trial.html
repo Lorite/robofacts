@@ -98,7 +98,7 @@
 <div class="tablewrap"><table>
 <thead><tr><th>analysis</th><th>per</th><th>generated</th><th>result folder</th><th class="num">failed commands</th></tr></thead>
 <tbody>{% for a in r.analyses %}
-<tr><td><b>{{ a.analysis }}</b></td><td>{{ a.per }}{% if a.per == 'cohort' %} <span class="muted">({{ a.n_bags }} bags)</span>{% endif %}</td><td class="nowrap">{{ a.generated_at }}</td>
+<tr><td><b>{{ a.analysis }}</b></td><td>{{ a.per }}{% if a.per == 'cohort' %} <span class="muted">({{ a.n_bags }} {{ noun }}s)</span>{% endif %}</td><td class="nowrap">{{ a.generated_at }}</td>
   <td><a href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}"><code>{{ a.path|relpath(experiment) }}</code></a></td>
   <td class="num">{{ a.failed_commands if a.failed_commands is not none else '—' }}</td></tr>
 {% endfor %}</tbody></table></div>
@@ -123,13 +123,13 @@
 {% if excludable and not view_only %}
 <h2>Exclude</h2>
 <form method="post" action="{{ url_for('exclude_trial', experiment=experiment, name=r.name) }}"
-      onsubmit="return confirm('Move {{ r.name }} to bags_issues? It stops counting as coverage but is NOT deleted.')">
+      onsubmit="return confirm('Move {{ r.name }} to {{ dirs.issues }}? It stops counting as coverage but is NOT deleted.')">
   <input type="hidden" name="back" value="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">
   <p class="small"><label>Why it must not count <textarea name="reason" rows="2" cols="70" required placeholder="one or two sentences: what went wrong and how you know"></textarea></label></p>
   <p class="small"><label>Category <select name="category" required>{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
     <label>By <input name="by" size="14" placeholder="your name"></label></p>
   <p class="small"><button type="submit">🗑 Exclude this trial</button>
-    <span class="muted">the same as <code>trials exclude {{ experiment }} {{ r.name }}</code>: moves the bag (and its slim copy) to <code>bags_issues*</code> with an <code>exclusion.json</code> that keeps the reason. Never deleted, and <code>trials restore</code> moves it back.</span></p>
+    <span class="muted">the same as <code>trials exclude {{ experiment }} {{ r.name }}</code>: moves the {{ noun }} (and its slim copy) to <code>{{ dirs.issues }}*</code> with an <code>exclusion.json</code> that keeps the reason. Never deleted, and <code>trials restore</code> moves it back.</span></p>
 </form>
 {% elif restorable and not view_only %}
 <h2>Restore</h2>
@@ -138,7 +138,7 @@
   <input type="hidden" name="back" value="{{ url_for('trial_view', experiment=experiment, name=r.name) }}">
   <p class="small"><label>Why it counts again <input name="reason" size="60"></label> <label>By <input name="by" size="14"></label></p>
   <p class="small"><button type="submit">↩ Restore this trial</button>
-    <span class="muted">the same as <code>trials restore {{ experiment }} {{ r.name }}</code>: moves it back to <code>bags*</code> and keeps the old reason as <code>exclusion_restored_&lt;time&gt;.json</code>.</span></p>
+    <span class="muted">the same as <code>trials restore {{ experiment }} {{ r.name }}</code>: moves it back to <code>{{ dirs.recordings }}*</code> and keeps the old reason as <code>exclusion_restored_&lt;time&gt;.json</code>.</span></p>
 </form>
 {% endif %}
 {% endblock %}

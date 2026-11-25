@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from record_dirs import rdir
 from robofacts import cli
 from robofacts import trial_decisions as td
 from robofacts import trial_index as ti
@@ -89,8 +90,8 @@ def trial(root: Path, name: str, *, mcap_in_full: bool = True, ledger: bool = Tr
     meta = {"trial_id": name, "execution_host": "laptop", "aborted": False, "route": "block_loop",
             "non_default_factors": []}
     meta.update(metadata)
-    full = root / "expA" / "bags" / name
-    slim = root / "expA" / "bags_slim" / f"{name}_slim"
+    full = root / "expA" / rdir("bags") / name
+    slim = root / "expA" / rdir("bags_slim") / f"{name}_slim"
     for d in (full, slim):
         d.mkdir(parents=True)
         (d / "trial_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -138,7 +139,7 @@ def test_a_pass_lifts_a_verify_only_abort_and_never_edits_the_metadata(root):
     record = go(root, "t1", FakeRun())
     assert record["verify_ok"] and record["lifts_abort"]
     assert [s["name"] for s in record["steps"]] == ["rates", "drift"]
-    for d in (full, root / "expA" / "bags_slim" / "t1_slim"):
+    for d in (full, root / "expA" / rdir("bags_slim") / "t1_slim"):
         assert json.loads((d / td.REVERIFICATION_FILE).read_text())["lifts_abort"] is True
     assert (full / "trial_metadata.json").read_text() == before
     t = status(root, "t1")
@@ -194,8 +195,8 @@ def test_a_staging_copy_without_the_mcap_reads_the_slim_copy(root):
     trial(root, "t7", mcap_in_full=False, aborted=True, abort_reason=VERIFY_ABORT)
     run = FakeRun()
     record = go(root, "t7", run)
-    assert record["bag_read"] == "bags_slim/t7_slim"
-    assert run.calls[0][0][2].endswith("bags_slim/t7_slim")
+    assert record["bag_read"] == f"{rdir('bags_slim')}/t7_slim"
+    assert run.calls[0][0][2].endswith(f"{rdir('bags_slim')}/t7_slim")
 
 
 @pytest.mark.ros2

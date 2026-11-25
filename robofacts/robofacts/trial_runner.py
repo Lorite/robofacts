@@ -2015,7 +2015,7 @@ def failure_report(record: Dict[str, Any]) -> Optional[str]:
         lines += [f"- {noun}: `{bag}`, with `trial_metadata.json`{extra} beside it "
                   f"(on the host that recorded it)"]
     elif status == "blocked":
-        lines += [f"- Gate log: `runs/preflight_gate.jsonl`, and `bags/{label}/gate_refusal.json` "
+        lines += [f"- Gate log: `runs/preflight_gate.jsonl`, and `{backends.record_dirs()['recordings']}/{label}/gate_refusal.json` "
                   f"if the aux launches left a directory"]
     lines += ["", "## Findings", "",
               "- **Symptom:**",
@@ -2572,9 +2572,9 @@ def main(argv=None) -> int:
     ap.add_argument("--set", action="append", default=[], metavar="name=a[,b]")
     ap.add_argument("--include-unverified", action="store_true")
     ap.add_argument("--limit", type=int, help="run at most N trials")
-    ap.add_argument("--bags-root", metavar="repo|external|PATH",
-                    help="where to WRITE the heavy bags: 'repo' (default, "
-                         "experiments/<name>/bags), 'external' (storage.yaml's "
+    ap.add_argument("--bags-root", "--recordings-root", dest="bags_root", metavar="repo|external|PATH",
+                    help="where to WRITE the heavy recordings: 'repo' (default, "
+                         "the experiment's recordings folder), 'external' (storage.yaml's "
                          "external_dest for the recording host), or a path. "
                          "Overrides runner.yaml. A symlink is left in the repo, so "
                          "coverage, slimming and analyses are unaffected.")
@@ -2660,7 +2660,7 @@ def main(argv=None) -> int:
             gate.campaign = "scratch"
         result = run_scratch(
             campaign, config,
-            args.experiments_root / campaign.experiment / "bags_scratch",
+            args.experiments_root / campaign.experiment / backends.record_dirs(args.experiments_root)["scratch"],
             gate=gate, dry_run=not args.execute,
             action=args.action or "", label=args.label, slim=args.slim,
             quiet_children=args.quiet_stack,
@@ -2669,7 +2669,7 @@ def main(argv=None) -> int:
 
     trials = ti.load_trials(args.experiments_root, campaign.experiment)
     plan = cp.build_plan(campaign, trials, args.include_unverified)
-    bags_dir = args.experiments_root / campaign.experiment / "bags"
+    bags_dir = args.experiments_root / campaign.experiment / backends.record_dirs(args.experiments_root)["recordings"]
 
     print(cp.render(plan))
     print("")

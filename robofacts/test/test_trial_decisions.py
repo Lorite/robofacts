@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from record_dirs import rdir
 from robofacts import campaign_plan as cp
 from robofacts import campaign_spec as cs
 from robofacts import cli
@@ -74,12 +75,12 @@ def bag(root: Path, name: str, folder: str = "bags", slim: bool = True, **metada
     meta = {"trial_id": name, "execution_host": "laptop", "aborted": False, "route": "block_loop",
             "non_default_factors": []}
     meta.update(metadata)
-    d = root / "expA" / folder / name
+    d = root / "expA" / rdir(folder) / name
     d.mkdir(parents=True)
     (d / "trial_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
     (d / f"{name}_0.mcap").write_bytes(b"mcap")
     if slim:
-        s = root / "expA" / f"{folder}_slim" / f"{name}_slim"
+        s = root / "expA" / rdir(f"{folder}_slim") / f"{name}_slim"
         s.mkdir(parents=True)
         (s / f"{name}_slim_0.mcap").write_bytes(b"slim")
         (s / "trial_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -103,18 +104,18 @@ def test_exclude_moves_the_bag_and_its_slim_copy_and_writes_the_reason_beside_ea
     (root / "expA" / "plot.png").write_bytes(b"png")
     record = td.exclude(root, "expA", "t1", reason="Wi-Fi re-association stalled DDS for 40 s",
                         category="infrastructure", by="Alejandro", evidence=["plot.png"], now=LATER)
-    issues = root / "expA" / "bags_issues" / "t1"
-    issues_slim = root / "expA" / "bags_issues_slim" / "t1_slim"
+    issues = root / "expA" / rdir("bags_issues") / "t1"
+    issues_slim = root / "expA" / rdir("bags_issues_slim") / "t1_slim"
     assert issues.is_dir() and issues_slim.is_dir()
-    assert not full.exists() and not (root / "expA" / "bags_slim" / "t1_slim").exists()
+    assert not full.exists() and not (root / "expA" / rdir("bags_slim") / "t1_slim").exists()
     for d in (issues, issues_slim):
         written = json.loads((d / td.EXCLUSION_FILE).read_text(encoding="utf-8"))
         assert written["category"] == "infrastructure" and written["by"] == "Alejandro"
         assert written["reason"].startswith("Wi-Fi") and written["evidence"] == ["plot.png"]
         assert written["date"][:4].isdigit()
     assert (issues / "trial_metadata.json").read_bytes() == before, "never edited"
-    assert record["moved"] == ["bags/t1 -> bags_issues/t1",
-                               "bags_slim/t1_slim -> bags_issues_slim/t1_slim"]
+    assert record["moved"] == [f"{rdir('bags')}/t1 -> {rdir('bags_issues')}/t1",
+                               f"{rdir('bags_slim')}/t1_slim -> {rdir('bags_issues_slim')}/t1_slim"]
 
 
 def test_an_excluded_trial_shows_its_reason_and_category_in_the_records(root):
@@ -143,9 +144,9 @@ def test_exclude_of_a_hand_quarantine_adds_the_reason_in_place(root):
     record = td.exclude(root, "expA", "t_old", reason="DDS stalled", category="infrastructure",
                         evidence=["quarantine_reason.md"], now=LATER)
     assert record["moved"] == []
-    assert record["evidence"] == ["bags_issues/t_old/quarantine_reason.md"]
+    assert record["evidence"] == [f"{rdir('bags_issues')}/t_old/quarantine_reason.md"]
     assert (old / td.EXCLUSION_FILE).is_file()
-    assert (root / "expA" / "bags_issues_slim" / "t_old_slim" / td.EXCLUSION_FILE).is_file()
+    assert (root / "expA" / rdir("bags_issues_slim") / "t_old_slim" / td.EXCLUSION_FILE).is_file()
 
 
 def test_exclude_refuses_without_a_reason_a_bad_category_or_twice(root):
@@ -172,8 +173,8 @@ def test_exclude_refuses_a_trial_that_is_still_being_written(root):
 def test_exclude_refuses_a_trial_of_the_run_in_progress(root):
     full = bag(root, "t1")
     old = time.time() - 600
-    for p in [full, *full.rglob("*")] + [root / "expA" / "bags_slim" / "t1_slim",
-                                          *(root / "expA" / "bags_slim").rglob("*")]:
+    for p in [full, *full.rglob("*")] + [root / "expA" / rdir("bags_slim") / "t1_slim",
+                                          *(root / "expA" / rdir("bags_slim")).rglob("*")]:
         os.utime(p, (old, old))
     with run_marker.running(root, experiment="expA", campaign="c", label="t1"):
         with pytest.raises(td.DecisionError, match="in progress"):
@@ -186,8 +187,8 @@ def test_restore_moves_it_back_and_keeps_the_old_reason_as_history(root):
     bag(root, "t1")
     td.exclude(root, "expA", "t1", reason="looked broken", category="estimator", now=LATER)
     result = td.restore(root, "expA", "t1", reason="the estimator was fine", by="Alejandro")
-    full = root / "expA" / "bags" / "t1"
-    assert full.is_dir() and (root / "expA" / "bags_slim" / "t1_slim").is_dir()
+    full = root / "expA" / rdir("bags") / "t1"
+    assert full.is_dir() and (root / "expA" / rdir("bags_slim") / "t1_slim").is_dir()
     assert not (full / td.EXCLUSION_FILE).exists()
     history = json.loads((full / result["history"]).read_text(encoding="utf-8"))
     assert history["reason"] == "looked broken"
@@ -198,7 +199,7 @@ def test_restore_moves_it_back_and_keeps_the_old_reason_as_history(root):
 
 
 def test_an_unknown_trial_names_where_it_looked(root):
-    with pytest.raises(td.DecisionError, match="bags_issues_slim"):
+    with pytest.raises(td.DecisionError, match=rdir("bags_issues_slim")):
         td.exclude(root, "expA", "nope", reason="x", category="other")
     with pytest.raises(td.DecisionError, match="not a trial name"):
         td.exclude(root, "expA", "../expA", reason="x", category="other")
@@ -216,7 +217,7 @@ def test_amend_writes_corrections_beside_both_and_never_edits_the_metadata(root)
     assert new[0]["field"] == "route" and new[0]["recorded"] == "block_loop"
     assert new[0]["corrected"] == "building_loop" and new[0]["by"] == "Alejandro"
     assert (full / "trial_metadata.json").read_bytes() == before
-    for d in (full, root / "expA" / "bags_slim" / "t1_slim"):
+    for d in (full, root / "expA" / rdir("bags_slim") / "t1_slim"):
         assert [e["corrected"] for e in td.read_corrections(d)] == ["building_loop"]
 
 
@@ -254,7 +255,7 @@ def test_amend_validates_the_factor_and_the_level(root):
         td.amend(root, "expA", "t1", ["route=block_loop"], reason="x", now=LATER)
     with pytest.raises(td.DecisionError, match="reason"):
         td.amend(root, "expA", "t1", ["route=building_loop"], reason="", now=LATER)
-    assert not (root / "expA" / "bags" / "t1" / td.CORRECTIONS_FILE).exists()
+    assert not (root / "expA" / rdir("bags") / "t1" / td.CORRECTIONS_FILE).exists()
 
 
 def test_a_second_amend_extends_the_file_and_the_newest_wins(root):
@@ -262,7 +263,7 @@ def test_a_second_amend_extends_the_file_and_the_newest_wins(root):
     td.amend(root, "expA", "t1", ["route=building_loop"], reason="first look", now=LATER)
     new = td.amend(root, "expA", "t1", ["route=block_loop"], reason="second look", now=LATER)
     assert new[0]["replaces"] == "building_loop"
-    assert [e["reason"] for e in td.read_corrections(root / "expA" / "bags" / "t1")] == \
+    assert [e["reason"] for e in td.read_corrections(root / "expA" / rdir("bags") / "t1")] == \
         ["first look", "second look"]
     assert trials(root)["t1"].metadata["route"] == "block_loop"
 

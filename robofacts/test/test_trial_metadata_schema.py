@@ -10,6 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
+from record_dirs import rdir
 from robofacts import trial_metadata_schema as tms
 #: The experiments of this package's example project (the "shipped" declarations).
 EXPERIMENTS_ROOT = HERE.parent / "example_project" / "experiments"
@@ -193,10 +194,10 @@ def test_annotated_metadata_stays_json_serialisable(root):
 # Audit over recorded bags
 # --------------------------------------------------------------------------- #
 def test_audit_reports_per_bag(root):
-    bag = root / "expA" / "bags" / "t1"
+    bag = root / "expA" / rdir("bags") / "t1"
     bag.mkdir(parents=True)
     (bag / "trial_metadata.json").write_text(json.dumps(GOOD), encoding="utf-8")
-    bad = root / "expA" / "bags" / "t2"
+    bad = root / "expA" / rdir("bags") / "t2"
     bad.mkdir(parents=True)
     (bad / "trial_metadata.json").write_text(json.dumps({"trial_id": "t2"}), encoding="utf-8")
 
@@ -208,17 +209,17 @@ def test_audit_reports_per_bag(root):
 def test_audit_ignores_slim_copies(root):
     """Same `bags*` glob bug as the index: a slim bag's metadata is a copy, not
     a second trial, and auditing it would double every reported problem."""
-    bag = root / "expA" / "bags" / "t1"
+    bag = root / "expA" / rdir("bags") / "t1"
     bag.mkdir(parents=True)
     (bag / "trial_metadata.json").write_text(json.dumps(GOOD), encoding="utf-8")
-    slim = root / "expA" / "bags_slim" / "t1_slim"
+    slim = root / "expA" / rdir("bags_slim") / "t1_slim"
     slim.mkdir(parents=True)
     (slim / "trial_metadata.json").write_text(json.dumps(GOOD), encoding="utf-8")
     assert len(tms.audit(root)) == 1
 
 
 def test_audit_handles_unreadable_metadata(root):
-    bag = root / "expA" / "bags" / "broken"
+    bag = root / "expA" / rdir("bags") / "broken"
     bag.mkdir(parents=True)
     (bag / "trial_metadata.json").write_text("{not json", encoding="utf-8")
     assert any("unreadable" in p for p in tms.audit(root)[str(bag)])

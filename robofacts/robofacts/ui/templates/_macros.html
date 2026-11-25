@@ -114,7 +114,7 @@
     {%- if show_campaign and r.campaign %}<div class="small muted">campaign {{ r.campaign }}</div>{% endif %}
     <div class="tlinks">{{ replay(r, experiment, layouts) }}</div>
     {%- if r.analyses %}<div class="tlinks">{% for a in r.analyses %}<a class="chip" href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}"
-       title="{{ a.analysis }} ({{ a.per }}{% if a.per == 'cohort' %} of {{ a.n_bags }} bags{% endif %}), {{ a.generated_at }}: {{ a.folder.name }}">{{ a.analysis }}</a>{% endfor %}</div>{% endif %}
+       title="{{ a.analysis }} ({{ a.per }}{% if a.per == 'cohort' %} of {{ a.n_bags }} {{ noun }}s{% endif %}), {{ a.generated_at }}: {{ a.folder.name }}">{{ a.analysis }}</a>{% endfor %}</div>{% endif %}
     <div class="tlinks small">
       {%- for v in r.videos[:2] %}<a href="{{ url_for('files', experiment=experiment, rel=v|relpath(experiment)) }}" title="{{ v|relpath(experiment) }}">🎬 {{ 'video' if loop.first else 'alt' }}</a>{% endfor -%}
       {%- if r.camera_video %}<a href="{{ url_for('files', experiment=experiment, rel=r.camera_video|relpath(experiment)) }}" title="the {{ r.camera_label }}, made from the bag ({{ r.camera_video|relpath(experiment) }}): not the trial video">📷 {{ r.camera_label }}</a>{% endif -%}
@@ -159,7 +159,7 @@
     {%- if not r.videos %}<span class="muted">—</span>{% endif %}</td>
   <td data-sort="{{ r.analyses|length }}">
     {%- for a in r.analyses %}<a class="chip" href="{{ url_for('files', experiment=experiment, rel=a.path|relpath(experiment) ~ '/') }}"
-       title="{{ a.analysis }} ({{ a.per }}{% if a.per == 'cohort' %} of {{ a.n_bags }} bags{% endif %}), {{ a.generated_at }}: {{ a.folder.name }}">{{ a.analysis }}</a>{% endfor -%}
+       title="{{ a.analysis }} ({{ a.per }}{% if a.per == 'cohort' %} of {{ a.n_bags }} {{ noun }}s{% endif %}), {{ a.generated_at }}: {{ a.folder.name }}">{{ a.analysis }}</a>{% endfor -%}
     {%- if not r.analyses %}<span class="muted">—</span>{% endif %}</td>
   <td data-sort="{{ r.gate.verdict if r.gate else '' }}">{{ gate_badge(r.gate) }}</td>
   <td class="actions">

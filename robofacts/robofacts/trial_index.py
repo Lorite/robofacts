@@ -246,7 +246,10 @@ def load_trials(experiments_root: Optional[Path] = None,
     # bags_scratch_slim/) and are excluded from coverage by not being named
     # here. Their metadata also carries "scratch": true, which Trial.status
     # forces to excluded should a scratch bag ever be moved into bags/ by hand.
-    for record_dir in ("bags", "bags_issues", "bags_slim", "bags_issues_slim"):
+    from . import backend
+    rd = backend.record_dirs(experiments_root)
+    issue_dirs = (rd["issues"], rd["issues_slim"])
+    for record_dir in (rd["recordings"], rd["issues"], rd["slim"], rd["issues_slim"]):
         prefix = f"{experiment}/" if experiment else "*/"
         meta_paths.extend(experiments_root.glob(f"{prefix}{record_dir}/*/trial_metadata.json"))
     seen_recordings: set = set()
@@ -294,7 +297,7 @@ def load_trials(experiments_root: Optional[Path] = None,
             # startswith, not equality: bags_issues_slim must quarantine too — an
             # exact match let a usable-by-metadata bag in bags_issues_slim keep
             # counting as coverage (2026-07-31, the retune-quarantined cv trial).
-            is_issue_bag=any(p.startswith("bags_issues") for p in meta_path.parts),
+            is_issue_bag=any(p in issue_dirs for p in meta_path.parts),
             corrections=corrections,
             exclusion=td.read_exclusion(meta_path.parent),
             recorded=recorded,

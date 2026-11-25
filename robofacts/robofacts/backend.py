@@ -39,6 +39,23 @@ BUILT_IN = {
 }
 
 
+#: The folders of an experiment, by role: what the coverage index reads (recordings, slim),
+#: what a person excluded (issues, issues_slim) and the diagnostic runs it never reads
+#: (scratch, scratch_slim). The names come from the backend: a backend whose projects
+#: already have folders keeps their names, a new backend gets the general names.
+RECORDING_DIRS = {
+    "recordings": "recordings", "issues": "recordings_issues",
+    "slim": "recordings_slim", "issues_slim": "recordings_issues_slim",
+    "scratch": "recordings_scratch", "scratch_slim": "recordings_scratch_slim",
+}
+#: The older names, for a backend whose recording is called a bag.
+BAG_DIRS = {
+    "recordings": "bags", "issues": "bags_issues",
+    "slim": "bags_slim", "issues_slim": "bags_issues_slim",
+    "scratch": "bags_scratch", "scratch_slim": "bags_scratch_slim",
+}
+
+
 class BackendError(ValueError):
     """A backend that cannot be loaded, or a declaration that the backend refuses."""
 
@@ -150,6 +167,8 @@ class Backend:
     #: after the last commit. ``workspaces_setting`` is the backend's older name of that key.
     build_workspaces: Tuple[str, ...] = (".",)
     workspaces_setting: str = ""
+    #: The folder names of an experiment, by role (see RECORDING_DIRS).
+    record_dirs: Dict[str, str] = field(default_factory=lambda: dict(RECORDING_DIRS))
 
     def feature(self, name: str) -> Optional[ModuleType]:
         """The module of an optional feature, or None when this backend does not offer it."""
@@ -216,6 +235,14 @@ def source_dirs(start: Optional[Any] = None) -> List[Path]:
     except Exception:  # noqa: BLE001 - an unknown backend adds nothing
         pass
     return dirs
+
+
+def record_dirs(start: Optional[Any] = None) -> Dict[str, str]:
+    """The folder names of the project at or above ``start``, by role (RECORDING_DIRS)."""
+    try:
+        return dict(active(start).record_dirs)
+    except BackendError:
+        return dict(RECORDING_DIRS)
 
 
 def active(start: Optional[Any] = None) -> Backend:

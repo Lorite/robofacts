@@ -1,6 +1,6 @@
 # Where heavy bags live, per host.
 #
-# The runner writes a bag to experiments/<name>/bags/ unless the experiment's
+# The runner writes a recording to the experiment's recordings folder unless the experiment's
 # runner.yaml says `bags_root: external` (or the command line says --bags-root),
 # in which case the destination is resolved here for the host that records.
 #

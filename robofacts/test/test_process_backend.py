@@ -83,7 +83,7 @@ def write_project(root: Path, *, min_lines: int = 3, with_stack: bool = True) ->
     (root / "trials.yaml").write_text("experiments_root: experiments\nproject_root: .\n"
                                       "backend: process\n", encoding="utf-8")
     exp = root / "experiments" / "plant"
-    for sub in ("config", "campaigns", "scripts", "runs", "bags"):
+    for sub in ("config", "campaigns", "scripts", "runs", "recordings"):
         (exp / sub).mkdir(parents=True)
     for name, body in (("plant.py", PLANT), ("observe.py", OBSERVE), ("verify_log.py", VERIFY)):
         (exp / "scripts" / name).write_text(body, encoding="utf-8")
@@ -119,8 +119,8 @@ def write_project(root: Path, *, min_lines: int = 3, with_stack: bool = True) ->
           laptop: {{local: true}}
         """), encoding="utf-8")
     (exp / "config" / "preflight_checklist.json").write_text(json.dumps({"checklist": [
-        {"text": "[HARD] The recording directory is writable.", "check": "bag_dir_writable",
-         "args": {"path": "experiments/plant/bags", "label": "recordings"}},
+        {"text": "[HARD] The recording directory is writable.", "check": "recording_dir_writable",
+         "args": {"path": "experiments/plant/recordings", "label": "recordings"}},
         {"text": "Enough disk for the recording.", "check": "disk_space",
          "args": {"path": ".", "min_gb": "0.01"}},
     ]}, indent=2), encoding="utf-8")
@@ -280,7 +280,7 @@ def test_a_dry_run_shows_the_launcher_and_the_recorder_commands(project, capsys)
     assert re.search(r"\$ python3 experiments/plant/scripts/plant\.py --rate (slow|fast) --log", out), out
     assert "$ python3 -m robofacts.backends.process_recorder --out" in out
     assert "ros2" not in out
-    assert not any((project / "plant" / "bags").iterdir())
+    assert not any((project / "plant" / "recordings").iterdir())
 
 
 @pytest.mark.real_sleep
@@ -330,7 +330,7 @@ def test_a_stack_that_writes_nothing_leaves_no_trial(tmp_path, monkeypatch, caps
     use_project(root, monkeypatch)
     rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
     assert rc == 1 and "holds no data" in out
-    assert "no recording recorded" in out and "bag" not in out.replace("bags", ""), out
+    assert "no recording recorded" in out and "bag" not in out, out
     assert ti.load_trials(experiments, "plant") == []
     ti._recorder_at.cache_clear()
 

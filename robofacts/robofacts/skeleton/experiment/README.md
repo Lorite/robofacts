@@ -22,4 +22,4 @@ trials analyze {{name}} line_count --execute                 # a named analysis 
 
 The template works as generated, without any robot: `scripts/system.py` stands in for the system under test (it writes a line to a log file many times per second), the recorder stores what it writes during the trial, and `scripts/verify_log.py` checks the recording. Replace the three scripts with your own.
 
-Recordings land in `bags/` (the folder name is older than the backends) with a `trial_metadata.json` next to each, run logs in `runs/`, results in `results/`.
+Recordings land in `recordings/` with a `trial_metadata.json` next to each, run logs in `runs/`, results in `results/`.

@@ -10,10 +10,11 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
+from record_dirs import rdir
 from robofacts import trial_index as ti
 def make_trial(root: Path, experiment: str, name: str, metadata: dict,
                issues: bool = False) -> Path:
-    bags = "bags_issues" if issues else "bags"
+    bags = rdir("bags_issues") if issues else rdir("bags")
     bag = root / experiment / bags / name
     bag.mkdir(parents=True)
     (bag / "trial_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
@@ -51,7 +52,7 @@ def test_loads_from_bags_and_bags_issues(root):
 
 def test_unreadable_metadata_is_skipped_not_fatal(root):
     make_trial(root, "expA", "t1", BASE)
-    bad = root / "expA" / "bags" / "broken"
+    bad = root / "expA" / rdir("bags") / "broken"
     bad.mkdir(parents=True)
     (bad / "trial_metadata.json").write_text("{oops", encoding="utf-8")
     (bad / "metadata.yaml").write_text("rosbag2_bagfile_information:\n", encoding="utf-8")
@@ -64,7 +65,7 @@ def test_slim_copies_are_not_counted_as_trials(root):
     carry a COPY of trial_metadata.json (#94), so every slimmed trial was counted
     twice and coverage was silently doubled — 179 'trials' where there were 108."""
     make_trial(root, "expA", "t1", BASE)
-    slim = root / "expA" / "bags_slim" / "t1_slim"
+    slim = root / "expA" / rdir("bags_slim") / "t1_slim"
     slim.mkdir(parents=True)
     (slim / "trial_metadata.json").write_text(json.dumps(BASE), encoding="utf-8")
 
@@ -79,7 +80,7 @@ def test_slim_copies_sharing_a_generic_trial_id_are_distinct_trials(root):
     distinct pre-framework recordings vanished from the index. A slim copy is a
     duplicate only of the full bag it is named after."""
     for name in ("2026-05-28T08-29-14_flight_slim", "2026-05-28T10-25-41_flight_slim"):
-        slim = root / "expA" / "bags_slim" / name
+        slim = root / "expA" / rdir("bags_slim") / name
         slim.mkdir(parents=True)
         (slim / "trial_metadata.json").write_text(json.dumps(dict(BASE, trial_id="trial_001")), encoding="utf-8")
     make_trial(root, "expA", "2026-06-01T09-00-00_other", dict(BASE, trial_id="trial_001"))

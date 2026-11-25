@@ -38,7 +38,8 @@ from . import roots
 #: The lint reads this to lint one experiment (lint.ENV_ONLY_EXPERIMENT, not imported here).
 LINT_ENV = "TRIALS_LINT_EXPERIMENT"
 STAGES = ("check", "plan", "gate", "lint", "tests", "dry_run")
-DATA_DIRS = ("bags", "runs", "results", "notebooks")
+DATA_DIRS = ("bags", "recordings", "runs", "results", "notebooks")
+DATA_PREFIXES = ("bags_", "recordings_")
 _PYTEST_SUMMARY = re.compile(r"\d+ (passed|failed|error|errors|skipped|deselected)")
 _GIT_HOOK_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX")
 
@@ -115,7 +116,7 @@ def experiment_tests(experiment_dir: Path) -> List[Path]:
         here = Path(root)
         dirs[:] = [d for d in dirs
                    if d != "__pycache__" and not (here == experiment_dir and
-                                                  (d in DATA_DIRS or d.startswith("bags_")))]
+                                                  (d in DATA_DIRS or d.startswith(DATA_PREFIXES)))]
         found += [here / f for f in files if f.startswith("test_") and f.endswith(".py")]
     return sorted(found)
 

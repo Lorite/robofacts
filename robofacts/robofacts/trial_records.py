@@ -75,8 +75,28 @@ STATUS_MEANING = {
     "interrupted": "an attempt the operator interrupted before it finished: no trial",
 }
 
-RECORD_DIRS = ("bags", "bags_issues", "bags_slim", "bags_issues_slim")
-SCRATCH_DIRS = ("bags_scratch", "bags_scratch_slim")
+def record_dirs_of(root: Optional[Path] = None) -> Tuple[str, ...]:
+    """The folders of counted and excluded trials and their slim copies, named by the backend."""
+    from . import backend
+    rd = backend.record_dirs(root)
+    return rd["recordings"], rd["issues"], rd["slim"], rd["issues_slim"]
+
+
+def scratch_dirs_of(root: Optional[Path] = None) -> Tuple[str, ...]:
+    """The folders of scratch recordings and their slim copies, named by the backend."""
+    from . import backend
+    rd = backend.record_dirs(root)
+    return rd["scratch"], rd["scratch_slim"]
+
+
+def __getattr__(name):
+    """``RECORD_DIRS`` and ``SCRATCH_DIRS``, the constants from before the backends named the
+    folders, resolved for the project in the working directory."""
+    if name == "RECORD_DIRS":
+        return record_dirs_of()
+    if name == "SCRATCH_DIRS":
+        return scratch_dirs_of()
+    raise AttributeError(name)
 _STAMP = re.compile(r"^(\d{8}T\d{6})")
 
 
@@ -531,6 +551,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
     """
     root = roots.experiments_root(experiments_root)
     exp_dir = root / experiment
+    slim_tiers = record_dirs_of(root)[2:]     # the slim copies of counted, then excluded trials
     trials = ti.load_trials(root, experiment)
     try:
         factors = ti.declared_factors(experiment, root)
@@ -553,8 +574,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
         row = by_label.get(name)
         status, reason = _status_of(trial)
         slim = trial.bag_dir if in_slim else _slim_for(
-            exp_dir, name, ("bags_issues_slim", "bags_slim") if trial.is_issue_bag
-            else ("bags_slim", "bags_issues_slim"))
+            exp_dir, name, tuple(reversed(slim_tiers)) if trial.is_issue_bag else slim_tiers)
         log = exp_dir / "runs" / f"{name}.log"
         records.append(TrialRecord(
             experiment=experiment, name=name, kind="campaign", status=status, reason=reason,
@@ -640,7 +660,7 @@ def _scratch_records(root: Path, experiment: str, factors: List[str],
     """Scratch recordings with their slim copies: replayable, never coverage."""
     exp_dir = root / experiment
     names: Dict[str, Dict[str, Optional[Path]]] = {}
-    for dir_name in SCRATCH_DIRS:
+    for dir_name in scratch_dirs_of(root):
         base = exp_dir / dir_name
         if not base.is_dir():
             continue
