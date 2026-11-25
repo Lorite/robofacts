@@ -6,6 +6,27 @@
 - pytest is a dependency of `robofacts` (2026-11-25): the linter's rules are pytest tests, so `trials lint` and `trials validate` stopped with `ModuleNotFoundError: No module named 'pytest'` after a plain `pip install` (found by installing the wheel without extras in `python:3.10-slim`). The CI had always installed the `test` extra.
 - An MCP server for agents (2026-11-25): `trials mcp` serves nine read-only tools over stdio with JSON results (`list_experiments`, `list_campaigns`, `validate_experiment`, `lint`, `plan_campaign`, `dry_run_campaign`, `coverage_index`, `list_trials`, `explain_trial`), built on the MCP Python SDK 2 as the optional extra `robofacts[mcp]` (module `robofacts.mcp`). No tool runs a trial, runs a gate check against a robot, writes the stop latch or changes a file: the dry run calls the runner with `dry_run=True` and no gate, `validate_experiment` leaves out the experiment's own test files, and the result of a dry run names the `--execute` command for the operator. Arguments are names, never paths, and an argument a tool does not declare is refused. `test/test_mcp_read_only.py` calls every tool on a copy of the example with recorded trials and checks that no file changed, no process other than the lint's pytest started, no socket opened and no stop latch was written, plus a static check of the server's code. The CI job `core-no-ros` installs the SDK through the `test` extra.
 
+### Fixes from the pre-release review (2026-11-25)
+
+Three rounds of independent review before the first PyPI release. Each fix has a test that fails without it.
+
+- The runner and stops:
+    - The trial's action ends before the teardown. On Ctrl-C the runner stopped the recorder and the stack while the action was still landing. Now the interrupt goes on to the action, SIGTERM follows after 5 s, the runner waits up to 90 s, and SIGKILL ends it last. A second Ctrl-C kills it at once.
+    - SIGTERM and SIGHUP take the Ctrl-C path. Before, they ended the runner at once and left the stack and the recorder running, with no metadata and no ledger line. A second interrupt during the teardown waits until the recorder and the stack have stopped.
+    - A local action leads its own process group, so the action timeout and the web interface's stop reach the whole action, also behind a wrapper script.
+    - An action that could not start, or that the runner lost (a byte that is not UTF-8 in its output), is written as aborted and never counts. Before, it was written with `aborted: false` and counted as coverage, and the lost action ran on into the next trial.
+    - An action that a signal ended is reported as "interrupted (SIGINT)", "stopped (SIGTERM)" or "killed (SIGKILL)", not as "the trial did not happen as planned". The abort reason names the signal and the stage the trial had reached (it named the teardown before), and an interrupted run ends with one line and the exit code 128 plus the signal number instead of a traceback.
+- Settings: `names()`, `default_record_profile()`, `default_cf_name()` and the adapter functions read `trials.yaml` from the working directory, not from the experiments root they were given. A run started inside another project read that project's adapters and blocked every trial. They now take the experiments root, a setting read without one follows `$TRIALS_EXPERIMENTS_ROOT`, and `trials run` exports its root while it runs.
+- The linter:
+    - L10 checks the metadata contract's invariant (every swept factor is recorded as a coverage axis), as the paper says. Before, only `plan`, `check` and `run` refused such a campaign.
+    - The lint ignores the pytest configuration and the `conftest.py` files of the project it checks. With robofacts installed in a virtual environment inside the project, the project's `conftest.py` ran during `trials lint` and during the MCP server's `lint` tool.
+- Campaigns: a sweep that lists a level twice is refused (it doubled the trials wanted of that level).
+- The coverage index: the grid shows the axes that vary before a constant one.
+- The MCP server: a factor level that contains a comma is refused (it became a sweep of two levels).
+- Packaging: the license text is in the wheel and the sdist, the sdist no longer ships a test suite that cannot run, the classifiers name Python 3.10 to 3.14 and the CI job of the general package runs on each, the release workflow runs the core suite before it publishes, and every action of the release workflow is pinned to a commit.
+- Docs and examples: the PyPI page names the MCP extra, the README gives `rosdep install ... --skip-keys robofacts` (rosdep has no rule for `robofacts`), the CLI's help no longer names a tool that only the ROS 2 backend ships, the stand-in systems of the examples stop quietly on SIGINT, and the README steps that run `--execute` on a demo pass `--no-pause` or say that each trial waits for Enter.
+- Tests: the web interface's tests no longer skip the whole ROS 2 suite when Flask is missing (a module-level `importorskip` collected 0 of 527 tests with exit code 0), and a static check refuses that pattern in every test module.
+
 ## 0.1.0 (2026-11-25)
 
 The framework of a robotics lab's experiments, extracted into two installable packages: `robofacts` (Python only, `pip install`) and its ROS 2 backend `robofacts_ros2` (`ament_python`).
