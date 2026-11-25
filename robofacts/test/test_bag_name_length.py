@@ -76,3 +76,32 @@ def test_the_real_2026_08_19_id_now_fits():
     name = tr.bag_name(_Trial(values), {}, "20260819T112442")
     assert len(name.encode()) <= tr.MAX_TRIAL_ID_BYTES
     assert len(f"{name}_0.mcap".encode()) <= 255
+
+
+def test_a_long_cjk_level_is_cut_on_bytes_without_splitting_a_character():
+    """2026-11-25: the cut counted characters, so a CJK level kept 200 characters, 524 bytes,
+    and the recorder failed with "File name too long". The cut now counts UTF-8 bytes and
+    never ends inside a character."""
+    name = tr.bag_name(_Trial({"site": "東京駅前の実験室" * 12}), {}, "20261125T195710")
+    assert len(name.encode("utf-8")) <= tr.MAX_TRIAL_ID_BYTES
+    assert name.encode("utf-8").decode("utf-8") == name        # whole characters only
+    assert name.startswith("20261125T195710_site-東京駅前の実験室") and "_rep01_h" in name
+
+
+def _old_cut(full_values, stamp, rep=1):
+    """The character cut of before 2026-11-25, which ASCII names must keep exactly."""
+    import hashlib
+    parts = [stamp] + [f"{k}-{v}" for k, v in sorted(full_values.items())] + [f"rep{rep:02d}"]
+    full = "_".join(str(p).replace("/", "-").replace(" ", "") for p in parts)
+    if len(full.encode("utf-8")) <= tr.MAX_TRIAL_ID_BYTES:
+        return full
+    digest = hashlib.sha1(full.encode("utf-8")).hexdigest()[:8]
+    head, tail = f"{stamp}_", f"_rep{rep:02d}_h{digest}"
+    budget = tr.MAX_TRIAL_ID_BYTES - len(head.encode()) - len(tail.encode())
+    return f"{head}{full[len(head):full.rindex('_rep')][:max(0, budget)].rstrip('_-')}{tail}"
+
+
+@pytest.mark.parametrize("n", [3, 8, 20, 60])
+def test_an_ascii_name_is_cut_exactly_as_before(n):
+    values = {f"factor_number_{i:02d}": "v" * 24 for i in range(n)}
+    assert tr.bag_name(_Trial(values), {}, "20260819T112442") == _old_cut(values, "20260819T112442")

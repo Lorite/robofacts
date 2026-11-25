@@ -35,7 +35,7 @@ import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import roots
 from . import trial_decisions as td
@@ -495,10 +495,32 @@ def _started(name: str, ledger_row: Optional[Dict[str, Any]]) -> str:
     return ""
 
 
+def _lookup(check: Callable[[], bool]) -> Tuple[bool, str]:
+    """``(answer, "")`` of a file check, or ``(False, why)`` when the path cannot even be looked
+    up: a trial label over the file system's limit for a name (``File name too long``, left
+    in the ledger by an attempt whose recorder failed on it) must not stop the listing of the
+    whole experiment (2026-11-25)."""
+    try:
+        return bool(check()), ""
+    except OSError as exc:
+        return False, exc.strerror or str(exc)
+
+
+def _run_log(exp_dir: Path, name: str) -> Tuple[Optional[Path], str]:
+    """The trial's run log when it exists, and why it could not be looked up, if so."""
+    log = exp_dir / "runs" / f"{name}.log"
+    found, why = _lookup(log.is_file)
+    return (log if found else None), (f"its run log cannot be looked up ({why})" if why else "")
+
+
+def _with(reason: str, problem: str) -> str:
+    return "; ".join(x for x in (reason, problem) if x)
+
+
 def _slim_for(exp_dir: Path, name: str, roots_: Iterable[str]) -> Optional[Path]:
     for root_name in roots_:
         candidate = exp_dir / root_name / f"{name}_slim"
-        if candidate.is_dir() and ti.recording_holds_data(candidate):
+        if _lookup(candidate.is_dir)[0] and ti.recording_holds_data(candidate):
             return candidate
     return None
 
@@ -585,9 +607,10 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
         status, reason = _status_of(trial)
         slim = trial.bag_dir if in_slim else _slim_for(
             exp_dir, name, tuple(reversed(slim_tiers)) if trial.is_issue_bag else slim_tiers)
-        log = exp_dir / "runs" / f"{name}.log"
+        log, problem = _run_log(exp_dir, name)
         records.append(TrialRecord(
-            experiment=experiment, name=name, kind="campaign", status=status, reason=reason,
+            experiment=experiment, name=name, kind="campaign", status=status,
+            reason=_with(reason, problem),
             started=_started(name, row),
             campaign=(row or {}).get("campaign") or trial.metadata.get("campaign"),
             values=_values(trial.metadata, factors or sorted(
@@ -596,7 +619,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
             bag_dir=None if in_slim else trial.bag_dir,
             slim_dir=slim,
             metadata_path=trial.bag_dir / "trial_metadata.json",
-            run_log=log if log.is_file() else None,
+            run_log=log,
             gate=_gate_summary(trial.metadata.get("preflight")) or _gate_summary(
                 (row or {}).get("gate")) or _gate_summary(gates.get(name)),
             code_version=trial.metadata.get("code_version"),
@@ -625,15 +648,15 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
             reason = str(row.get("abort_reason") or row.get("detail") or "").strip()
             if row.get("status") == "ran":
                 reason = "the ledger says it ran, but its bag is not on this machine"
-            log = exp_dir / "runs" / f"{label}.log"
+            log, problem = _run_log(exp_dir, label)
             records.append(TrialRecord(
                 experiment=experiment, name=label, kind="scratch" if scratch else "campaign",
-                status=status, reason=reason, started=_started(label, row),
+                status=status, reason=_with(reason, problem), started=_started(label, row),
                 campaign=None if scratch else row.get("campaign"),
                 values={k: str(v) for k, v in (row.get("values") or {}).items()
                         if not isinstance(v, (dict, list))},
                 repetition=row.get("repetition"),
-                run_log=log if log.is_file() else None, gate=gate,
+                run_log=log, gate=gate,
             ))
 
     by_name = {r.name: r for r in records}
@@ -644,7 +667,10 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
     camera = tm.load_camera_or_none(exp_dir)
     plots_first = tm.load_card_first(exp_dir) == "plots"
     for record in records:
-        record.stills, record.camera_video, info = tm.cached(exp_dir, record.name)
+        try:
+            record.stills, record.camera_video, info = tm.cached(exp_dir, record.name)
+        except OSError:      # a name the file system cannot look up: no pictures, no crash
+            record.stills, record.camera_video, info = [], None, {}
         if record.stills or record.camera_video:
             record.camera_label = str(info.get("label") or (camera.label if camera else "camera"))
         record.plots = tm.plots_of(record.analyses, record.name)
@@ -702,15 +728,15 @@ def _scratch_records(root: Path, experiment: str, factors: List[str],
             meta_path = None
         row = by_label.get(name)
         aborted = bool(metadata.get("aborted"))
-        log = exp_dir / "runs" / f"{name}.log"
+        log, problem = _run_log(exp_dir, name)
         out.append(TrialRecord(
             experiment=experiment, name=name, kind="scratch",
             status="aborted" if aborted else "scratch",
-            reason=str(metadata.get("abort_reason") or "") if aborted else "",
+            reason=_with(str(metadata.get("abort_reason") or "") if aborted else "", problem),
             started=_started(name, row),
             values=_values(metadata, factors),
             bag_dir=found.get("full"), slim_dir=found.get("slim"),
-            metadata_path=meta_path, run_log=log if log.is_file() else None,
+            metadata_path=meta_path, run_log=log,
             gate=_gate_summary(metadata.get("preflight")) or _gate_summary(
                 (row or {}).get("gate")) or _gate_summary(gates.get(name)),
             code_version=metadata.get("code_version"), metadata=metadata,

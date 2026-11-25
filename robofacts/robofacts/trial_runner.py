@@ -760,7 +760,11 @@ def bag_name(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], stamp: str) -> 
     head = f"{stamp}_"
     tail = f"_rep{trial.repetition:02d}_h{digest}"
     budget = MAX_TRIAL_ID_BYTES - len(head.encode()) - len(tail.encode())
-    middle = full[len(head):full.rindex("_rep")][:max(0, budget)].rstrip("_-")
+    # Cut on the UTF-8 BYTES, never inside a character (2026-11-25). A cut on characters
+    # left 200 characters of a CJK level, 524 bytes, and the recorder failed with
+    # "File name too long". An ASCII name is cut exactly where it was before.
+    middle = (full[len(head):full.rindex("_rep")].encode("utf-8")[:max(0, budget)]
+              .decode("utf-8", errors="ignore").rstrip("_-"))
     return f"{head}{middle}{tail}"
 
 
