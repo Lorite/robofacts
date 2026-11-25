@@ -514,16 +514,22 @@ def render_report(trials: List[Trial], experiments_root: Path,
             out.append(f"{len(subset)} trial(s); no varying factors found.")
             out.append("")
             continue
+        def varies(factor: str) -> bool:
+            return len({str(t.metadata.get(factor)) for t in subset}) >= 2
+
         if not factors_override:
             # The grid shows three axes. An axis with one value among these trials says
             # nothing, so the axes that vary come first (found 2026-11-25: a single-level
             # execution_host took one of the three places, and an 8-cell campaign showed as
             # 4 cells of 2).
-            factors = sorted(factors, key=lambda f: len({str(t.metadata.get(f)) for t in subset}) < 2)
+            factors = sorted(factors, key=lambda f: not varies(f))
         used = factors[:3]
+        # Only the axes left out of the grid that DO vary: after the sort above, the slots
+        # after the third one hold the constant axes, which the note used to call varying.
+        also = [f for f in factors[3:] if varies(f)][:5]
         out.append(f"{len(subset)} trial(s). Axes: {', '.join(f'`{f}`' for f in used)}"
-                   + (f" _(also varying: {', '.join(factors[3:8])}; choose the grid's axes "
-                      f"with `--factors a,b,c`)_" if len(factors) > 3 else ""))
+                   + (f" _(also varying: {', '.join(also)}; choose the grid's axes "
+                      f"with `--factors a,b,c`)_" if also else ""))
         out.append("")
         cells = coverage(subset, used)
         out.append(render_grid(cells, used, missing_combinations(cells, used)))

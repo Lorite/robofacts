@@ -216,7 +216,20 @@ def test_the_grid_shows_the_axes_that_vary_before_a_constant_one(root):
     report = ti.render_report(ti.load_trials(root), root)
     axes_line = next(line for line in report.splitlines() if "Axes:" in line)
     assert all(f"`{axis}`" in axes_line.split("_(")[0] for axis in ("axis_a", "axis_b", "axis_c")), axes_line
-    assert "--factors" in axes_line
+    # The constant host is no axis of the grid, and it is not called varying either.
+    assert "also varying" not in axes_line, axes_line
+
+
+def test_the_also_varying_note_names_only_axes_that_vary(root):
+    """Four varying axes and the constant host: the note names the fourth varying axis only
+    (found 2026-11-25: it listed factors[3:8], which after the sort were the constant ones)."""
+    import itertools
+    for i, (a, b, c, d) in enumerate(itertools.product("xy", "pq", "mn", "uv")):
+        make_trial(root, "expA", f"t{i}", dict(BASE, axis_a=a, axis_b=b, axis_c=c, axis_d=d))
+    report = ti.render_report(ti.load_trials(root), root)
+    axes_line = next(line for line in report.splitlines() if "Axes:" in line)
+    note = axes_line.split("also varying:")[1].split(";")[0]
+    assert "axis_d" in note and "execution_host" not in note, axes_line
 
 
 def test_report_flags_contract_violations(root):
