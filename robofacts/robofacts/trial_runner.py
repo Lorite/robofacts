@@ -1403,6 +1403,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     _saved_stdout = sys.stdout
     if log_file is not None:
         sys.stdout = _LogTee(_saved_stdout, log_file)
+    leaving: Optional[BaseException] = None
     try:
         announce("before_launch")
         # Setup steps run before the stack: they are the preconditions, so failing
@@ -1702,56 +1703,62 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         detail = f"execution error: {exc}"
         trace_step("execution error", "error", ok=False, output=str(exc),
              note=type(exc).__name__)
+    except BaseException as exc:  # an interrupt: the finally below still tears down
+        leaving = exc
+        raise
     finally:
-        timeline = _ctx.pop("voice_timeline", None)
-        if timeline is not None:
-            cue_results = timeline.stop()
-            _ctx.setdefault("voice", {})["cues"] = cue_results
-            unspoken = [r for r in cue_results if r.get("why")]
-            if unspoken:
-                print(f"[voice] {len(unspoken)} cue(s) not spoken: the action ended "
-                      f"before their time")
-        # Recorder first so the bag finalizes; then the stack.
-        teardown: List[tuple] = [("record", "recorder")]
-        if session is None:
-            teardown += ([(f"aux:{n}", "launch") for n, _ in reversed(aux_cmds)]
-                         + [("launch_stack", "launch")])
-        else:
-            # Hand the stack to the session so the next trial reuses it and
-            # run_plan can tear it down once, at the end.
-            session.setdefault("procs", {}).update(
-                {k: v for k, v in procs.items() if k != "record"})
-            session["target"] = target
-            session["aux_names"] = [n for n, _ in aux_cmds] or session.get("aux_names", [])
-        _t_teardown = time.monotonic()
-        for name, kind in teardown:
-            proc = procs.get(name)
-            if proc is None:
-                continue
-            try:
-                hooks.stop_process(proc, target, name=name, kind=kind)
-            except Exception as exc:  # noqa: BLE001
-                detail = f"{detail} | stop {name} failed: {exc}".strip(" |")
-                trace_step(f"stop:{name}", "teardown", ok=False, output=str(exc))
-            if name == "record":
-                time.sleep(config.stop_grace_s)
-                announce("record_end")
-        print(f"[runner] teardown done in {time.monotonic() - _t_teardown:.1f} s")
-        mark("teardown_done")
-        sys.stdout = _saved_stdout
-        if log_file is not None:
-            print(f"[runner] run log: {log_path}")
-            log_file.close()
-            # The verify steps, the probes and the metadata follow, and their
-            # output belongs in the same run log (2026-10-02: E2's per-agent
-            # AGENT lines were only on the console). Reopened for appending;
-            # the public run_trial() restores stdout on every return path.
-            try:
-                post_log = log_path.open("a", encoding="utf-8")
-                _ctx["post_log"] = (_saved_stdout, post_log)
-                sys.stdout = _LogTee(_saved_stdout, post_log)
-            except OSError:
-                pass
+        with interrupts_held("the recorder and the stack stop") as held:
+            timeline = _ctx.pop("voice_timeline", None)
+            if timeline is not None:
+                cue_results = timeline.stop()
+                _ctx.setdefault("voice", {})["cues"] = cue_results
+                unspoken = [r for r in cue_results if r.get("why")]
+                if unspoken:
+                    print(f"[voice] {len(unspoken)} cue(s) not spoken: the action ended "
+                          f"before their time")
+            # Recorder first so the bag finalizes; then the stack.
+            teardown: List[tuple] = [("record", "recorder")]
+            if session is None:
+                teardown += ([(f"aux:{n}", "launch") for n, _ in reversed(aux_cmds)]
+                             + [("launch_stack", "launch")])
+            else:
+                # Hand the stack to the session so the next trial reuses it and
+                # run_plan can tear it down once, at the end.
+                session.setdefault("procs", {}).update(
+                    {k: v for k, v in procs.items() if k != "record"})
+                session["target"] = target
+                session["aux_names"] = [n for n, _ in aux_cmds] or session.get("aux_names", [])
+            _t_teardown = time.monotonic()
+            for name, kind in teardown:
+                proc = procs.get(name)
+                if proc is None:
+                    continue
+                try:
+                    hooks.stop_process(proc, target, name=name, kind=kind)
+                except Exception as exc:  # noqa: BLE001
+                    detail = f"{detail} | stop {name} failed: {exc}".strip(" |")
+                    trace_step(f"stop:{name}", "teardown", ok=False, output=str(exc))
+                if name == "record":
+                    time.sleep(config.stop_grace_s)
+                    announce("record_end")
+            print(f"[runner] teardown done in {time.monotonic() - _t_teardown:.1f} s")
+            mark("teardown_done")
+            sys.stdout = _saved_stdout
+            if log_file is not None:
+                print(f"[runner] run log: {log_path}")
+                log_file.close()
+                # The verify steps, the probes and the metadata follow, and their
+                # output belongs in the same run log (2026-10-02: E2's per-agent
+                # AGENT lines were only on the console). Reopened for appending;
+                # the public run_trial() restores stdout on every return path.
+                try:
+                    post_log = log_path.open("a", encoding="utf-8")
+                    _ctx["post_log"] = (_saved_stdout, post_log)
+                    sys.stdout = _LogTee(_saved_stdout, post_log)
+                except OSError:
+                    pass
+        if held and leaving is None:
+            raise deferred_interrupt(held[0])
 
     if not steps["record"]:
         # No recorder was asked for, so no bag and NO metadata: an unrecorded
@@ -1947,6 +1954,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
 
 
 from .remote_exec_utils import package_module_command  # noqa: E402,F401  (re-exported)
+from .remote_exec_utils import (deferred_interrupt, interrupt_signal_name,  # noqa: E402
+                                interrupts_held, stop_signals_interrupt)
 
 
 #: The attempt ledger's file name, under experiments/<name>/runs/.
@@ -2139,9 +2148,11 @@ def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config
         # line, invisible to the index rather than excluded with a reason. The
         # trial is now finalized as ABORTED before the interrupt propagates.
         if ledger and not kwargs.get("dry_run", True):
-            _finalize_interrupted(trial, factors, config, bags_dir, ctx, started=started,
-                                  campaign_name=campaign_name, session_id=session_id,
-                                  scratch=kwargs.get("scratch_label") is not None)
+            # A second interrupt must not cut the writing of the aborted metadata.
+            with interrupts_held("the interrupted trial is written as aborted"):
+                _finalize_interrupted(trial, factors, config, bags_dir, ctx, started=started,
+                                      campaign_name=campaign_name, session_id=session_id,
+                                      scratch=kwargs.get("scratch_label") is not None)
         raise
     finally:
         if "post_log" in ctx:
@@ -2461,15 +2472,18 @@ def close_session(session: Optional[Dict[str, Any]],
     target = session.get("target")
     print("[runner] closing continuous session - stopping the shared stack")
     names = [f"aux:{n}" for n in reversed(session.get("aux_names", []))] + ["launch_stack"]
-    for name in names:
-        proc = session["procs"].get(name)
-        if proc is None:
-            continue
-        try:
-            hooks.stop_process(proc, target, name=name, kind="launch")
-        except Exception as exc:  # noqa: BLE001 - report, never mask the result
-            print(f"[runner] stop {name} failed: {exc}")
-    session["procs"] = {}
+    with interrupts_held("the shared stack stops") as held:
+        for name in names:
+            proc = session["procs"].get(name)
+            if proc is None:
+                continue
+            try:
+                hooks.stop_process(proc, target, name=name, kind="launch")
+            except Exception as exc:  # noqa: BLE001 - report, never mask the result
+                print(f"[runner] stop {name} failed: {exc}")
+        session["procs"] = {}
+    if held:
+        raise deferred_interrupt(held[0])
 
 
 def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *,
@@ -2672,7 +2686,7 @@ def main(argv=None) -> int:
     # Every setting the run reads (the backend, the adapters, the record profiles, the stop
     # patterns) and every process it starts (the gate) belongs to the project of this
     # experiments root, also when the working directory lies in another project.
-    with roots.exported_experiments_root(args.experiments_root):
+    with roots.exported_experiments_root(args.experiments_root), stop_signals_interrupt():
         return _main(ap, args)
 
 

@@ -15,6 +15,7 @@ files back.
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import re
 import shlex
@@ -24,7 +25,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,65 @@ def interrupt_signal_name(exc: BaseException) -> str:
     return signal.Signals(getattr(exc, "signum", signal.SIGINT)).name
 
 
+_STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def raise_runner_signal(signum: int, frame=None) -> None:
+    """The handler of SIGTERM and SIGHUP while the runner runs: the same path as a Ctrl-C."""
+    raise RunnerSignal(signum)
+
+
+@contextlib.contextmanager
+def stop_signals_interrupt() -> Iterator[None]:
+    """While the block runs, SIGTERM and SIGHUP raise RunnerSignal, a KeyboardInterrupt.
+    Before 2026-11-25 they ended the runner at once: the stack and the recorder, each in
+    its own session, ran on, and the trial got no metadata and no ledger line. A closed
+    terminal sends SIGHUP, a service manager or another program SIGTERM."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    old = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+    for s in old:
+        signal.signal(s, raise_runner_signal)
+    try:
+        yield
+    finally:
+        for s, handler in old.items():
+            signal.signal(s, handler)
+
+
+@contextlib.contextmanager
+def interrupts_held(what: str) -> Iterator[list]:
+    """Ctrl-C, SIGTERM and SIGHUP wait while the block runs, and the list yielded collects
+    them: the caller raises the first one afterwards (see deferred_interrupt). Used for the
+    teardown and the writing of an interrupted trial, which a second Ctrl-C cut short
+    before 2026-11-25 (the stack stayed up after the runner exited)."""
+    pending: list = []
+    if threading.current_thread() is not threading.main_thread():
+        yield pending
+        return
+
+    def hold(signum, frame):
+        if not pending:
+            print(f"[runner] {signal.Signals(signum).name} received: {what} first, "
+                  f"then the run stops", flush=True)
+        pending.append(signum)
+
+    old = {s: signal.getsignal(s) for s in _STOP_SIGNALS}
+    for s in old:
+        signal.signal(s, hold)
+    try:
+        yield pending
+    finally:
+        for s, handler in old.items():
+            signal.signal(s, handler)
+
+
+def deferred_interrupt(signum: int) -> KeyboardInterrupt:
+    """The exception a held signal becomes: KeyboardInterrupt for SIGINT, else RunnerSignal."""
+    return KeyboardInterrupt() if signum == signal.SIGINT else RunnerSignal(signum)
+
+
 def _signal_process(proc: subprocess.Popen, sig: int) -> None:
     """``sig`` to the process, or to its whole group when it leads one of its own."""
     try:
@@ -265,12 +325,17 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
     (found 2026-11-25: on Ctrl-C the stack went down during the landing, and after a
     decoding error the action kept flying into the next trial). So: the signal that
     interrupted the runner goes on to the action (a Ctrl-C at the terminal no longer
-    reaches an action that leads its own group), SIGTERM follows after SIGINT_GRACE_S, the
+    reaches an action that leads its own group, and any other cause becomes SIGTERM),
+    SIGTERM follows after SIGINT_GRACE_S, the
     runner waits up to LAND_WAIT_S, and SIGKILL ends it last. A second Ctrl-C kills it at
     once. Any other command gets SIGTERM, 5 s, then SIGKILL."""
     if proc.poll() is not None:
         return
-    first = getattr(exc, "signum", signal.SIGINT) if isinstance(exc, KeyboardInterrupt) else signal.SIGTERM
+    # A Ctrl-C goes on as SIGINT, which the action got from the terminal before it led its own
+    # group. Any other cause gets SIGTERM, the signal an action lands on (a closed terminal's
+    # SIGHUP would end most scripts without a landing).
+    first = (signal.SIGINT if isinstance(exc, KeyboardInterrupt)
+             and getattr(exc, "signum", signal.SIGINT) == signal.SIGINT else signal.SIGTERM)
     wait_s = LAND_WAIT_S if action else 5.0
     _signal_process(proc, first)
     if action:

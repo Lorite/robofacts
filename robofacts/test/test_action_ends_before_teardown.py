@@ -21,7 +21,7 @@ import pytest
 
 from robofacts import campaign_plan as cp, campaign_spec as cs, trial_index as ti
 
-from test_process_backend import PACKAGE, _run, leftover_processes, use_project, write_project
+from test_process_backend import PACKAGE, _run, use_project, write_project
 
 #: The action of these tests: it waits for a signal, then "lands" for 1.5 s and writes
 #: whether the stack (the plant, which writes a log line every 50 ms) was still up then.
@@ -44,6 +44,25 @@ signal.signal(signal.SIGTERM, land)
 mark.write_text("started\\n")
 time.sleep(30)
 '''
+
+
+def processes_in(root: Path, pattern: str = "") -> str:
+    """Command lines of the live processes whose working directory lies under ``root`` (the
+    stack, the recorder and the action run with relative paths, so a match on the command
+    line alone would never find them)."""
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            cwd = os.readlink(entry / "cwd")
+            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            state = next((l for l in (entry / "status").read_text().splitlines() if l.startswith("State:")), "")
+        except OSError:
+            continue
+        if cwd.startswith(str(root)) and pattern in command and "zombie" not in state:
+            found.append(command.strip())
+    return "\n".join(found)
 
 
 def _action(experiments: Path, body: str, name: str = "observe.py") -> None:
@@ -113,10 +132,12 @@ def _start_runner(root: Path, experiments: Path) -> subprocess.Popen:
 
 
 @pytest.mark.real_sleep
-@pytest.mark.parametrize("sig", [signal.SIGINT])
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
 def test_the_action_lands_before_the_stack_stops(tmp_path, monkeypatch, sig):
-    """Ctrl-C at the terminal (SIGINT to the foreground group) or a stop request (SIGTERM to
-    the group): the action lands with its stack still up, then the teardown runs."""
+    """Ctrl-C at the terminal (SIGINT to the foreground group), a stop request (SIGTERM) or a
+    closed terminal (SIGHUP): the action lands with its stack still up, then the teardown
+    runs, and the trial is written as aborted. Before 2026-11-25 SIGTERM and SIGHUP ended the
+    runner at once and left the stack and the recorder running."""
     root = tmp_path / "proj"
     experiments = write_project(root)
     use_project(root, monkeypatch)
@@ -133,8 +154,7 @@ def test_the_action_lands_before_the_stack_stops(tmp_path, monkeypatch, sig):
             os.killpg(runner.pid, signal.SIGKILL)
     text = mark.read_text(encoding="utf-8")
     assert "landed stack_up=True" in text, (text, out)
-    assert leftover_processes(str(root) + ".*observe.py") == ""
-    assert leftover_processes(str(root) + ".*plant.py") == ""
+    assert processes_in(root) == "", "nothing of the trial is left running"
     (trial,) = ti.load_trials(experiments, "plant")
     assert trial.metadata["aborted"] is True and trial.status != "usable"
     ti._recorder_at.cache_clear()
@@ -167,4 +187,36 @@ mark.write_text("flew the whole 8 s, no signal\\n")
     assert time.monotonic() - t0 < 7.5, "the runner did not wait for the whole flight"
     (trial,) = ti.load_trials(experiments, "plant")
     assert trial.metadata["aborted"] is True
+    ti._recorder_at.cache_clear()
+
+
+@pytest.mark.real_sleep
+def test_a_second_interrupt_does_not_cut_the_teardown(tmp_path, monkeypatch):
+    """Two Ctrl-C in a row: the second one waits until the recorder and the stack stopped."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    _action(experiments, LANDER)
+    # A long pause after the recorder stops, so the next interrupts land inside the teardown.
+    _runner_yaml(experiments, "stop_grace_s: 0.3", "stop_grace_s: 3")
+    mark = experiments / "plant" / "runs" / "lander.txt"
+    runner = _start_runner(root, experiments)
+    try:
+        _wait_for(mark, "started")
+        time.sleep(0.5)
+        os.killpg(runner.pid, signal.SIGINT)
+        _wait_for(mark, "landed")
+        time.sleep(0.8)
+        for _ in range(10):   # keep interrupting through the teardown
+            time.sleep(0.3)
+            if runner.poll() is not None:
+                break
+            os.killpg(runner.pid, signal.SIGINT)
+        out, _ = runner.communicate(timeout=60)
+    finally:
+        if runner.poll() is None:
+            os.killpg(runner.pid, signal.SIGKILL)
+    assert processes_in(root) == "", out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert trial.metadata["aborted"] is True, out
     ti._recorder_at.cache_clear()
