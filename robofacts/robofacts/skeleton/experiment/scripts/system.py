@@ -6,6 +6,8 @@ with the command that starts your system.
 """
 import argparse
 import itertools
+import signal
+import sys
 import time
 from pathlib import Path
 
@@ -17,6 +19,8 @@ def main() -> None:
     ap.add_argument("--rate", default="slow", choices=sorted(PERIOD_S))
     ap.add_argument("--log", type=Path, required=True)
     args = ap.parse_args()
+    # The runner stops the stack with SIGINT. Exit quietly, without a traceback.
+    signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     args.log.parent.mkdir(parents=True, exist_ok=True)
     with args.log.open("a", encoding="utf-8") as log:
         for n in itertools.count():

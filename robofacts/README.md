@@ -21,8 +21,10 @@ cd my_project
 trials lint                                            # every declaration against the rules
 trials plan experiments/my_experiment/campaigns/baseline.yaml
 trials run  experiments/my_experiment/campaigns/baseline.yaml --limit 1    # dry run: the exact commands
-trials run  experiments/my_experiment/campaigns/baseline.yaml --execute    # the trials
+trials run  experiments/my_experiment/campaigns/baseline.yaml --execute --no-pause    # the trials
 ```
+
+`--no-pause` skips the stop before each trial. Without it, every trial waits for Enter so that you can pose the rig, which is what you want on real hardware.
 
 The generated experiment works as it is: a small script stands in for the system and writes a log file, the recorder stores what it writes during a trial, and a verify step reads the recording. `trials index --experiment my_experiment --summary` then lists the usable trials. Edit the declarations in `experiments/my_experiment/config/` to describe your own system, and `trials validate experiments/my_experiment` says whether it is ready for a first trial.
 
