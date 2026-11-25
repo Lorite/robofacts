@@ -1745,7 +1745,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         if (record_cmd or action_cmd or window) and take_pending_stop():
             stage = ("the recorder" if record_cmd else "the action" if action_cmd
                      else "the manual window")
-            refusal = f"{STOPPED_BEFORE} {stage} started — nothing was recorded or flown"
+            refusal = f"{STOPPED_BEFORE} {stage} started: nothing was recorded or flown"
             print(_c("31;1", f"[runner] TRIAL STOPPED - {refusal}"))
             trace_step("stop", "stop", ok=False, note=refusal)
             return TrialResult(trial, None, "blocked", refusal, commands)

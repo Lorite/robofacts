@@ -2371,7 +2371,7 @@ of this UI still running (it survives a closed terminal or a dropped ssh).
         except KeyboardInterrupt:
             pass
         # A plain return can leave the interpreter waiting on lingering threads
-        # with the socket half-held — the "port blocked after Ctrl-C" report.
+        # with the socket half-held (the "port blocked after Ctrl-C" report).
         # Exit hard, but say what that means if a run is in flight.
         code = shut_down(app.config.get("RUNS"),
                          deferred_interrupt(received[0]) if received else KeyboardInterrupt())
