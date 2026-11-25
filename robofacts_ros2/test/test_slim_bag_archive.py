@@ -71,3 +71,58 @@ def test_the_remote_slim_copy_runs_the_module_of_the_ros2_package(tmp_path, monk
     assert "python3 -m robofacts_ros2.slim_bag_archive" in seen["cmd"][-1], seen["cmd"]
     assert out == project / "experiments" / "e" / "bags_slim" / "t1_slim", out
     assert (out / "t1_0.mcap").read_bytes() == b"MCAP"
+
+
+def external_bag(tmp_path: Path, heavy: bool = False) -> tuple:
+    """A bag recorded on a scratch "disk", linked into the repo's bags/ as the runner links an
+    externally recorded bag (trial_runner: ln -sfn <disk bag> <repo>/bags/<name>)."""
+    disk_bag = light_bag(tmp_path / "disk" / "e" / "bags" / "t1")
+    if heavy:
+        (disk_bag / "metadata.yaml").write_text(
+            "rosbag2_bagfile_information:\n  topics_with_message_count:\n"
+            "    - topic_metadata:\n        name: /cam/image_raw\n", encoding="utf-8")
+    project = tmp_path / "project"
+    bags = project / "experiments" / "e" / "bags"
+    bags.mkdir(parents=True)
+    link = bags / "t1"
+    link.symlink_to(disk_bag, target_is_directory=True)
+    return project, link, disk_bag
+
+
+def test_the_slim_copy_of_an_external_bag_stays_in_the_repo(tmp_path):
+    """Third review of 2026-11-25: the link was resolved first, so the slim copy landed on the
+    external disk, and the path that archive_and_sync returned did not exist."""
+    project, link, disk_bag = external_bag(tmp_path)
+    res = sba.archive_bag(link, copy_if_light=True)
+    expected = project / "experiments" / "e" / "bags_slim" / "t1_slim"
+    assert res["status"] == "copied" and res["slim"] == str(expected), res
+    assert (expected / "t1_0.mcap").read_bytes() == b"MCAP", "the bag was read through the link"
+    assert not (disk_bag.parent.parent / "bags_slim").exists(), "a slim copy on the external disk"
+
+
+def test_a_slimmed_external_bag_too(tmp_path, monkeypatch):
+    """A bag with a heavy topic goes through slim(): the copy is in the repo, and slim() reads
+    the bag through the repo's link."""
+    project, link, _ = external_bag(tmp_path, heavy=True)
+    read = []
+
+    def fake_slim(bag_dir, *, out_dir, compress):
+        read.append(Path(bag_dir))
+        out_dir.mkdir(parents=True)
+        (out_dir / "slim_0.mcap").write_bytes(b"S")
+        return out_dir
+
+    monkeypatch.setattr(sba, "slim", fake_slim)
+    out = sba.archive_and_sync(link)
+    assert out == project / "experiments" / "e" / "bags_slim" / "t1_slim" and out.is_dir(), out
+    assert read == [link]
+    assert (out / "trial_metadata.json").is_file(), "the sidecars come with it"
+
+
+def test_a_remote_external_bag_is_slimmed_where_the_rsync_pulls_from(tmp_path, monkeypatch):
+    project, link, disk_bag = external_bag(tmp_path)
+    seen = rig_here(monkeypatch, tmp_path)
+    out = sba.archive_and_sync(link, target(project), project_root=project)
+    assert seen["pulled"] == [project / "experiments" / "e" / "bags_slim"]
+    assert out is not None and (out / "t1_0.mcap").is_file(), "the returned slim copy does not exist"
+    assert not (disk_bag.parent.parent / "bags_slim").exists()

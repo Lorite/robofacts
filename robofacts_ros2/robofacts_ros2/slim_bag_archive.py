@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -137,8 +138,15 @@ def archive_bag(bag_dir: Path, *, force: bool = False, dry_run: bool = False,
     Returns a result dict with ``status`` in {archived, skipped, failed} and a
     ``reason`` when skipped. Never raises for the ordinary skip cases, so a
     backfill over hundreds of bags does not abort on the first oddity.
+
+    The slim copy goes beside the path as given, made absolute but with its links
+    kept: an externally recorded bag is a link in the repo's ``bags/`` to a disk
+    outside it, and its slim copy belongs in the repo's ``bags_slim/``, where
+    fetch_slim_bags.sh, the rsync of a remote trial and the index look for it. The
+    bag is read through the link. Until the third review of 2026-11-25 the path was
+    resolved first, and the slim copy landed on the external disk.
     """
-    bag_dir = bag_dir.resolve()
+    bag_dir = Path(os.path.abspath(bag_dir))
     out_dir = slim_path_for(bag_dir)
     result = {"bag": str(bag_dir), "slim": str(out_dir), "status": "skipped", "reason": ""}
 
