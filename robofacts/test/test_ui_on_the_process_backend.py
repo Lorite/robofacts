@@ -412,6 +412,16 @@ FOREIGN_BACKS = ["https://evil.example/", "//evil.example/", "/\\evil.example", 
                  "/\t/evil.example", " //evil.example", "evil.example"]
 
 
+def _local_target(response) -> str:
+    """The redirect's path and query, after a check that it stays on the interface's own host.
+    Werkzeug 2.0 (Ubuntu 22.04's python3-flask, which the Humble CI job installs) writes an
+    absolute Location (``http://localhost/e/...``), newer versions the path alone."""
+    from urllib.parse import urlsplit
+    target = urlsplit(response.headers["Location"])
+    assert target.scheme in ("", "http") and target.netloc in ("", "localhost"), target
+    return target.path + (f"?{target.query}" if target.query else "")
+
+
 def test_the_back_field_only_ever_leads_back_into_the_interface(bare, monkeypatch):
     """C2-10b: /exclude and /restore redirected to any `back` value (an open redirect), and the
     gate page rendered it as a link, so `javascript:` ran there. The decisions are stubbed."""
@@ -430,7 +440,7 @@ def test_the_back_field_only_ever_leads_back_into_the_interface(bare, monkeypatc
         for route in ("/exclude/demo_log_recorder/x", "/restore/demo_log_recorder/x"):
             response = bare.c.post(route, data={"reason": "r", "category": "other", "back": back},
                                    headers=auth())
-            assert response.status_code == 302 and response.headers["Location"] == expected, (route, back)
+            assert response.status_code == 302 and _local_target(response) == expected, (route, back)
         page = bare.c.post("/preflight/demo_log_recorder", data={"back": back},
                            headers=auth()).get_data(as_text=True)
         assert f'<a href="{expected}">' in page.replace("&amp;", "&"), back
