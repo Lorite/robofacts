@@ -157,6 +157,14 @@ def test_the_action_lands_before_the_stack_stops(tmp_path, monkeypatch, sig):
     assert processes_in(root) == "", "nothing of the trial is left running"
     (trial,) = ti.load_trials(experiments, "plant")
     assert trial.metadata["aborted"] is True and trial.status != "usable"
+    # The reason names the signal and the stage the trial had reached, not the teardown,
+    # and the run ends with a message and the signal's exit code, not a traceback.
+    reason = trial.metadata["abort_reason"]
+    assert sig.name in reason and "after stage 'action_start'" in reason, reason
+    runner_lines = [l for l in out.splitlines() if not l.startswith("[stack]")]
+    assert f"INTERRUPTED ({sig.name})" in out, out
+    assert not any(l.startswith("Traceback") for l in runner_lines), out
+    assert runner.returncode == 128 + int(sig), runner.returncode
     ti._recorder_at.cache_clear()
 
 

@@ -2141,7 +2141,7 @@ def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config
     started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     try:
         result = _run_trial(trial, factors, config, bags_dir, _ctx=ctx, **kwargs)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interrupt:
         # INTERRUPTED (2026-10-06, the first lighting_sim campaign): a SIGINT
         # mid-trial tore the stack down (the finally inside _run_trial) and
         # then left a recorded bag with no trial_metadata.json and no ledger
@@ -2152,7 +2152,8 @@ def _run_trial_logged(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config
             with interrupts_held("the interrupted trial is written as aborted"):
                 _finalize_interrupted(trial, factors, config, bags_dir, ctx, started=started,
                                       campaign_name=campaign_name, session_id=session_id,
-                                      scratch=kwargs.get("scratch_label") is not None)
+                                      scratch=kwargs.get("scratch_label") is not None,
+                                      signal_name=interrupt_signal_name(interrupt))
         raise
     finally:
         if "post_log" in ctx:
@@ -2226,8 +2227,8 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
                           config: RunnerConfig, bags_dir: Path, ctx: Dict[str, Any], *,
                           started: str, campaign_name: Optional[str],
                           session_id: Optional[str], scratch: bool,
-                          reason: str = "", recovered: Optional[Dict[str, Any]] = None
-                          ) -> Optional[Path]:
+                          reason: str = "", recovered: Optional[Dict[str, Any]] = None,
+                          signal_name: str = "SIGINT") -> Optional[Path]:
     """Write ABORTED metadata into an interrupted trial's bag, and its ledger line.
 
     Only when the bag directory holds a recording and no trial_metadata.json:
@@ -2236,9 +2237,16 @@ def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
     """
     try:
         bag_dir = ctx.get("bag_dir") or (bags_dir / ctx["label"] if ctx.get("label") else None)
-        marks = ctx.get("marks") or {}
+        # The stage the trial had reached: the teardown's own marks come after the interrupt
+        # and do not say where it happened (every reason named 'teardown_done' before
+        # 2026-11-25).
+        marks = {k: v for k, v in (ctx.get("marks") or {}).items() if not k.startswith("teardown")}
         last = max(marks, key=marks.get) if marks else "before any stage"
-        reason = reason or (f"interrupted by the operator (SIGINT) after stage {last!r}: "
+        by = {"SIGINT": "interrupted by the operator (SIGINT)",
+              "SIGTERM": "stopped by SIGTERM (a stop request)",
+              "SIGHUP": "stopped by SIGHUP (the terminal closed)"}.get(signal_name,
+                                                                      f"stopped by {signal_name}")
+        reason = reason or (f"{by} after stage {last!r}: "
                             f"the trial did not finish, so it cannot count as coverage")
         written = None
         if bag_dir is not None and Path(bag_dir).is_dir() \
@@ -2687,7 +2695,17 @@ def main(argv=None) -> int:
     # patterns) and every process it starts (the gate) belongs to the project of this
     # experiments root, also when the working directory lies in another project.
     with roots.exported_experiments_root(args.experiments_root), stop_signals_interrupt():
-        return _main(ap, args)
+        try:
+            return _main(ap, args)
+        except KeyboardInterrupt as exc:
+            # The trial that ran is already written as aborted (run_trial). A traceback here
+            # told the operator nothing (2026-11-25), so the run ends with what happened.
+            name = interrupt_signal_name(exc)
+            print(f"\n[runner] INTERRUPTED ({name}): the campaign stopped. A trial that was "
+                  f"running is written as aborted and never counts; `trials plan` shows what "
+                  f"is still missing.", flush=True)
+            import signal as _signal
+            return 128 + int(_signal.Signals[name])
 
 
 def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
