@@ -545,6 +545,42 @@ def test_kill_ros_is_refused_while_a_trial_runs(client, monkeypatch):
     assert "E-STOP" in response.get_data(as_text=True)
 
 
+def test_kill_ros_uses_the_hosts_own_checkout_and_setup_files(client, root, monkeypatch):
+    """Third review of 2026-11-25: the clean slate ignored the workspace, ws_setup and
+    env_setup that hosts.yaml declares for the host, so an interface served from another path
+    than the rig's checkout ran `cd` and `source` on paths that do not exist there."""
+    (root / "common" / "config" / "hosts.yaml").write_text("""
+version: 1
+hosts:
+  robot:
+    host: rig-host
+    container: robot_dev
+    shell: zsh
+    workspace: /rig/project
+    ws_setup: /rig/project/install/setup.zsh
+    env_setup: [/rig/project/dds.zsh]
+""", encoding="utf-8")
+    robots = root / "common" / "config" / "robots.yaml"
+    robots.write_text(robots.read_text(encoding="utf-8").replace(
+        "  crazyflie:\n    host: local", "  crazyflie:\n    host_level: robot"), encoding="utf-8")
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "ok", ""
+
+    monkeypatch.setattr(ui_ext.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Done())[1])
+    response = client.post("/kill_ros", headers=auth())
+    assert response.status_code == 200, response.get_data(as_text=True)
+    remote = [c for c in calls if c[0] == "ssh"]
+    assert len(remote) == 1, calls
+    inner = remote[0][-1]
+    assert "rig-host" in remote[0] and inner.startswith("docker exec -i robot_dev zsh -c "), inner
+    assert "source /rig/project/install/setup.zsh" in inner, inner
+    assert "source /rig/project/dds.zsh" in inner, inner
+    assert "cd /rig/project &&" in inner, inner
+    assert str(root.parent) not in inner, "the interface's own checkout is not the rig's"
+
+
 def test_the_stop_endpoint_cannot_run_arbitrary_commands(client, monkeypatch):
     """The robot name is passed as an argv element to estop.sh, which validates
     it against robots.yaml — it is never interpolated into a shell string."""

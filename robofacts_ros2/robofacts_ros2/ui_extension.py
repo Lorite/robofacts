@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from flask import current_app, render_template, request, send_file
 
 from robofacts import backend, tools
-from robofacts.ui.app import experiment_names, robot_hosts
+from robofacts.ui.app import experiment_names, robot_hosts, robots_config
 
 TEMPLATES = Path(__file__).resolve().parent / "ui" / "templates"
 
@@ -147,6 +147,34 @@ def add_bag_queries(run: Dict[str, Any], key: Optional[bytes]) -> Dict[str, Any]
     return run
 
 
+def host_settings(robots_path: Path, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """The hosts.yaml settings of the host level that a robot_hosts entry (host and container)
+    came from: ``workspace``, ``ros_setup``, ``ws_setup``, ``env_setup`` and the rest, or {}
+    for a robot that names its host itself.
+
+    robot_hosts gives only the host, the container and the shell. Before the third review of
+    2026-11-25 the clean slate therefore used the interface's own checkout for the ``cd`` and
+    the default setup files on every host, which breaks there when the interface is served
+    from another path than the rig's checkout."""
+    import yaml
+    from robofacts import host_registry
+    try:
+        registry = host_registry.load_file(Path(robots_path).parent / "hosts.yaml")
+        robots = (yaml.safe_load(Path(robots_path).read_text(encoding="utf-8")) or {}).get("robots") or {}
+        targets = host_registry.robot_targets(robots_path, robots)
+    except Exception:  # noqa: BLE001 - robot_hosts reported such a config already
+        return {}
+    for name, target in targets.items():
+        if ("" if target.host == "local" else target.host, target.container) != \
+                (spec.get("host") or "", spec.get("container") or ""):
+            continue
+        raw = robots.get(name)
+        level = raw.get("host_level") if isinstance(raw, dict) else None
+        if level is not None and str(level) in registry.hosts:
+            return dict(registry.hosts[str(level)])
+    return {}
+
+
 def register(ui) -> None:
     """Add the ROS 2 routes to the general interface's app."""
     app, requires_auth, action, root = ui.app, ui.requires_auth, ui.action, ui.root
@@ -216,14 +244,21 @@ def register(ui) -> None:
             argv = ["bash", "-lc", f"cd {shlex.quote(str(workspace))} && {tools.remote_invocation('kill_ros.sh')}"]
             if spec["host"]:
                 from robofacts.remote_exec_utils import RemoteTarget, wrap_command
-                host_workspace = Path(spec.get("workspace") or workspace)
+                # The host's own checkout and setup files from hosts.yaml, as the runner
+                # uses them there (see host_settings).
+                settings = {**host_settings(robots_config(app), spec), **spec}
+                host_workspace = Path(settings.get("workspace") or workspace)
                 ros_setup, ws_setup = backend.active(root()).host_setup(
-                    {k: spec[k] for k in ("ros_setup", "ws_setup") if spec.get(k)}, host_workspace)
+                    {k: settings[k] for k in ("ros_setup", "ws_setup") if settings.get(k)},
+                    host_workspace)
                 target = RemoteTarget(host=spec["host"], container=spec["container"],
                                       workspace=host_workspace,
                                       ros_setup=ros_setup, ws_setup=ws_setup,
-                                      shell=spec["shell"])
-                argv = wrap_command(argv, target)
+                                      shell=spec["shell"],
+                                      env_setup=tuple(str(f) for f in settings.get("env_setup") or ()))
+                argv = wrap_command(["bash", "-lc", f"cd {shlex.quote(str(host_workspace))} && "
+                                                    f"{tools.remote_invocation('kill_ros.sh')}"],
+                                    target)
             try:
                 proc = subprocess.run(argv, capture_output=True, text=True, timeout=90)
                 results.append((spec["host"] or "local", proc.returncode == 0,
