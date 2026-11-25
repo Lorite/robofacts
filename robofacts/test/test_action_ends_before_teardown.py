@@ -17,6 +17,10 @@ Found by the second review of 2026-11-25 (round 2), in the fixes of round 1:
 - a stop did not end the manual window (the action step disabled), and the trial counted,
 - an error after the recording left a recording without metadata and no ledger line,
 - the web interface's Ctrl-C did not reach the action in its worker thread.
+
+Found by the third review of 2026-11-25 (round 3): after an action that exited normally, any
+process left in its group was stopped and the trial failed, so the ROS 2 CLI daemon that a
+`ros2 topic echo` starts failed every such trial and was killed.
 """
 from __future__ import annotations
 
@@ -340,16 +344,112 @@ def test_ctrl_c_lands_a_flight_the_wrapper_left_in_the_background(tmp_path, monk
     ti._recorder_at.cache_clear()
 
 
+def _kill_pids_in(root: Path, pattern: str) -> None:
+    """SIGKILL the processes this test left on purpose (cwd under ``root``, ``pattern`` in
+    the command line)."""
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            cwd = os.readlink(entry / "cwd")
+            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if cwd.startswith(str(root)) and pattern in command:
+            try:
+                os.kill(int(entry.name), signal.SIGKILL)
+            except OSError:
+                pass
+
+
 @pytest.mark.real_sleep
-def test_a_flight_left_running_after_the_action_ends_before_the_stack(tmp_path, monkeypatch, capsys):
-    """The wrapper exits normally, the flight it detached flies on: it is stopped and lands
-    while the stack is still up, and the trial does not count."""
+def test_a_process_left_running_after_a_normal_exit_is_named_and_not_stopped(tmp_path, monkeypatch, capsys):
+    """The wrapper exits normally and the process it detached runs on. Until the third review
+    of 2026-11-25 it was stopped and the trial failed. Now the runner names it in a warning,
+    leaves it alone, and the trial counts (A3-2)."""
     root = tmp_path / "proj"
     experiments = write_project(root)
     use_project(root, monkeypatch)
     mark = _background_flight(experiments, detached=True)
+    try:
+        rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+        assert "left 1 process(es) of its group running" in out, out
+        assert "flight.py" in out and "They are not stopped" in out, out
+        assert mark.read_text(encoding="utf-8") == "flying\n", "a signal reached it"
+        assert "flight.py" in processes_in(root, "flight.py")
+    finally:
+        _kill_pids_in(root, "flight.py")
+    assert rc == 0 and "1 trial(s): 1 OK" in out, out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert not trial.metadata.get("aborted") and trial.status == "usable", trial.metadata
+    ti._recorder_at.cache_clear()
+
+
+#: An action that asks the ROS graph a question the way `ros2 topic echo --once` does with no
+#: daemon running: ros2cli/daemon/daemonize.py starts the daemon with Popen, DEVNULL streams,
+#: close_fds=False and no new session, so it stays in the action's process group.
+DAEMON_ACTION = """\
+import subprocess, sys, time
+from pathlib import Path
+daemon = Path("experiments/plant/runs/daemon.txt")
+subprocess.Popen([sys.executable, "-c",
+                  "import pathlib, signal, sys, time\\n"
+                  "p = pathlib.Path('experiments/plant/runs/daemon.txt')\\n"
+                  "signal.signal(signal.SIGTERM, lambda s, f: (p.write_text('stopped\\\\n'), sys.exit(0)))\\n"
+                  "signal.signal(signal.SIGINT, lambda s, f: (p.write_text('stopped\\\\n'), sys.exit(0)))\\n"
+                  "p.write_text('serving\\\\n')\\n"
+                  "time.sleep(30)\\n"],
+                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                 close_fds=False)
+while not (daemon.is_file() and "serving" in daemon.read_text()):
+    time.sleep(0.05)
+print("topic echo: data: 1")
+time.sleep(0.6)
+"""
+
+
+@pytest.mark.real_sleep
+def test_an_action_that_leaves_a_daemon_in_its_group_exits_0_and_counts(tmp_path, monkeypatch, capsys):
+    """A3-2: after a normal exit, a daemon the action started (the ROS 2 CLI daemon) stays in
+    its process group. The trial counts and the daemon, shared with other users of the ROS
+    graph, is not stopped."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    _action(experiments, DAEMON_ACTION, "echo_once.py")
+    _runner_yaml(experiments, '"python3 experiments/plant/scripts/observe.py 0.6"',
+                 '"python3 experiments/plant/scripts/echo_once.py"')
+    daemon = experiments / "plant" / "runs" / "daemon.txt"
+    try:
+        rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+        assert daemon.read_text(encoding="utf-8") == "serving\n", "the daemon was stopped"
+        assert processes_in(root, "time.sleep(30)"), "the daemon is gone"
+    finally:
+        _kill_pids_in(root, "time.sleep(30)")
+    assert rc == 0 and "1 trial(s): 1 OK" in out, out
+    assert "WARNING the action exited (rc=0) and left 1 process(es)" in out, out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert not trial.metadata.get("aborted") and trial.status == "usable", trial.metadata
+    ti._recorder_at.cache_clear()
+
+
+@pytest.mark.real_sleep
+def test_a_stop_still_waits_for_the_flight_the_stopped_wrapper_leaves(tmp_path, monkeypatch, capsys):
+    """The action timeout reaches a wrapper that waits for its flight: the wrapper dies at once,
+    the flight lands for 1 s. A3-2 leaves processes alone only after a normal exit: here the
+    runner waits for the landing before the stack stops, and the trial does not count."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    _action(experiments, FLIGHT, "flight.py")
+    _action(experiments, "python3 experiments/plant/scripts/flight.py >/dev/null 2>&1 &\nwait\n",
+            "wrapper.sh")
+    _runner_yaml(experiments, '"python3 experiments/plant/scripts/observe.py 0.6"',
+                 '"sh experiments/plant/scripts/wrapper.sh"\naction_timeout_s: 2')
+    mark = experiments / "plant" / "runs" / "flight.txt"
     rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
-    assert "left 1 process(es) of its group running" in out, out
+    assert "ACTION TIMEOUT" in out, out
+    assert "The runner waits for them" in out, out
     assert mark.read_text(encoding="utf-8") == "landed on SIGTERM stack_up=True\n", out
     assert processes_in(root) == ""
     (trial,) = ti.load_trials(experiments, "plant")

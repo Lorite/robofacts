@@ -31,8 +31,10 @@ record_sources: [experiments/{{name}}/runs/system.log]
 # `sudo -n`, ssh with BatchMode). A stop reaches the whole group: Ctrl-C arrives as SIGINT,
 # any other stop (a closed terminal, kill, the web interface, action_timeout_s) as SIGTERM.
 # The runner waits up to 90 s for the group to end (a flight lands), then sends SIGTERM
-# and SIGKILL, and only then stops the recorder and the stack. A process the action leaves
-# running in the background is stopped the same way, and that trial does not count.
+# and SIGKILL, and only then stops the recorder and the stack. When the action exits on its
+# own, a process it left running in its group (a daemon that a command-line tool started,
+# for example) is only named in a warning, not stopped, and the trial counts: an action that
+# starts a flight in the background must wait for it before it exits.
 action:
   command: "python3 experiments/{{name}}/scripts/run_trial.py --rate {rate}"
 

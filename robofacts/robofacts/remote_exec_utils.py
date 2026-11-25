@@ -398,6 +398,9 @@ def terminate_current_foreground() -> bool:
         return True
     for proc in list(_CURRENT_FOREGROUND):
         if _running(proc):
+            # Marked first, so the action's own end sees it: members of the group that
+            # outlive the leader are then awaited and ended (_run_streamed), not left.
+            proc._robofacts_stopped = True
             _signal_process(proc, signal.SIGTERM)
             return True
     return False
@@ -450,7 +453,8 @@ def _drain(proc: subprocess.Popen, captured: list) -> threading.Thread:
     return thread
 
 
-def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool) -> None:
+def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool,
+                     signalled: bool = False) -> None:
     """The runner leaves a foreground process early (Ctrl-C, SIGTERM, SIGHUP, an error).
 
     An action must END before the runner's teardown stops the recorder and the stack: a
@@ -465,7 +469,10 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
 
     The signals go to the action's process group as long as any member lives, also after
     the group leader has exited: a wrapper that starts the flight in the background and
-    exits leaves the flight in the group (second review of 2026-11-25)."""
+    exits leaves the flight in the group (second review of 2026-11-25).
+
+    ``signalled``: the group already got its stop (terminate_current_foreground), so the
+    first signal is not sent again: a second SIGTERM can restart a landing."""
     if not _running(proc):
         return
     # A Ctrl-C goes on as SIGINT, which the action got from the terminal before it led its own
@@ -474,7 +481,10 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
     first = (signal.SIGINT if isinstance(exc, KeyboardInterrupt)
              and getattr(exc, "signum", signal.SIGINT) == signal.SIGINT else signal.SIGTERM)
     wait_s = LAND_WAIT_S if action else 5.0
-    _signal_process(proc, first)
+    if signalled:
+        first = signal.SIGTERM
+    else:
+        _signal_process(proc, first)
     if action:
         print(f"[runner] waiting up to {wait_s:.0f} s for the action to end (a flight lands) "
               f"before the stack stops; Ctrl-C again kills it now", flush=True)
@@ -503,15 +513,34 @@ def _end_interrupted(proc: subprocess.Popen, exc: BaseException, *, action: bool
             _await_group(proc.pid, 2.0)
 
 
-def _end_leftovers(proc: subprocess.Popen) -> None:
-    """The action's leader has exited but members of its group still run: a flight that a
-    wrapper started in the background. They end before the runner goes on to the teardown,
-    the same way an interrupted action ends (signal, landing time, SIGTERM, SIGKILL)."""
+def _end_stopped_leftovers(proc: subprocess.Popen) -> None:
+    """A stop (the web interface's stop, the action timeout) reached the action's group, its
+    leader has exited, and members of the group still run: a flight that a wrapper started
+    in the background, still landing. They end before the runner goes on to the teardown,
+    the same way an interrupted action ends (landing time, then SIGKILL)."""
     members = _group_members(proc.pid)
-    print(f"[runner] the action exited but left {len(members) or 'some'} process(es) of its "
-          f"group running{': ' + _describe(members) if members else ''}. They end now, "
+    print(f"[runner] the action was stopped and its leader exited, but "
+          f"{len(members) or 'some'} process(es) of its group still run"
+          f"{': ' + _describe(members) if members else ''}. The runner waits for them "
           f"before the stack stops", flush=True)
-    _end_interrupted(proc, RunnerSignal(signal.SIGTERM), action=True)
+    _end_interrupted(proc, RunnerSignal(signal.SIGTERM), action=True, signalled=True)
+
+
+def _report_leftovers(proc: subprocess.Popen, rc: int) -> None:
+    """The action ended on its own and left processes in its group: only a warning.
+
+    Until the third review of 2026-11-25 they were stopped and the trial failed. But a
+    process the action leaves on purpose is not a flight: a middleware's command-line tools
+    can start a shared daemon on first use, without a new session, so the daemon stays in
+    the caller's process group. Every trial whose action asked such a tool a question
+    failed, and the shared daemon was killed. An action that must not leave a flight behind
+    waits for it before it exits.
+    """
+    members = _group_members(proc.pid)
+    print(f"[runner] WARNING the action exited (rc={rc}) and left {len(members) or 'some'} "
+          f"process(es) of its group running{': ' + _describe(members) if members else ''}. "
+          f"They are not stopped (a daemon that a tool of the action started, for example). "
+          f"If one of them flies, stop it before the next trial", flush=True)
 
 
 def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, check: bool,
@@ -538,10 +567,13 @@ def _run_streamed(cmd: list[str], target: RemoteTarget | None, *, cwd: Path, che
                 captured.append(line)
             rc = proc.wait()
             if own_group and _group_alive(proc.pid):
-                _end_leftovers(proc)
-                # Part of the action was still running and had to be stopped, so the action
-                # did not complete, whatever its leader returned.
-                rc = rc or -signal.SIGTERM
+                if getattr(proc, "_robofacts_stopped", False):
+                    _end_stopped_leftovers(proc)
+                    # A stop ended the action, so it did not complete, whatever its leader
+                    # returned.
+                    rc = rc or -signal.SIGTERM
+                else:
+                    _report_leftovers(proc, rc)
         except BaseException as exc:
             drain = _drain(proc, captured)
             _end_interrupted(proc, exc, action=action)
