@@ -18,10 +18,20 @@ import pytest
 HERE = Path(__file__).resolve().parent
 UI_DIR = HERE.parent / "ui"
 
-pytest.importorskip("flask", reason="the UI needs Flask (present in the dev container)")
+# A guarded import and a skip mark, not a module-level pytest.importorskip: in the ROS 2
+# dev container (the lab's pytest.ini and the launch_testing plugins) a module-level skip
+# skipped the collection of the whole suite, 0 of its tests, with exit code 0.
+try:
+    import flask  # noqa: F401
+except ImportError:
+    flask = None
+if flask is not None:
+    from robofacts.ui import app as ui
+    from robofacts_ros2 import ui_extension as ui_ext
+else:
+    ui = ui_ext = None
 
-from robofacts.ui import app as ui  # noqa: E402
-from robofacts_ros2 import ui_extension as ui_ext  # noqa: E402
+pytestmark = pytest.mark.skipif(flask is None, reason="the UI needs Flask (present in the dev container)")
 
 PASSWORD = "hunter2"
 
