@@ -337,6 +337,31 @@ def test_a_failing_verify_step_aborts_the_trial(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.real_sleep
+@pytest.mark.parametrize("signal_name, expected", [("SIGINT", "the action was interrupted"),
+                                                   ("SIGTERM", "the action was stopped")])
+def test_an_action_ended_by_a_signal_is_reported_as_interrupted(tmp_path, monkeypatch, capsys,
+                                                               signal_name, expected):
+    """An action that a signal ends (Ctrl-C reaches only the action, or a stop) did not fail on
+    its own: the runner says so, names the signal, and still records the trial as aborted."""
+    root = tmp_path / "proj"
+    experiments = write_project(root)
+    use_project(root, monkeypatch)
+    (experiments / "plant" / "scripts" / "observe.py").write_text(
+        "import os, signal\n"
+        f"signal.signal(signal.{signal_name}, signal.SIG_DFL)\n"
+        f"os.kill(os.getpid(), signal.{signal_name})\n", encoding="utf-8")
+    rc, out = _run(experiments, capsys, "--execute", "--limit", "1")
+    assert rc == 1, out
+    assert f"{expected} ({signal_name})" in out, out
+    assert "did not happen as planned" not in out
+    (trial,) = ti.load_trials(experiments, "plant")
+    assert trial.metadata["aborted"] is True and trial.status != "usable"
+    assert trial.metadata["abort_reason"].startswith("action returned rc=-")
+    assert signal_name in trial.metadata["abort_reason"]
+    ti._recorder_at.cache_clear()
+
+
+@pytest.mark.real_sleep
 def test_a_stack_that_writes_nothing_leaves_no_trial(tmp_path, monkeypatch, capsys):
     """No stack, so nothing writes the log: the recorder finalizes an empty recording and
     the runner refuses to write metadata for it."""

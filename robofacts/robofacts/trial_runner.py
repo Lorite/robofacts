@@ -1671,7 +1671,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 # non-flight that counts as coverage would satisfy a cell of
                 # the grid forever and silently shrink the campaign.
                 tail = (getattr(completed, "stdout", "") or "").strip().splitlines()
-                detail = f"action returned rc={rc} — the action did not complete"
+                ended_by = action_signal_phrase(rc)
+                detail = (f"action returned rc={rc} — the action was {ended_by}, it did not complete"
+                          if ended_by else f"action returned rc={rc} — the action did not complete")
                 if timed_out["yes"]:
                     detail += f" (action_timeout_s={config.action_timeout_s:.0f} expired)"
                 if tail:
@@ -1879,8 +1881,16 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         # the runner writes metadata its own contract rejects.
         metadata["abort_reason"] = detail or "action/verify failed (no detail captured)"
         if detail.startswith("action returned rc="):
-            print("[runner] TRIAL FAILED - the action failed, so the trial did not happen as "
-                  "planned; recorded as aborted, so it cannot count as coverage")
+            code = _re.match(r"action returned rc=(-?\d+)", detail)
+            ended_by = action_signal_phrase(int(code.group(1))) if code else None
+            if ended_by:
+                # A signal ended the action (Ctrl-C reached it, a stop, the action timeout):
+                # it did not fail on its own, so the message does not say it failed.
+                print(f"[runner] TRIAL FAILED - the action was {ended_by}, so the trial did not "
+                      "complete; recorded as aborted, so it cannot count as coverage")
+            else:
+                print("[runner] TRIAL FAILED - the action failed, so the trial did not happen as "
+                      "planned; recorded as aborted, so it cannot count as coverage")
         else:
             print("[runner] TRIAL FAILED - a verify step rejected the recorded trial; recorded "
                   "as aborted, so it cannot count as coverage (trials reverify, after a rule fix)")
@@ -2166,6 +2176,22 @@ def _note_gate_refusal(bag_dir: Path, gate: Optional[Dict[str, Any]], detail: st
                                                    encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         print(f"[runner] gate_refusal.json not written ({exc})")
+
+
+def action_signal_phrase(rc: int) -> Optional[str]:
+    """How a signal ended the action, for a negative return code (``subprocess`` reports a
+    process killed by signal N as -N), else None. "interrupted (SIGINT)" for Ctrl-C,
+    "stopped (SIGTERM)" for a stop or the action timeout, "killed (SIGKILL)", and
+    "ended by SIG<name>" for any other signal."""
+    if rc >= 0:
+        return None
+    import signal as _signal
+    try:
+        name = _signal.Signals(-rc).name
+    except ValueError:
+        name = f"signal {-rc}"
+    verb = {"SIGINT": "interrupted", "SIGTERM": "stopped", "SIGKILL": "killed"}.get(name)
+    return f"{verb} ({name})" if verb else f"ended by {name}"
 
 
 def _finalize_interrupted(trial: cs.TrialSpec, factors: Dict[str, cs.Factor],
