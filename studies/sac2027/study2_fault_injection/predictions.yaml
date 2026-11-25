@@ -1,0 +1,32 @@
+# E1 pre-registered predictions, FROZEN with the pre-registration commit
+# (SAC 2027 framework paper, design note Section 3.3, revised by the pilot of
+# 2026-10-01 before any main-run attempt). One predicted outcome per cell;
+# scripts/e1_table.py reports, per cell, how many attempts met it.
+#
+# Revised by the pilot (results/20261001T221500_pilot/), each with its reason:
+# * leftover_stack, gate=on: O1 -> O6. The design predicted that ros_clean_slate
+#   (max_each 1) would see two PX4 and two agents. It sees one of each: the
+#   trial's own agent fails to bind UDP 8888 and exits, its PX4 exits with
+#   "PX4 server already running for instance 0", and offboard_node flies the
+#   leftover vehicle in the other world. The frozen gate names this fault but
+#   its check does not fire, so H1.1 is predicted FALSIFIED for it.
+# * leftover_stack, gate=off: [to measure] -> O6 (pilot: O6, V2 false).
+# * dds_no_discovery, gate=off: "O2 or O3" -> O3 (pilot: the action times out
+#   after 90 s, the recorder still wrote the bridge and /rosout).
+outcomes:
+  none:               {"on": O5, "off": O5}
+  leftover_stack:     {"on": O6, "off": O6}
+  stale_world:        {"on": O6, "off": O6}
+  gt_bridge_down:     {"on": O1, "off": O4}
+  dds_no_discovery:   {"on": O1, "off": O3}
+  vehicle_not_ready:  {"on": O3, "off": O3}
+  bag_dir_unwritable: {"on": O1, "off": O2}
+# Side check (gate=disabled): the same outcome as gate=off.
+side_check:
+  none:               {"disabled": O5}
+  dds_no_discovery:   {"disabled": O3}
+# Phase B (exploratory, gate=on with the phase B checklist): blocked.
+phase_b:
+  leftover_stack:     {"on": O1}
+  stale_world:        {"on": O1}
+  vehicle_not_ready:  {"on": O1}

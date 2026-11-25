@@ -1,0 +1,40 @@
+# Pre-registered predictions of the simulated lighting experiment (SAC 2027
+# framework paper, 2026-10-06). FROZEN with the pre-registration commit, before
+# the calibration and before the first trial. scripts/lighting_analysis.py
+# evaluates P1 to P4 from the attempt ledger and the trials' metadata; P0 is
+# read from the calibration commit, P5 from the coverage view.
+#
+# Design: 4 levels x 2 repetitions (lighting_sim, seeded blocks, seed 20261006)
+# plus 1 deliberate mismatch attempt (lighting_mismatch). Descriptive only:
+# n = 2 per level supports no inferential test, and none is reported.
+
+P0_calibration: >-
+  Gazebo's camera has no auto exposure, so the calibrated bands of
+  lights_on, lights_dimmed and dark do not overlap (lint L13 accepts them).
+  backlit has no directional prediction: if its band overlaps another level's,
+  backlit is declared `blocked:` with that reason in config/factors.yaml,
+  lighting_sim drops it (a logged deviation), and the coverage view shows it
+  as none.
+P1_gate_go: >-
+  Every lighting_sim attempt passes its T-0 lighting check (PASS) and the whole
+  gate (GO), and its flight verifies (verify_px4_flight): 8 of 8.
+P2_mismatch_blocked: >-
+  The lighting_mismatch attempt (declared dark, a stale lighting_on world) is
+  NO-GO, its lighting check FAILs with the T-0 mean ABOVE the dark band, and
+  image_brightness is the only failed check. Nothing is recorded.
+P3_realized_in_band: >-
+  The realized brightness of each lighting_sim trial (the bag's first 4 s, the
+  vehicle still on the ground) lies inside its level's band: 8 of 8.
+P4_order: >-
+  Mean realized brightness per level: dark < lights_dimmed < lights_on.
+P5_coverage: >-
+  After the runs, trial_index --condition-space lighting.yaml reports 2 usable
+  confirmed simulation trials and 0 hardware trials for every level that was
+  run (status: simulation only), and 1 refusal at T-0 for dark. Experiment C's
+  hardware trials (lab day 2026-10-07) enter the same view without a change.
+
+# Exclusion rule (fixed before the runs): an attempt whose setup step fails
+# (unclean start: a Gazebo server survives the reset) or whose gate fails on a
+# check other than image_brightness is EXCLUDED, kept in the ledger, reported
+# with its reason, and the cell is run again once. A lighting_sim attempt that
+# fails ONLY the lighting check is not excluded: it falsifies P1 and is reported.

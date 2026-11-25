@@ -1,0 +1,32 @@
+# Pre-registered predictions of the one-bad-agent campaign, FROZEN with the
+# pre-registration commit (SAC 2027 framework paper, multi-agent study,
+# 2026-10-15, design note Section 3). One predicted outcome per fault level,
+# the same at every n_vehicles and fleet; scripts/fleet_tally.py reports, per
+# cell, how many attempts met it, and the attribution per refused attempt.
+#
+# Outcomes (fleet_tally.outcome, first match wins): X1 setup step failed,
+# O1 blocked at T-0, O2 failed without metadata, O3 aborted by the action's
+# exit code, O4 aborted by a verify step, O5 usable and no agent was injected,
+# O6 usable although an agent was injected (silently wrong), X3 other.
+outcomes:
+  none:          O5
+  stale_pose:    O4
+  wrong_mission: O4
+  dead_bridge:   O1
+  never_moves:   O3
+# Which layer's record must name the injected agent (attribution = exact).
+named_by:
+  stale_pose:    verify     # fleet_states_track_bodies, in abort_reason and fleet_verdict.named
+  wrong_mission: verify     # fleet_missions_match_declaration, same
+  dead_bridge:   gate       # the watchdog_health item's detail in runs/preflight_gate.jsonl
+  never_moves:   action     # abort_reason (the action's last line) and fleet_action.not_started
+# Cost (H3): gate duration slope over N below 0.1 s per agent, metadata bytes
+# linear in N (reported), real-time factor during the action at or above 0.8
+# at N = 20 and at or above 0.95 at N = 5 and 10.
+# Revised by the pilot (2026-10-15, before any main-run attempt): the design
+# note predicted 0.9 at N = 20; the pilot measured 0.857 at N = 20 (0.999 to
+# 1.011 at N = 5) with other sessions' load on the laptop, where the
+# feasibility run had measured 0.995 with the drones only climbing.
+cost:
+  gate_slope_s_per_agent_max: 0.1
+  rtf_min: {5: 0.95, 10: 0.95, 20: 0.8}

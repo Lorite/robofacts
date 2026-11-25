@@ -1,0 +1,40 @@
+# Pre-registered predictions of the lab-day gaps experiment (SAC 2027 framework
+# paper, 2026-10-12). FROZEN with the pre-registration commit, before any
+# attempt of campaigns/lab_day_gaps.yaml. A later change is a deviation, logged
+# in the README with its reason. scripts/gaps_tally.py reports, per level, how
+# many attempts met the predicted outcome AND every predicted predicate.
+#
+# Outcome classes (gaps_tally.py, mutually exclusive, first match wins):
+#   X1  excluded: unclean start (fault_reset or stop_latch_clear failed)
+#   X2  excluded: the fault was not realized (latch not written, lead lifted)
+#   O1  blocked at T-0 by the binding gate, nothing recorded
+#   O2  failed without metadata (no bag data)
+#   O3  recorded, aborted by the action's exit code
+#   O4  recorded, aborted by a verify step only (the action exited 0)
+#   O5  counted as coverage (usable) and valid: both drones reached altitude in
+#       the simulator's own pose, no abort recorded by the action
+#   O6  counted as coverage (usable) and invalid: SILENTLY WRONG
+#   O7  recorded but unverified (contract problems)
+#   X3  anything else (reported, never dropped)
+
+attempts_per_level: 5
+
+outcomes:
+  none: O5
+  latch_fresh: O1
+  lead_grounded: O3
+
+# Every predicate must hold in the attempt for it to count as "as predicted".
+predicates:
+  none:
+    both_drones_reached_m: 0.4          # max z of each drone on /tf
+  latch_fresh:
+    gate_failed_checks: [stop_latch]    # the ONLY failing check
+    latch_age_s_below: 120.0            # the measured age in the gate log
+    bag: false
+  lead_grounded:
+    action_rc: 7                        # NOT_AIRBORNE_RC
+    verify_failed: flight_happened      # the lead's verify step also marks it aborted
+    lead_max_z_below_m: 0.15            # the fault was realized (else X2)
+    follower_max_z_below_m: 0.15        # cfb2 never airborne
+    every_drone_final_z_below_m: 0.15   # every drone on the ground at the end of the bag

@@ -1,0 +1,21 @@
+<!-- Verbatim sections of experiments/px4_sitl_lighting/README.md in the laboratory repository at commit 5c5c220c72 (2026-11-25): the research question, the factor and its check, the frozen predictions and the deviation log. Other sections (apparatus, procedure, results) are left out. See ../README.md. -->
+
+## Research question
+
+Can a condition that a launch argument selects in simulation and an operator sets on hardware be declared, confirmed at T-0 by the same measurement, and counted per domain (simulation, hardware) in one coverage view?
+
+## The factor and its check
+
+`lighting` is a `launch_arg` factor (`world:=`, `worlds_dir:=`) that declares the same `image_brightness` check as the hardware factor, on `/lightcam/image`, with a band per level. The runner appends it to the T-0 gate with the trial's level. In simulation the launch argument is a claim as well: PX4 attaches to any Gazebo world that is already running (E1's `stale_world` finding), so the deliberate mismatch leaves a `lighting_on` server running and declares `dark` (`scripts/lighting_inject.sh`). The checklist deliberately has no `gz_world_matches`, so only the realized-condition check can see the mismatch. The realized brightness is measured again from the bag's first 4 s (`lighting_realized`), the view the gate measured, because the camera flies with the vehicle.
+
+## Pre-registered predictions
+
+Frozen in `config/predictions.yaml` with the pre-registration commit, before the calibration: P0 the graded bands do not overlap (backlit is blocked if it overlaps), P1 every trial is GO and verified, P2 the mismatch is refused by `image_brightness` alone, P3 every realized brightness is inside its band, P4 dark < lights_dimmed < lights_on, P5 every run level is "simulation only" with 2 confirmed trials until the lab day. Exclusion rule: an unclean start or a gate failure on a check other than the lighting one excludes the attempt and reruns the cell once.
+
+## Deviations (logged after the runs, the predictions are unchanged)
+
+- **D1. An operator interrupt.** Alejandro had to leave at about 15:45 UTC and the base session sent SIGINT to the runner during trial 20261006T154426 (lights_on, GO, PASS 188.17, the hover completed, the landing had begun). The runner of that time had no interrupt handling: it tore the stack down but left the recorded bag without `trial_metadata.json` and without a ledger line. The pre-registered exclusion rule names setup and gate failures, not interrupts. We treated the attempt as excluded: its metadata was written afterwards as `aborted: true` with the reason and a `_recovered` stamp (sources: the run log and the gate log), an `interrupted` ledger line was appended, and the cell was run again. The runner now does this itself (`f995d339bc`).
+- **D2. A wedged ROS 2 daemon.** The first attempt after the interrupt (20261006T170306) was blocked because the gate's `ros2 daemon stop` hung on the daemon left by the interrupt, until the gate's 300 s timeout. This is a gate failure on something other than the lighting check, so the exclusion rule applies as written, and the cell was run again after the wedged daemon was killed. The daemon bounce now has timeouts (`bda8b6ac2e`).
+- **D3. The refused mismatch left a sidecar-only directory.** Not a deviation from the protocol, but recorded here because it looks like a recorded trial. A NO-GO now writes `gate_refusal.json` into such a directory (`f995d339bc`), and this one got the file afterwards from the gate log.
+- **D4. Execution order.** The resumed run re-planned the remaining cells, so the six attempts after the interrupt ran in the order lights_on (blocked, D2), lights_on, dark, lights_dimmed, backlit, lights_on, not the seeded schedule of the pre-registration. The resumed bags restart the repetition number at rep01 (bag names are still unique by their timestamp).
+- **D5. Two ledger lines that are not attempts.** A calibration dry run refused without `--scratch` (20261006T151837, before the fix in `f995d339bc` that keeps dry runs out of the ledger) and the calibration attempt refused by `bag_dir_writable` (the git-ignored `bags/` directory did not exist yet). Neither belongs to lighting_sim or lighting_mismatch, which is all the analysis reads.
