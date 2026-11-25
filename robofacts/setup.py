@@ -25,7 +25,7 @@ def files_under(subdir: str) -> list:
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.1.1",
     packages=find_packages(exclude=["test", "test.*"]),
     # Everything the package needs at run time that is not a .py file: the gate's general
     # check scripts and their bash helper, the stop tools, the templates of new projects and

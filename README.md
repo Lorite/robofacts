@@ -15,12 +15,18 @@ The dependency goes one way. A test fails the build when `robofacts` imports a R
 
 ## Install
 
-The general package, with pip, into any Python 3.10 or newer environment:
+The general package, from [PyPI](https://pypi.org/project/robofacts/), into any Python 3.10 or newer environment:
+
+```bash
+pip install robofacts                 # add [ui] for the web interface: pip install 'robofacts[ui]'
+trials --help
+```
+
+Or from a clone, which also holds the examples and the quickstart:
 
 ```bash
 git clone https://github.com/Lorite/robofacts.git && cd robofacts
-pip install ./robofacts               # add [ui] for the web interface: pip install './robofacts[ui]'
-trials --help
+pip install ./robofacts
 ```
 
 Both packages, with colcon, into a ROS 2 Humble workspace:
