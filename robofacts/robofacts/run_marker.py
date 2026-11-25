@@ -28,6 +28,13 @@ never stops them itself: a process group number can belong to an unrelated progr
 then). When none is left, the runner's ``on_dead`` puts the dead run's trial on record,
 and the new run replaces the marker.
 
+A REUSED PID (2026-11-25, third review A3-4). After a container restart or a reboot, the pid
+of a killed runner can belong to another process, and ``os.kill(pid, 0)`` took that process
+for the runner: every run was refused until the marker was 12 hours old. So the marker also
+records when its process started (``pid_start``: the boot id and field 22 of
+``/proc/<pid>/stat``), and a pid that started at another time is another process. Where
+/proc is missing, only ``os.kill`` decides, as before.
+
 Shell readers (the robotics repo's scripts/archive/upload_trials.sh)::
 
     find <root> -maxdepth 1 -name .robofacts_trial_running.json -mmin -720
@@ -84,14 +91,40 @@ def read_live(experiments_root: Path, *, now: Optional[float] = None) -> Optiona
     counts while it is fresh.
     """
     record = read(experiments_root, now=now)
-    if record and record.get("host") == socket.gethostname():
-        try:
-            os.kill(int(record.get("pid")), 0)
-        except ProcessLookupError:
-            return None
-        except (PermissionError, TypeError, ValueError):
-            pass
+    if record and record.get("host") == socket.gethostname() and _runner_gone(record):
+        return None
     return record
+
+
+def process_start(pid: int) -> Optional[str]:
+    """When process ``pid`` started: the boot id and its start time in clock ticks after the
+    boot (field 22 of /proc/<pid>/stat), or None where /proc cannot tell (A3-4)."""
+    try:
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        return f"{boot}:{stat[stat.rindex(')') + 2:].split()[19]}"
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _runner_gone(record: Dict[str, Any]) -> bool:
+    """True when the runner of a marker of this machine no longer runs: its pid is gone, or
+    the pid now belongs to a process that started at another time (A3-4). False when the
+    runner may still run, or when this cannot be told."""
+    try:
+        pid = int(record.get("pid"))
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    except (TypeError, ValueError, OSError):
+        return False
+    started = record.get("pid_start")
+    if not started:
+        return False
+    now = process_start(pid)
+    return now is not None and now != started
 
 
 def note(experiments_root: Path, **info: Any) -> None:
@@ -168,8 +201,13 @@ def note_group(experiments_root: Path, name: str, pgid: int) -> None:
 
 
 def _own(record: Dict[str, Any]) -> bool:
-    """True when ``record`` is the marker of this process."""
-    return record.get("host") == socket.gethostname() and record.get("pid") == os.getpid()
+    """True when ``record`` is the marker of this process. A marker that names this pid but
+    another start time is the marker of a killed runner that had the same pid (A3-4)."""
+    if record.get("host") != socket.gethostname() or record.get("pid") != os.getpid():
+        return False
+    started = record.get("pid_start")
+    mine = process_start(os.getpid())
+    return not started or mine is None or started == mine
 
 
 @contextmanager
@@ -245,13 +283,7 @@ def _read_any(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _pid_gone(record: Dict[str, Any]) -> bool:
-    try:
-        os.kill(int(record.get("pid")), 0)
-    except ProcessLookupError:
-        return True
-    except (PermissionError, TypeError, ValueError, OSError):
-        return False
-    return False
+    return _runner_gone(record)
 
 
 def _claim(root: Path, info: Dict[str, Any],
@@ -295,6 +327,9 @@ def _claim(root: Path, info: Dict[str, Any],
                         print(f"[runner] the killed run's trial was not put on record ({exc})")
         record = {"host": socket.gethostname(), "pid": os.getpid(),
                   "started": datetime.now(timezone.utc).isoformat(timespec="seconds"), **info}
+        started = process_start(os.getpid())
+        if started:
+            record["pid_start"] = started
         try:
             _write(path, record)
         except OSError as exc:

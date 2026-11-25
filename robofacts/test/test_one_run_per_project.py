@@ -15,6 +15,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -335,3 +336,53 @@ def test_a_killed_local_run_gets_no_remote_clean_up(project, capsys):
     with run_marker.running(project, on_dead=tr.recover_killed_trial, experiment="plant"):
         pass
     assert "ssh" not in capsys.readouterr().out
+
+
+needs_proc = pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs /proc")
+
+
+@needs_proc
+def test_a_marker_whose_pid_now_belongs_to_another_process_is_replaced(project, capsys):
+    """A3-4 (third review of 2026-11-25): after a container restart or a reboot, the pid of a
+    killed runner can belong to another process. os.kill(pid, 0) alone took that process for
+    the runner, and every run was refused for 12 hours. The marker records when its process
+    started, and a pid with another start time is another process."""
+    other = subprocess.Popen(["sleep", "60"])
+    try:
+        record = {"host": socket.gethostname(), "pid": other.pid, "pid_start": "another-boot:1",
+                  "experiment": "plant", "started": "2026-11-25T10:00:00+00:00"}
+        run_marker.marker_path(project).write_text(json.dumps(record), encoding="utf-8")
+        assert run_marker.read_live(project) is None
+        with run_marker.running(project, experiment="plant"):
+            mine = run_marker.read(project)
+            assert mine["pid"] == os.getpid() and mine.get("pid_start"), mine
+        assert "no longer runs" in capsys.readouterr().out
+    finally:
+        other.kill()
+        other.wait()
+
+
+@needs_proc
+def test_a_marker_that_names_this_pid_from_another_start_is_not_taken_for_its_own(project):
+    """The same reuse can hand the new runner the killed runner's pid: the marker then looked
+    like its own, and the killed run's trial was never put on record."""
+    record = {"host": socket.gethostname(), "pid": os.getpid(), "pid_start": "another-boot:1",
+              "experiment": "plant", "started": "2026-11-25T10:00:00+00:00"}
+    run_marker.marker_path(project).write_text(json.dumps(record), encoding="utf-8")
+    dead = []
+    with run_marker.running(project, on_dead=dead.append, experiment="plant"):
+        pass
+    assert [r.get("pid_start") for r in dead] == ["another-boot:1"]
+
+
+@needs_proc
+def test_a_live_holder_with_its_own_start_time_still_refuses(project):
+    holder = _hold_marker(project)
+    try:
+        assert run_marker.read_live(project)["pid"] == holder.pid
+        with pytest.raises(run_marker.RunRefused):
+            with run_marker.running(project, experiment="plant"):
+                pass
+    finally:
+        holder.kill()
+        holder.wait()
