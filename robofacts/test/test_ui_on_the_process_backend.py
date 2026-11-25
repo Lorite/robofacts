@@ -282,3 +282,36 @@ def test_the_stop_and_action_buttons_name_the_robots_file_of_the_interface(bare,
     assert stop[0].endswith("estop.sh") and stop[1:3] == ["--config", str(robots)]
     assert stop[3:] == ["--robot", "demo_bot"]
     assert act[0].endswith("robot_action.sh") and act[1:] == ["--config", str(robots), "demo_bot", "wave"]
+
+
+@pytest.mark.real_sleep
+def test_a_failing_checklist_blocks_an_execute_from_the_interface_as_on_the_cli(bare):
+    """C2-3: an experiment without scripts/preflight.sh ran ungated from the interface, while
+    the CLI built its gate from the checklist, and those trials counted. The paper says the
+    runner runs the gate whether it starts from the CLI or the web interface."""
+    import json
+    from robofacts import trial_index as ti
+    checklist = bare.root / "demo_log_recorder" / "config" / "preflight_checklist.json"
+    data = json.loads(checklist.read_text(encoding="utf-8"))
+    data["checklist"][0] = {"text": "[HARD] Enough disk for the recording.", "check": "disk_space",
+                            "args": {"path": ".", "min_gb": "999999"}}
+    checklist.unlink()
+    checklist.write_text(json.dumps(data), encoding="utf-8")
+    run = wait_until_ended(bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth()))),
+                           timeout=120)
+    assert [r["status"] for r in run.results] == ["blocked"], (run.state, run.error, run.results)
+    assert "disk_space" in run.results[0]["detail"]
+    assert "UNGATED" not in run.campaign
+    assert not [t for t in ti.load_trials(bare.root, "demo_log_recorder") if t.status == "usable"]
+    gate_log = bare.root / "demo_log_recorder" / "runs" / "preflight_gate.jsonl"
+    assert len(gate_log.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_an_execute_with_no_gate_at_all_says_so(bare, held_runner):
+    """C2-3: with no preflight.sh and no checklist the run carries " ⚠UNGATED" in its shown name,
+    like a skipped gate, and the campaign page no longer promises a T-0 gate."""
+    (bare.root / "demo_log_recorder" / "config" / "preflight_checklist.json").unlink()
+    page = bare.c.get("/e/demo_log_recorder/c/grid", headers=auth()).get_data(as_text=True)
+    assert "run the T-0 gate" not in page and "runs UNGATED" in page
+    run = bare.runs.get(run_id_of(bare.c.post("/run", data=EXECUTE, headers=auth())))
+    assert run.campaign.endswith(" ⚠UNGATED"), run.campaign

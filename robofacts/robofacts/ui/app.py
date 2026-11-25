@@ -601,13 +601,31 @@ class ShellPreflightGate:
         return _GatePass()
 
 
+def ui_gate_source(experiments_root: Path, experiment: str, campaign) -> str:
+    """Which T-0 gate an EXECUTE from this interface builds: "preflight.sh", "checklist" or "".
+
+    The same order as the /run route: the experiment's scripts/preflight.sh, else the
+    campaign's checklist (or the experiment's default one), the file tr.build_gate reads.
+    "" means the trials would run with no gate at all.
+    """
+    if (Path(experiments_root) / experiment / "scripts" / "preflight.sh").is_file():
+        return "preflight.sh"
+    rel = getattr(campaign, "preflight_checklist", "") or "config/preflight_checklist.json"
+    if (Path(experiments_root) / campaign.experiment / rel).is_file():
+        return "checklist"
+    return ""
+
+
 def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None,
-                       campaign_setup: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+                       campaign_setup: Optional[List[Dict[str, Any]]] = None,
+                       gated: bool = True) -> List[str]:
     """What EXECUTE does by itself, in order, derived from runner.yaml.
 
     Derived rather than written out, so it cannot drift from what the runner
     actually does — the failure this exists to prevent is an operator reading a
-    stale description and assuming a step is covered when it is not.
+    stale description and assuming a step is covered when it is not. That is
+    why an ungated run (``gated=False``: no preflight.sh and no checklist) says
+    so instead of promising a T-0 gate.
     """
     steps = {**tr.DEFAULT_STEPS, **(steps or {})}
     seq: List[str] = []
@@ -625,7 +643,11 @@ def automatic_sequence(config, steps: Optional[Dict[str, bool]] = None,
         seq += [f"start aux: {a['name']}" for a in config.aux_launches]
     if steps["livestream"] and config.livestream:
         seq.append("start the livestream bridge")
-    seq.append("run the T-0 gate (blocks the trial if it fails)")
+    if gated:
+        seq.append("run the T-0 gate (blocks the trial if it fails)")
+    else:
+        seq.append("NO T-0 gate: no scripts/preflight.sh and no checklist, so every trial "
+                   "runs UNGATED")
     if steps["record"]:
         seq.append("start the bag recorder")
     if steps["action"]:
@@ -1173,7 +1195,8 @@ def create_app(experiments_root: Optional[Path] = None,
         checklist, checklist_vars = load_preflight_checklist(root(), experiment)
         try:
             auto_seq = automatic_sequence(tr.RunnerConfig.load(experiment, root()),
-                                          campaign_setup=campaign.setup_steps)
+                                          campaign_setup=campaign.setup_steps,
+                                          gated=bool(ui_gate_source(root(), experiment, campaign)))
             runner_error = ""
         except tr.RunnerError as exc:
             auto_seq, runner_error = [], str(exc)
@@ -1434,21 +1457,30 @@ def create_app(experiments_root: Optional[Path] = None,
 
         plan = cp.build_plan(campaign, ti.load_trials(root(), experiment), include_unverified)
 
-        # T-0 gate on executed runs, when the experiment ships a preflight.sh.
-        # The skip is operator-explicit and travels in the run's shown name so
-        # the journal records that the gate was waived, not merely absent.
+        # T-0 gate on executed runs: the experiment's preflight.sh when it ships one,
+        # else the CLI's own gate from the campaign's checklist (tr.build_gate).
+        # Before 2026-11-25 an experiment without preflight.sh ran ungated from
+        # here while the CLI gated it, and those trials counted. The skip is
+        # operator-explicit and travels in the run's shown name so the journal
+        # records that the gate was waived, and so does a run with no gate at all.
         gate = None
         suffix = f" [{pin}]" if pin else ""
         if confirm:
             script = root() / experiment / "scripts" / "preflight.sh"
             if skip_gate:
                 suffix += " ⚠GATE-SKIPPED"
-            elif script.is_file():
-                host_level = (plan.cells[0].values.get("execution_host")
-                              if plan.cells else None)
-                gate = ShellPreflightGate(experiment, config, host_level, app.config["REPO_ROOT"],
-                                          light=keep_stack,
-                                          checklist=getattr(campaign, "preflight_checklist", ""))
+            else:
+                if script.is_file():
+                    host_level = (plan.cells[0].values.get("execution_host")
+                                  if plan.cells else None)
+                    gate = ShellPreflightGate(experiment, config, host_level, app.config["REPO_ROOT"],
+                                              light=keep_stack,
+                                              checklist=getattr(campaign, "preflight_checklist", ""))
+                else:
+                    # Prints "UNGATED" itself when the campaign has no checklist.
+                    gate = tr.build_gate(campaign, root(), execute=True)
+                if gate is None:
+                    suffix += " ⚠UNGATED"
         if keep_stack:
             suffix += " [session]"
         if steps is not None:
