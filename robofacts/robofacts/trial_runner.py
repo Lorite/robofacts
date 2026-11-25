@@ -1954,6 +1954,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # from whoever was standing at the rig. Bookkeeping, not a coverage axis
     # (trial_index.NON_FACTOR_FIELDS lists it).
     metadata["bag_storage"] = f"external:{record_dir}" if external_record else "repo"
+    # The steps an operator turned off for this trial (the web interface's steps form). Before
+    # 2026-11-25 a trial whose action never ran was written like a full one. Recorded here, not
+    # judged: whether such a trial counts is a separate decision. A list, so the index never
+    # takes it for a factor. Written only when a step was off, so other records are unchanged.
+    if skipped:
+        metadata["steps_disabled"] = list(skipped)
     # WHICH CODE FLEW IT. Probed on `target` — the rig's own checkout, which is
     # routinely behind the laptop's — and cached per host, so a 40-trial
     # campaign pays one ssh round-trip rather than 40. Never fatal: the trial

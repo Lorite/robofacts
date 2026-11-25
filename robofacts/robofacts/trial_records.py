@@ -139,6 +139,9 @@ class TrialRecord:
     #: trial, and the corrections.json entries already applied to ``values``.
     exclusion: Optional[Dict[str, Any]] = None
     corrections: List[Dict[str, Any]] = field(default_factory=list)
+    #: The steps an operator turned off for the trial (``steps_disabled`` of its metadata,
+    #: written since 2026-11-25), such as ``action`` when the action never ran.
+    steps_disabled: List[str] = field(default_factory=list)
 
     @property
     def slim_name(self) -> Optional[str]:
@@ -192,6 +195,7 @@ class TrialRecord:
             "plots_first": self.plots_first,
             "exclusion": self.exclusion,
             "corrections": list(self.corrections),
+            "steps_disabled": list(self.steps_disabled),
         }
 
     def poster(self, experiments_root: Optional[Path]) -> Optional[Path]:
@@ -529,6 +533,12 @@ def _status_of(trial: ti.Trial) -> Tuple[str, str]:
     return "scratch", "carries scratch: true, so it never counts"
 
 
+def _steps_disabled(metadata: Dict[str, Any]) -> List[str]:
+    """The trial's ``steps_disabled``, or [] when the field is absent or not a list."""
+    steps = metadata.get("steps_disabled")
+    return [str(s) for s in steps] if isinstance(steps, list) else []
+
+
 def _values(metadata: Dict[str, Any], factors: List[str]) -> Dict[str, str]:
     out = {}
     for f in factors:
@@ -593,6 +603,7 @@ def load_records(experiments_root: Optional[Path] = None, experiment: str = "", 
             metadata=trial.metadata,
             exclusion=trial.exclusion,
             corrections=list(trial.corrections),
+            steps_disabled=_steps_disabled(trial.metadata),
         ))
 
     if include_scratch:
@@ -843,6 +854,8 @@ def render(records: List[TrialRecord], factors: Optional[List[str]] = None) -> s
             bits.append(f"gate={r.gate['verdict']}")
         if r.corrections:
             bits.append("corrected=" + ",".join(dict.fromkeys(str(e["field"]) for e in r.corrections)))
+        if r.steps_disabled:
+            bits.append("steps_disabled=" + ",".join(r.steps_disabled))
         lines.append("  ".join(bits))
         if r.reason and r.status != "usable":
             lines.append(f"      why: {r.reason.splitlines()[0][:160]}")
