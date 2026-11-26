@@ -3,7 +3,9 @@ import os
 from setuptools import find_packages, setup
 
 package_name = "robofacts"
-HERE = os.path.dirname(os.path.abspath(__file__))
+# realpath, not abspath: `colcon build --symlink-install` runs a symlink to this file from
+# build/robofacts/, where no README.md lies (2026-11-26, the lab's build failed).
+HERE = os.path.dirname(os.path.realpath(__file__))
 
 # The PyPI page. It is this folder's README, not the repository's: the repository's README
 # also describes the middleware backend, which this package must not name.
