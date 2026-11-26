@@ -89,7 +89,7 @@ trials run  experiments/my_experiment/campaigns/baseline.yaml --limit 1    # dry
 trials run  experiments/my_experiment/campaigns/baseline.yaml --execute --no-pause    # the trials
 ```
 
-`--no-pause` skips the stop before each trial. Without it, every trial waits for Enter so that you can pose the rig, which is what you want on real hardware.
+`--no-pause` skips the stop before each trial. Without it, every trial waits so that you can pose the rig: for Enter in a simulation, and for the word `fly` on real hardware. A hardware run therefore needs a terminal, or `trials run` refuses it unless you pass `--no-pause`. A hardware trial also runs only after a gate, so its experiment needs a gate checklist.
 
 `trials init` takes `--backend ros2` for a ROS 2 project (the default is the built-in `process` backend). `trials new <name>` writes a commented experiment that works as generated: on the ROS 2 backend it listens to `demo_nodes_cpp talker`, on the `process` backend a small script stands in for the system and writes a log file. Edit, in this order: `config/factors.yaml` (the axes and how the runner realizes each level), `config/trial_metadata_schema.yaml` (the fields every trial records, with the coverage axes), `config/preflight_checklist.json` (the gate), `config/runner.yaml` (the stack, one trial, the verify steps, the computers) and `campaigns/baseline.yaml` (the sweep, the fixed levels, the repetitions). The linter and the planner then check the declarations before any trial runs.
 

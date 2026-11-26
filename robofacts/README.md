@@ -24,7 +24,7 @@ trials run  experiments/my_experiment/campaigns/baseline.yaml --limit 1    # dry
 trials run  experiments/my_experiment/campaigns/baseline.yaml --execute --no-pause    # the trials
 ```
 
-`--no-pause` skips the stop before each trial. Without it, every trial waits for Enter so that you can pose the rig, which is what you want on real hardware.
+`--no-pause` skips the stop before each trial. Without it, every trial waits so that you can pose the rig: for Enter in a simulation, and for the word `fly` on real hardware. A hardware run therefore needs a terminal, or `trials run` refuses it unless you pass `--no-pause`. A hardware trial also runs only after a gate, so its experiment needs a gate checklist.
 
 The generated experiment works as it is: a small script stands in for the system and writes a log file, the recorder stores what it writes during a trial, and a verify step reads the recording. `trials index --experiment my_experiment --summary` then lists the usable trials. Edit the declarations in `experiments/my_experiment/config/` to describe your own system, and `trials validate experiments/my_experiment` says whether it is ready for a first trial.
 
