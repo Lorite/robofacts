@@ -26,7 +26,7 @@ Every trial belongs to one domain: simulation or hardware. The domain decides wh
 
 **The gate runs before every trial.** A check that passed minutes ago proves nothing about now, so the runner runs the gate again seconds before each trial. Each verdict goes into the trial's metadata and into the gate log, `runs/preflight_gate.jsonl`. A gate that cannot run has not passed.
 
-**The runner waits until the operator types `fly`.** After the gate passes and before the recorder starts, the runner stops at the pose pause, so that you can pose the robot without a race. On an experiment whose `runner.yaml` does not say `simulation: true`, type `fly` and Enter to record and act, or `no` to abort. Any other answer asks again, and after three tries the trial aborts. The recorder and the action do not start before `fly`, and an aborted trial records nothing. In a simulated experiment, Enter is enough.
+**The runner waits until the operator types `fly`.** After the gate passes and before the recorder starts, the runner stops at the pose pause, so that you can pose the robot without a race. On a [[hardware-runs#Which trial is a hardware trial|hardware trial]], type `fly` and Enter to record and act, or `no` to abort. Any other answer asks again, and after three tries the trial aborts. The recorder and the action do not start before `fly`, and an aborted trial records nothing. In a simulation trial, Enter is enough. The trial's domain decides, so a hardware level inside a `simulation: true` experiment also waits for `fly`.
 
 **A hardware run needs a terminal on stdin.** When stdin is not a terminal, nobody could type `fly`, so `trials run --execute` refuses a hardware trial. This also holds for `--scratch`.
 

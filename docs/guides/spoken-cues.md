@@ -66,7 +66,7 @@ A hardware experiment (one whose `runner.yaml` does not say `simulation: true`) 
 | `gate_blocked` | "The gate says no go. Nothing was recorded.", then up to three failed checks |
 | `gate_passed` | "The gate passed. Type fly when you are ready." |
 
-Without the `fly` pause (`--no-pause`), the GO line is only "The gate passed.". A shadow gate's recorded NO-GO is not announced as a pass. A campaign cue at 0 seconds replaces the default "Recording.". The sentence of a failed check comes from the checklist entry's `"speak"`, or from a built-in sentence per check.
+Without the `fly` pause (`--no-pause`, or a simulation trial), the GO line is only "The gate passed.". A shadow gate's recorded NO-GO is not announced as a pass. A campaign cue at 0 seconds replaces the default "Recording.". The sentence of a failed check comes from the checklist entry's `"speak"`, or from a built-in sentence per check.
 
 A simulated experiment says nothing unless its campaign asks. `voice_announce: false` silences every moment, and a moment set to `null` silences that one.
 

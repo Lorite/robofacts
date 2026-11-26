@@ -32,10 +32,10 @@ The runner owns the order, and `runner.yaml` only declares the content of the st
 
 After the gate, every executed trial waits so that you can pose the setup (stand the robot up, place an object) before the recorder starts:
 
-- in a simulation (`simulation: true`), the runner waits for **Enter**,
-- on hardware, it waits for the word **`fly`** and Enter. The word `no` aborts the trial, and after three other answers it aborts too.
+- in a simulation trial, the runner waits for **Enter**,
+- in a hardware trial, it waits for the word **`fly`** and Enter. The word `no` aborts the trial, and after three other answers it aborts too.
 
-`--no-pause` skips the pause. The web interface answers the pause in the browser and needs no terminal.
+The trial's domain decides which of the two: `simulation` in `runner.yaml`, unless a factor level names a domain (see [[factors]]). `--no-pause` skips the pause. The web interface answers the pause in the browser and needs no terminal.
 
 !!! warning "Hardware needs a terminal or --no-pause"
     `trials run` refuses a hardware run whose standard input is not a terminal, unless you pass `--no-pause`, because nobody could type `fly`. With `--no-pause` and no terminal, the runner prints the operator steps and says that nobody waited for them. A hardware trial also needs a [[gate|T-0 gate]]. See [[hardware-runs|Run on hardware]].

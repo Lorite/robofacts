@@ -837,6 +837,21 @@ DEFAULT_VOICE_ANNOUNCE: Dict[str, Optional[str]] = {
 }
 
 
+def trial_is_hardware(trial: Any, factors: Optional[Dict[str, "cs.Factor"]], config: Any) -> bool:
+    """Whether a trial moves real hardware: its domain, which is runner.yaml's `simulation`
+    unless a factor level names a domain (campaign_spec.trial_domain).
+
+    The pose pause, the spoken GO, the voice defaults and the run marker for the stop tools
+    follow it (Alejandro, 2026-11-26). They followed runner.yaml's flag alone, so a factor
+    level with `domain: hardware` in a `simulation: true` experiment was refused without a
+    terminal (hardware_trial_problems uses the domain) and then started on a plain Enter
+    instead of the word fly, and its run marker said simulation, which the stop tools ignore.
+    """
+    domain, _basis = cs.trial_domain(getattr(trial, "values", None) or {}, factors or {},
+                                     bool(getattr(config, "simulation", False)))
+    return domain == "hardware"
+
+
 def voice_plan(voice_cues: Optional[List[Any]], voice_announce: Any, *, simulation: bool,
                values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """What the runner will say during one trial (pure, so tests and dry runs share it).
@@ -1449,7 +1464,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
     # SPOKEN CUES (2026-10-13): what the laptop will say during this trial.
     # Sending is one non-blocking UDP datagram per line, so a voice daemon that
     # is down costs nothing and changes nothing about the trial.
-    vplan = voice_plan(voice_cues, voice_announce, simulation=config.simulation,
+    hardware = trial_is_hardware(trial, factors, config)
+    vplan = voice_plan(voice_cues, voice_announce, simulation=not hardware,
                        values=trial.values)
     if dry_run:
         # A dry run previews commands; there is no stack to check and the gate
@@ -1665,7 +1681,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             if (_ctx.get("gate") or {}).get("verdict") != "NO-GO":
                 text = vplan["announce"].get("gate_passed")
                 if (text and text == DEFAULT_VOICE_ANNOUNCE["gate_passed"]
-                        and (not pause_before_action or config.simulation)):
+                        and (not pause_before_action or not hardware)):
                     vplan["announce"]["gate_passed"] = "The gate passed."
                 announce("gate_passed")
 
@@ -1717,7 +1733,8 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                 # an Enter can come from either, and a flight must not start on an accidental
                 # one. On hardware the word ``fly`` starts the trial, ``no`` aborts it, anything
                 # else asks again (three tries, then it aborts). Simulation keeps the plain Enter.
-                if config.simulation:
+                # The trial's domain decides, not runner.yaml alone (trial_is_hardware).
+                if not hardware:
                     print(_c("33;1", f"[runner] T-0 gate done — POSE THE RIG NOW "
                                      f"({nd}). Recording starts on Enter."))
                     try:
@@ -2283,7 +2300,7 @@ def run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runner
         # whether it is a simulation, which never moves a stop.
         run_marker.note(root, execution_host=trial.host(factors), label=trial.describe(),
                         robots=[r["name"] for r in getattr(config, "robots", None) or []] or None,
-                        simulation=bool(getattr(config, "simulation", False)),
+                        simulation=not trial_is_hardware(trial, factors, config),
                         session=session_id)
         _print_stop_targets(root)
         try:
