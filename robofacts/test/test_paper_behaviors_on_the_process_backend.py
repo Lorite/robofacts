@@ -125,18 +125,24 @@ def test_an_override_runs_the_trial_and_stores_the_reason_and_the_failed_check(p
     assert trial.status == "usable" and plan_counts(project) == (2, 1)
 
 
-def test_an_override_also_passes_a_hard_check_today(project, capsys):
-    """FINDING of 2026-11-25, behavior unchanged on purpose: the experiment template says
-    that a text starting with [HARD] cannot be overridden, but no code enforces it. The
-    override passes a hard check too, and the gate log marks the failed item as hard. This
-    test pins today's behavior. Alejandro decides whether the code or the text changes."""
+def test_an_override_does_not_pass_a_failed_hard_check(project, capsys):
+    """The experiment template and the paper say that a text starting with [HARD] cannot be
+    overridden and that a failed check never counts. Until 2026-11-26 the override passed a
+    hard check too and the trial counted (review finding A2/C3-1, Alejandro's decision)."""
     add_gate_entry(project, {"text": "[HARD] The calibration file is present.", "check": "file_exists",
                              "args": {"path": "/no/such/calibration.yaml"}})
     rc, out = run(project, capsys, "--limit", "1", "--gate-override", "I am sure")
-    assert rc == 0 and "1 OK" in out
+    assert rc == 1 and "0 OK, 1 blocked" in out, out
+    assert "PROCEEDING ANYWAY" not in out
+    assert "The override does not pass [HARD] file_exists" in out
+    # Blocked like a NO-GO without the override: no recording, no metadata, nothing counts.
+    assert ti.load_trials(project, EXPERIMENT) == []
     (verdict,) = gate_log(project)
-    assert verdict["override"] == "I am sure"
+    assert verdict["verdict"] == "NO-GO" and verdict["override"] is None
     assert [(f["check"], f["hard"]) for f in verdict["failed"]] == [("file_exists", True)]
+    (attempt,) = ledger(project)
+    assert attempt["status"] == "blocked" and "override does not pass" in attempt["detail"]
+    assert plan_counts(project) == (2, 0)
 
 
 # --------------------------------------------------------------------------- #

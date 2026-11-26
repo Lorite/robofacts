@@ -3096,7 +3096,8 @@ def main(argv=None) -> int:
     ap.add_argument("--gate-override", metavar="REASON",
                     help="proceed past a FAILED T-0 gate. The reason and the "
                          "failed checks are stamped into trial_metadata.json forever "
-                         "(an escape hatch that is visible, never silent).")
+                         "(an escape hatch that is visible, never silent). It never "
+                         "passes a failed [HARD] item or a factor check that did not pass.")
     ap.add_argument("--no-voice", action="store_true",
                     help="print the spoken cues but send none (sets TRIALS_VOICE=off for "
                          "this run and its child processes). Cues go to the laptop's voice "

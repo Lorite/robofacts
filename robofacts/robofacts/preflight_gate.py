@@ -15,6 +15,11 @@ its reason, and the exact checks that failed are written into the trial's
 ``trial_metadata.json``, so an overridden trial is visible forever afterwards
 and can be excluded from analysis on purpose rather than by accident.
 
+The override never passes a failed ``[HARD]`` item or a factor check that did not
+pass (2026-11-26): the first is a condition no trial may run under, and the second
+leaves the trial's declared level unconfirmed. Such a trial is blocked, with or
+without the override.
+
 Why the default freshness window is zero
 ----------------------------------------
 The 2026-07-22 incident flew with three safety layers down, each "verified"
@@ -125,7 +130,7 @@ _RESULT_LINE = re.compile(r"^\s*(PASS|SKIP|FAIL|ERR)\s+([A-Za-z0-9_]+):\s?(.*)$"
 
 
 class PreflightBlocked(RuntimeError):
-    """Raised when the gate failed and no override was ticked."""
+    """Raised when the gate failed and no override applied."""
 
 
 @dataclass
@@ -380,7 +385,18 @@ class PreflightGate:
                             duration_s=duration, n_checks=len(items),
                             factor_checks=factor_items, stop_latch=latch)
 
-        if self.override:
+        # What no override passes (2026-11-26, Alejandro's decision in the review before 0.1.1):
+        # a failed [HARD] item, the condition the checklist says a trial must never run under,
+        # and a factor check that did not pass, because the trial's declared level was then not
+        # confirmed. Before, the operator's override passed both and the trial counted, while
+        # the checklist template and the paper say a failed check never counts. The shadow mode
+        # of a `gate` factor (simulation only) still records and never blocks.
+        hard = [i for i in items if i.get("result") in ("FAIL", "ERR") and i.get("hard")]
+        unconfirmed = [f for f in factor_items if f.get("result") in ("FAIL", "ERR", "NOT RUN")]
+        binding_failures = ([f"[HARD] {i['check']}" for i in hard]
+                            + [f"factor check {f['factor']}={f['level']} ({f['result']})"
+                               for f in unconfirmed])
+        if self.override and (self.mode == "shadow" or not binding_failures):
             result.allowed = True
             result.overridden = True
             result.override_reason = self.override_reason or "(no reason given)"
@@ -392,11 +408,16 @@ class PreflightGate:
         print(output)
         self._last_result = result
         self._log(trial_label, values, result, items)
-        # A failed [HARD] item is a condition the trial must not run under: the message does
-        # not suggest the override for it (2026-11-25). What the override does is unchanged.
-        hard = [i for i in items if i.get("result") in ("FAIL", "ERR") and i.get("hard")]
-        advice = (". A [HARD] item failed: fix the cause, then run again." if hard else
-                  ". Fix it, or set the gate's override flag with a reason to proceed anyway.")
+        if self.override:
+            advice = (". The override does not pass " + ", ".join(binding_failures)
+                      + ": fix the cause, then run again.")
+        elif binding_failures:
+            advice = ". " + ", ".join(binding_failures) + " failed: fix the cause, then run again."
+        else:
+            advice = ". Fix it, or set the gate's override flag with a reason to proceed anyway."
+        if self.override:
+            print(f"[gate]{label} override NOT applied: " + ", ".join(binding_failures)
+                  + " failed, and no override passes a [HARD] item or a factor check")
         raise PreflightBlocked(
             f"T-0 gate {status.upper()}{label}: "
             + (", ".join(failed) if failed else "see output above")
