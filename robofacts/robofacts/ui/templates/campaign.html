@@ -158,7 +158,7 @@
     <label><input type="checkbox" name="confirm" value="yes"> arm</label>
     <button type="submit" name="go" value="execute" class="btn-exec">▶ EXECUTE: run the trial(s)</button>
     <label class="small"><input type="checkbox" name="skip_gate" value="yes"> ⚠ skip the gate</label>
-    <span class="small muted">refuses unless armed; a skipped gate is written into the run's name in the journal</span>
+    <span class="small muted">refuses unless armed, and always for a hardware experiment; a skipped gate is written into the run's name in the journal</span>
   </div>
   {% if explore_offered %}
   <div class="panel" id="explore" style="margin-top:.8rem">

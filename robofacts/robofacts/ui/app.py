@@ -1645,6 +1645,14 @@ def create_app(experiments_root: Optional[Path] = None,
                     gate = tr.build_gate(campaign, root(), execute=True)
                 if gate is None:
                     suffix += " ⚠UNGATED"
+            # A hardware trial runs only after a gate (2026-11-26): a skipped gate and a missing
+            # checklist are refused here, before the run starts. A simulation keeps both.
+            # The browser answers the pose pause, so no terminal is needed.
+            refused = tr.hardware_plan_problems(plan, config, gated=gate is not None,
+                                                pause_before_action=pose_pause,
+                                                has_pose_surface=True)
+            if refused:
+                return error("; ".join(refused), 400)
         if keep_stack:
             suffix += " [session]"
         if steps is not None:

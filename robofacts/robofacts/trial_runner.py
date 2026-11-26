@@ -1089,15 +1089,17 @@ def confirm_operator_steps_tty(trial: cs.TrialSpec,
                                operator_steps: List[Dict[str, Any]]) -> bool:
     """The CLI's confirmation surface: print the steps, wait for Enter.
 
-    Only at a real terminal. A non-tty caller passes straight through, which
-    keeps headless and CI behaviour exactly what it was before 8f1213cc6e.
+    Waits only at a real terminal. A non-tty caller passes through, which keeps
+    headless and CI behaviour what it was before 8f1213cc6e, but since 2026-11-26
+    the steps are printed first, with a line that says nobody waited for them:
+    before, they passed without a word. A hardware run reaches this without a
+    terminal only with --no-pause (hardware_trial_problems).
     Callers with their OWN confirmation surface (the web UI) do not use this:
     they hand ``run_trial``/``run_plan`` a ``confirm_steps`` callable instead,
     because blocking on this process's stdin from a browser-driven worker
     thread waits on a terminal nobody is watching.
     """
-    if not sys.stdin.isatty():
-        return True
+    tty = _stdin_is_tty()
     print(_c("36;1", f"\n[runner] OPERATOR STEPS for {trial.describe()}"))
 
     class _KeepUnknown(dict):
@@ -1119,6 +1121,10 @@ def confirm_operator_steps_tty(trial: cs.TrialSpec,
         print(f"  {_c('36;1', f'{i}.')} {_c('1', first)}")
         for line in rest:
             print(f"     {line}")
+    if not tty:
+        print(_c("33;1", "[runner] stdin is not a terminal: nobody confirms the steps above, "
+                         "and the runner does not wait for them"))
+        return True
     print(_c("33;1", "[runner] Press Enter when the steps above are DONE "
                      "— the T-0 gate checks them next."))
     try:
@@ -1735,6 +1741,12 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
                         return TrialResult(trial, None, "blocked",
                                            "not confirmed at the pose pause (no 'fly' typed) — "
                                            "nothing was recorded or flown", commands)
+            else:
+                # No terminal and no other surface (2026-11-26): the pause is skipped, and the
+                # run log says so. `trials run` refuses this for a hardware trial unless
+                # --no-pause was given (hardware_trial_problems).
+                print(_c("33;1", f"[runner] T-0 gate done ({nd}). stdin is not a terminal: "
+                                 f"the pose pause is skipped, nobody confirmed the pose."))
 
         # A STOP THAT FOUND NOTHING TO END (third review of 2026-11-25): the web interface's
         # stop arrived during the settle time, the gate or the pose pause, when no action and
@@ -2692,6 +2704,73 @@ def gate_factor_problems(campaign: "cs.Campaign", config: RunnerConfig,
     return problems
 
 
+def _stdin_is_tty() -> bool:
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (ValueError, OSError):   # a closed or detached stdin
+        return False
+
+
+#: Why a hardware trial without a gate is refused (2026-11-26).
+NO_GATE_ON_HARDWARE = ("a hardware trial runs only after a T-0 gate, and this run has none (no "
+                       "gate checklist, or the gate was skipped): add the experiment's "
+                       "config/preflight_checklist.json, or run the trial in simulation")
+#: Why a hardware trial whose pose pause nobody can answer is refused (2026-11-26).
+NO_TERMINAL_ON_HARDWARE = ("a hardware trial waits at the pose pause until the operator types "
+                           "fly, and stdin is not a terminal, so nobody could type it: run it "
+                           "in a terminal, or pass --no-pause to run without the pose pause "
+                           "(the operator steps are then printed but not waited on)")
+
+
+def hardware_trial_problems(domain: str, *, gated: bool, pause_before_action: bool,
+                            has_pose_surface: bool,
+                            stdin_is_tty: Optional[bool] = None) -> List[str]:
+    """Why an EXECUTED trial of ``domain`` may not start, before anything of it runs.
+
+    Two of Alejandro's decisions in the review before 0.1.1 (2026-11-26). A hardware trial
+    with no T-0 gate (no checklist, or the web interface's "skip the gate") ran with a
+    warning only, while the paper says that the gate runs before every trial. And a hardware
+    run whose stdin is not a terminal skipped the pose pause ("type fly") and the operator
+    steps without a word, so the robot flew while nobody had confirmed anything. A
+    simulation keeps both: its ungated run prints the UNGATED warning, and a headless
+    simulation needs no operator. ``has_pose_surface`` is true when the caller confirms
+    the pose itself (the web interface waits in the browser).
+
+    The two places where an operator starts executed trials refuse with it before anything
+    runs: ``trials run`` (a campaign and ``--scratch``) and the web interface's EXECUTE.
+    run_plan and run_trial do not: they are library functions, and their gate and their
+    confirmation surfaces are the caller's choice (the unit tests run them ungated).
+    """
+    if domain != "hardware":
+        return []
+    problems = []
+    if not gated:
+        problems.append(NO_GATE_ON_HARDWARE)
+    tty = _stdin_is_tty() if stdin_is_tty is None else stdin_is_tty
+    if pause_before_action and not has_pose_surface and not tty:
+        problems.append(NO_TERMINAL_ON_HARDWARE)
+    return problems
+
+
+def hardware_plan_problems(plan: cp.Plan, config: RunnerConfig, **kwargs: Any) -> List[str]:
+    """hardware_trial_problems() over every attempt the plan still needs, once per problem."""
+    problems: List[str] = []
+    for cell in plan.cells:
+        if cell.needed(plan.include_unverified) <= 0:
+            continue
+        domain, _basis = cs.trial_domain(cell.values, plan.campaign.factors, config.simulation)
+        for problem in hardware_trial_problems(domain, **kwargs):
+            if problem not in problems:
+                problems.append(problem)
+    return problems
+
+
+def gate_checklist(campaign: "cs.Campaign", experiments_root: Path) -> Tuple[str, Path]:
+    """(path relative to the experiment, absolute path) of the campaign's gate checklist."""
+    rel = campaign.preflight_checklist or "config/preflight_checklist.json"
+    return rel, Path(experiments_root) / campaign.experiment / rel
+
+
 def plan_command_problems(plan: cp.Plan, config: RunnerConfig, bags_dir: Path, *,
                           extra_verify: Optional[List[Dict[str, Any]]] = None,
                           steps: Optional[Dict[str, bool]] = None) -> List[str]:
@@ -2998,12 +3077,13 @@ def build_gate(campaign: "cs.Campaign", experiments_root: Path, *,
     Dry runs stay ungated (nothing is launched, so there is nothing to probe).
     A missing checklist file disables the gate LOUDLY rather than silently —
     lint L8 keeps campaign-declared checklists existing, but an experiment with
-    no default checklist at all (the demos) still runs, and says so.
+    no default checklist at all (the demos) still runs, and says so. Since
+    2026-11-26 only a simulation does: a hardware trial without a gate is
+    refused (hardware_trial_problems).
     """
     if not execute:
         return None
-    rel = campaign.preflight_checklist or "config/preflight_checklist.json"
-    checklist = experiments_root / campaign.experiment / rel
+    rel, checklist = gate_checklist(campaign, experiments_root)
     if not checklist.is_file():
         print(f"[runner] ⚠ UNGATED: no gate checklist at "
               f"{campaign.experiment}/{rel} — every trial will run without a T-0 gate")
@@ -3086,7 +3166,10 @@ def main(argv=None) -> int:
                     help="do not wait for Enter between the T-0 gate and the "
                          "recorder (the pause exists so the operator can pose "
                          "the rig (stand the robot up, set its tools) without "
-                         "racing the dwell).")
+                         "racing the dwell). A hardware run whose stdin is not a "
+                         "terminal is refused without it, because nobody could type "
+                         "fly. Without a terminal, the operator steps are printed but "
+                         "not waited on.")
     ap.add_argument("--quiet-stack", action="store_true",
                     help="child process output (stack, aux, recorder) goes only to "
                          "the run log; the terminal keeps the campaign narrative — "
@@ -3163,6 +3246,17 @@ def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         # nor fills one. The gate is the same T-0 gate a real trial gets.
         if not args.execute:
             print("=== DRY RUN — nothing will be launched or recorded ===")
+        else:
+            # The same refusal as a campaign's (2026-11-26), for the scratch flight's shape.
+            domain, _basis = cs.trial_domain(next(campaign.combinations()).values,
+                                             campaign.factors, config.simulation)
+            refused = hardware_trial_problems(
+                domain, gated=gate_checklist(campaign, args.experiments_root)[1].is_file(),
+                pause_before_action=not args.no_pause, has_pose_surface=False)
+            if refused:
+                for problem in refused:
+                    print(f"ERROR: {problem}", file=sys.stderr)
+                return 2
         gate = build_gate(campaign, args.experiments_root, execute=args.execute,
                           override_reason=args.gate_override or "")
         if gate is not None:
@@ -3182,6 +3276,17 @@ def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     trials = ti.load_trials(args.experiments_root, campaign.experiment)
     plan = cp.build_plan(campaign, trials, args.include_unverified)
     bags_dir = args.experiments_root / campaign.experiment / backends.record_dirs(args.experiments_root)["recordings"]
+    if args.execute:
+        # Before the plan is printed, like the disk check above (2026-11-26): a hardware trial
+        # needs a gate (build_gate builds one exactly when the checklist exists) and a
+        # terminal for its pose pause. run_plan refuses the same for every other caller.
+        refused = hardware_plan_problems(
+            plan, config, gated=gate_checklist(campaign, args.experiments_root)[1].is_file(),
+            pause_before_action=not args.no_pause, has_pose_surface=False)
+        if refused:
+            for problem in refused:
+                print(f"ERROR: {problem}", file=sys.stderr)
+            return 2
 
     print(cp.render(plan))
     print("")
@@ -3193,8 +3298,7 @@ def _main(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if not args.execute:
         # Dry runs are ungated, so the per-trial line cannot name the pre-launch checks: say
         # once what every executed trial will run before its stack (2026-11-04).
-        rel = campaign.preflight_checklist or "config/preflight_checklist.json"
-        checklist = Path(args.experiments_root) / campaign.experiment / rel
+        rel, checklist = gate_checklist(campaign, args.experiments_root)
         if checklist.is_file():
             names = PreflightGate(checklist=checklist).stage_checks("pre_launch")
             if names:

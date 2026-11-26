@@ -361,6 +361,7 @@ def test_abort_marks_the_run_and_never_kills_a_trial(client):
 def test_only_one_campaign_may_execute_at_a_time(client, root, monkeypatch):
     """Two campaigns on one rig would fight over radio, recorder and airspace."""
     import threading
+    _simulated(root)
     from robofacts import trial_runner as tr_mod
     release = threading.Event()
 
@@ -818,6 +819,14 @@ def test_it_refuses_to_start_unauthenticated_by_accident(monkeypatch, capsys):
 # --------------------------------------------------------------------------- #
 # Operator flows: the CLI's waits and tally, mirrored in the browser (2026-08-12)
 # --------------------------------------------------------------------------- #
+def _simulated(root: Path) -> None:
+    """Declare expA simulated. Since 2026-11-26 the interface refuses an EXECUTE of a hardware
+    experiment without a gate, and expA has no checklist. The tests that use this are about
+    the browser's waits and the run slot, which are the same in simulation."""
+    path = root / "expA" / "config" / "runner.yaml"
+    path.write_text("simulation: true\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def _start_executed_stub_run(client, campaign: str = "steps", **extra) -> str:
     """EXECUTE with every trial phase disabled: the full executed code path —
     the operator waits, the gate hooks, the tally — with nothing launched,
@@ -853,12 +862,13 @@ def test_tally_is_the_clis_own_function():
     assert tr.tally(["ran"])["bad"] is False
 
 
-def test_executed_run_waits_for_the_operator_steps(client):
+def test_executed_run_waits_for_the_operator_steps(client, root):
     """The browser mirror of the CLI's Enter wait (8f1213cc6e): with
     operator_steps declared, an EXECUTE launches NOTHING until the operator
     confirms on the run page — otherwise the T-0 gate races the physical prep.
     Also the reason the UI must pass its own confirmation surface into
     run_plan: the tty default would park the worker on the SERVER's stdin."""
+    _simulated(root)
     run_id = _start_executed_stub_run(client)
     payload = _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
     assert payload["state"] == "running" and payload["done"] == 0
@@ -875,9 +885,10 @@ def test_executed_run_waits_for_the_operator_steps(client):
     assert final["tally"]["ok"] == 1 and final["tally"]["bad"] is False
 
 
-def test_abort_while_waiting_refuses_the_trial(client):
+def test_abort_while_waiting_refuses_the_trial(client, root):
     """Abort must wake a parked confirmation AND the woken trial must refuse
     to launch — otherwise 'abort' either hangs forever or flies one more."""
+    _simulated(root)
     run_id = _start_executed_stub_run(client)
     _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
     client.post(f"/run/{run_id}/abort", headers=auth())
@@ -888,9 +899,10 @@ def test_abort_while_waiting_refuses_the_trial(client):
     assert final["tally"]["blocked"] == 1
 
 
-def test_the_pose_pause_waits_in_the_browser_too(client):
+def test_the_pose_pause_waits_in_the_browser_too(client, root):
     """The second Enter wait (b0b42729ac), between the T-0 gate and the
     recorder. Same surface, kind 'pose', opted in by the form checkbox."""
+    _simulated(root)
     run_id = _start_executed_stub_run(client, pose_pause="1")
     _wait_for(client, run_id, lambda p: p["awaiting_kind"] == "steps")
     client.post(f"/run/{run_id}/proceed", headers=auth())
@@ -960,13 +972,17 @@ def test_run_trial_refuses_an_unconfirmed_trial(root):
     assert not (root / "expA" / "bags").exists(), "nothing may be created"
 
 
-def test_the_tty_surface_passes_through_headless(monkeypatch):
+def test_the_tty_surface_passes_through_headless(monkeypatch, capsys):
     """confirm_operator_steps_tty keeps the pre-8f1213cc6e headless behaviour:
-    no tty means no prompt, no block, proceed."""
+    no tty means no prompt, no block, proceed. Since 2026-11-26 it prints the steps
+    first and says that nobody waited for them: before, they passed without a word."""
     import types
     from robofacts import trial_runner as tr
     monkeypatch.setattr(tr.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
-    assert tr.confirm_operator_steps_tty(None, [{"text": "x"}]) is True
+    trial = types.SimpleNamespace(describe=lambda: "trajectory=circle", values={})
+    assert tr.confirm_operator_steps_tty(trial, [{"text": "x"}]) is True
+    out = capsys.readouterr().out
+    assert "1. x" in out and "nobody confirms the steps above" in out
 
 
 def test_campaign_verify_steps_reach_the_runner(monkeypatch, tmp_path):
