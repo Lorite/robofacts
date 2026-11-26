@@ -1,0 +1,120 @@
+site_name: RoboFACTS
+site_description: Declarative experiment design for robot trials, in simulation and on hardware
+site_url: https://lorite.github.io/robofacts/
+repo_url: https://github.com/Lorite/robofacts
+repo_name: Lorite/robofacts
+edit_uri: edit/main/docs/
+copyright: RoboFACTS is licensed under Apache-2.0
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  # [[page]], [[page|text]] and [[page#Heading|text]] resolve by file name, as in Obsidian.
+  # An unresolved link is a warning, so `mkdocs build --strict` fails on it.
+  - obsidian-bridge:
+      warn_on_invalid_links: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  # The changelog page includes CHANGELOG.md from the repository root.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - getting-started/install.md
+      - getting-started/quickstart.md
+      - getting-started/first-project.md
+      - getting-started/examples.md
+      - getting-started/talker-walkthrough.md
+  - Concepts:
+      - concepts/words.md
+      - concepts/projects.md
+      - concepts/experiments.md
+      - concepts/factors.md
+      - concepts/metadata-contract.md
+      - concepts/campaigns.md
+      - concepts/gate.md
+      - concepts/runner.md
+      - concepts/coverage.md
+      - concepts/decisions.md
+      - concepts/analyses.md
+  - Guides:
+      - guides/new-experiment.md
+      - guides/new-campaign.md
+      - guides/daily-loop.md
+      - guides/scratch-trials.md
+      - guides/hardware-runs.md
+      - guides/stopping-robots.md
+      - guides/other-machines.md
+      - guides/storage.md
+      - guides/web-ui.md
+      - guides/explore.md
+      - guides/spoken-cues.md
+      - guides/own-gate-checks.md
+      - guides/mcp-server.md
+      - guides/gotchas.md
+  - Backends:
+      - backends/backends.md
+      - backends/backend-contract.md
+      - backends/process-backend.md
+      - backends/ros2-backend.md
+      - backends/robot-adapters.md
+      - backends/record-profiles.md
+  - Reference:
+      - reference/commands.md
+      - reference/lint-rules.md
+      - reference/gate-checks.md
+      - reference/trials-yaml.md
+      - reference/factors-yaml.md
+      - reference/metadata-schema.md
+      - reference/runner-yaml.md
+      - reference/campaign-yaml.md
+      - reference/checklist-json.md
+      - reference/analyses-yaml.md
+      - reference/storage-yaml.md
+      - reference/robots-and-hosts.md
+  - Project:
+      - project/development.md
+      - project/changelog.md
+      - project/cite.md

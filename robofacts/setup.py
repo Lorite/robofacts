@@ -60,6 +60,7 @@ setup(
     url="https://github.com/Lorite/robofacts",
     project_urls={
         "Source": "https://github.com/Lorite/robofacts",
+        "Documentation": "https://lorite.github.io/robofacts/",
         "Changelog": "https://github.com/Lorite/robofacts/blob/main/CHANGELOG.md",
         "Issues": "https://github.com/Lorite/robofacts/issues",
     },

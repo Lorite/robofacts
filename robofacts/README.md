@@ -34,8 +34,8 @@ The generated experiment works as it is: a small script stands in for the system
 
 ## Documentation and examples
 
-- [README](https://github.com/Lorite/robofacts#readme): the packages, the backends, the commands, the record profiles and the robot adapters
-- [Examples](https://github.com/Lorite/robofacts#three-examples): a log recorder, a middleware demo, and one small drone that hovers without any middleware
+- [Documentation](https://lorite.github.io/robofacts/): install, quickstart, the concepts, guides, and a reference of every command, lint rule, gate check and declaration file
+- [Examples](https://lorite.github.io/robofacts/getting-started/examples/): a log recorder, a middleware demo, and one small drone that hovers without any middleware
 - [Changelog](https://github.com/Lorite/robofacts/blob/main/CHANGELOG.md)
 
 ## Cite

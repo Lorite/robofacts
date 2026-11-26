@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A documentation site (2026-11-26): https://lorite.github.io/robofacts/, built with MkDocs and Material from `docs/` and published on GitHub Pages by `.github/workflows/docs.yaml` (every push and pull request builds it with `--strict`, a push to `main` publishes it). The long README is split into 52 small pages (getting started, concepts, guides, backends, reference), which link to each other with wikilinks (`[[page]]`, resolved by file name with `mkdocs-obsidian-bridge`, so a broken link fails the build). The reference of the commands, the lint rules and the gate checks is generated from the code by `tools/gen_docs_reference.py`, and `robofacts_ros2/test/test_docs_reference_is_current.py` fails when a committed page is stale. The README now points to the site. `setup.py` names the site as the project's documentation, which the PyPI page shows from the next release. The test that no lab name reaches the packages also scans `docs/`, `mkdocs.yml` and `tools/`.
+- The runner's message when an override is set (2026-11-26) said "failures will not block", which was wrong since 0.1.1: it now says that a failed soft item will not block and a failed `[HARD]` item or factor check still blocks.
+- The quickstart test started `python3` through a link to `sys.executable`, which loses a venv's packages (2026-11-26). It now uses a small wrapper script.
+
 ## 0.1.1 (2026-11-26)
 
 - `robofacts` on PyPI (2026-11-25): `pip install robofacts` installs the general package from PyPI, without a clone. The workflow `.github/workflows/release.yaml` builds the sdist and the wheel of `robofacts/` on every `v*` tag, fails on a `twine check --strict` warning or on a tag that differs from the built version, installs the wheel alone and runs a generated project (lint, plan, one trial, the coverage index), and then publishes through PyPI trusted publishing, so no token is stored in the repository. A manual run builds and checks only. The package has its own README for the PyPI page (`robofacts/README.md`, without middleware names, so the purity test still passes) and the project links, keywords and classifiers. `robofacts_ros2` is not on PyPI, because it needs `rclpy`. Both packages and `CITATION.cff` say 0.1.1.

@@ -1,0 +1,4 @@
+# The docs site (mkdocs build --strict). Pinned: the site must build the same tomorrow.
+mkdocs==1.6.1
+mkdocs-material==9.8.2
+mkdocs-obsidian-bridge==1.3.1

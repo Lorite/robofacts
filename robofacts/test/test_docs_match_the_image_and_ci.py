@@ -37,11 +37,13 @@ def test_the_test_command_of_the_image_names_folders_the_image_holds():
         assert folders and all((REPO / f).is_dir() for f in folders), folders
 
 
-def test_the_readme_names_the_python_versions_of_the_core_job():
+def test_the_docs_name_the_python_versions_of_the_core_job():
+    # The development page of the docs site describes the CI jobs (the README did until the
+    # docs site took the long sections over).
     ci = yaml.safe_load(CI.read_text(encoding="utf-8"))
     versions = [str(v) for v in ci["jobs"]["core-no-ros"]["strategy"]["matrix"]["python"]]
-    readme = (REPO / "README.md").read_text(encoding="utf-8")
-    stated = re.search(r"`core-no-ros` installs only `robofacts` on [^(]*\(([^)]*)\)", readme)
-    assert stated, "the README no longer describes the core-no-ros job"
+    page = (REPO / "docs" / "project" / "development.md").read_text(encoding="utf-8")
+    stated = re.search(r"`core-no-ros` installs only `robofacts` on [^(]*\(([^)]*)\)", page)
+    assert stated, "docs/project/development.md no longer describes the core-no-ros job"
     named = re.findall(r"python:(\d+\.\d+)-slim", stated.group(1))
     assert named and named[0] == versions[0] and named[-1] == versions[-1], (named, versions)

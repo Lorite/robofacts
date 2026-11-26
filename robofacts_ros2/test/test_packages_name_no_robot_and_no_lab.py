@@ -24,7 +24,8 @@ SUFFIXES = (".py", ".sh", ".md", ".html", ".js", ".yaml", ".json")
 
 #: Names of one lab, its people, its robots and its issue tracker: nowhere in the package.
 #: The author's name in its paper form (Lorite-Mora) is allowed: the README cites the paper.
-LAB = re.compile(r"lorite(?!/robofacts|-mora\b)|crazylori|spot_BD_|helix|LORITE_|lab'?s #|issue #|\(#\d+|(?<![&\w])#\d{2,3}\b",
+#: So are the public addresses of the repository and of the docs site (lorite.github.io/robofacts).
+LAB = re.compile(r"lorite(?!/robofacts|-mora\b|\.github\.io/robofacts)|crazylori|spot_BD_|helix|LORITE_|lab'?s #|issue #|\(#\d+|(?<![&\w])#\d{2,3}\b",
                  re.IGNORECASE)
 
 #: Robot families and lab hardware that have (or would need) an adapter: not in the core.
@@ -68,13 +69,16 @@ def _hits(path: Path, pattern: re.Pattern):
 def test_the_lab_pattern_allows_the_cited_author_and_still_catches_the_lab():
     assert not LAB.search("Alejandro Lorite-Mora. RoboFACTS: A Declarative Experiment Design Framework")
     assert not LAB.search("git clone https://github.com/Lorite/robofacts.git")
+    assert not LAB.search("site_url: https://lorite.github.io/robofacts/")
     for lab in ("lorite_ros2_humble_phd", "lorite_experiments", "LORITE_STOP", "a.lorite.mora", "Lorite-Moral"):
         assert LAB.search(lab), lab
 
 
 def test_no_lab_name_anywhere_in_the_package():
     files = [*_core_files(), *sorted(ADAPTERS.rglob("*.py")), *sorted(ADAPTERS.rglob("*.sh")),
-             REPO / "README.md", REPO / "CHANGELOG.md",
+             REPO / "README.md", REPO / "CHANGELOG.md", REPO / "mkdocs.yml",
+             # The documentation site is public too.
+             *sorted((REPO / "docs").rglob("*.md")), *sorted((REPO / "tools").rglob("*.py")),
              *sorted((REPO / "robofacts_ros2" / "example_project").rglob("*.yaml")),
              *sorted((REPO / "robofacts_ros2" / "example_project").rglob("*.json"))]
     hits = [h for path in files if path.is_file() for h in _hits(path, LAB)]
