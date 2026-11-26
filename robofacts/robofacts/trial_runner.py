@@ -3097,7 +3097,8 @@ def build_gate(campaign: "cs.Campaign", experiments_root: Path, *,
                          campaign=getattr(campaign, "name", None),
                          experiments_root=Path(experiments_root))
     print(f"[runner] T-0 gate armed: {campaign.experiment}/{rel}"
-          + (" (OVERRIDE SET — failures will not block)" if override_reason else ""))
+          + (" (OVERRIDE SET: a failed soft item will not block, a failed [HARD] item or factor"
+             " check still blocks)" if override_reason else ""))
     return gate
 
 

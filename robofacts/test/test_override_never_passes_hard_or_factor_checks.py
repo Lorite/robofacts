@@ -95,3 +95,20 @@ def test_the_shadow_mode_still_records_and_never_blocks(tmp_path, hard_fails, fa
     result = gate.check("t1")
     assert result.status == "fail" and result.allowed is True and result.overridden is True
     assert result.mode == "shadow" and result.override_reason == "shadow"
+
+
+def test_the_armed_override_says_what_still_blocks(tmp_path, capsys):
+    # The runner announced "(OVERRIDE SET — failures will not block)" after the override
+    # stopped passing a failed [HARD] item or factor check, so the operator read the opposite
+    # of what the gate does (found by the docs review, 2026-11-26).
+    from types import SimpleNamespace
+    from robofacts import trial_runner as tr
+    (tmp_path / "exp" / "config").mkdir(parents=True)
+    (tmp_path / "exp" / "config" / "preflight_checklist.json").write_text(
+        json.dumps({"checklist": ["an operator confirmation"]}), encoding="utf-8")
+    campaign = SimpleNamespace(experiment="exp", preflight_checklist=None, name="c")
+    gate = tr.build_gate(campaign, tmp_path, execute=True, override_reason="test")
+    out = capsys.readouterr().out
+    assert gate is not None and gate.override
+    assert "failures will not block" not in out
+    assert "a failed [HARD] item or factor check still blocks" in out
