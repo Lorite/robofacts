@@ -10,6 +10,10 @@
 
 Three rounds of independent review before the first PyPI release. Each fix has a test that fails without it.
 
+- The gate (decided on 2026-11-26):
+    - No override passes a failed [HARD] item or a factor check that did not pass. Before, `--gate-override` passed both and the trial counted, while the checklist template says that a [HARD] item cannot be overridden and the paper says that a failed check never counts. A failed soft item may still be overridden with its reason, and the shadow mode of a `gate` factor (simulation only) still records every verdict and never blocks.
+    - A hardware trial runs only after a T-0 gate. Before, an experiment without a gate checklist, or the web interface's "skip the gate", ran a hardware trial with a warning only. A simulation still runs ungated, with the UNGATED warning.
+    - A hardware run whose stdin is not a terminal is refused unless `--no-pause` is given, because nobody could type `fly` at the pose pause. Before, the pose pause and the operator steps passed without a word. Without a terminal, the operator steps are now printed with a line that says that nobody waited for them. The web interface answers the pose pause in the browser and needs no terminal.
 - The runner and stops:
     - The trial's action ends before the teardown. On Ctrl-C the runner stopped the recorder and the stack while the action was still landing. Now the interrupt goes on to the action, the runner waits up to 90 s for the action's whole process group to end (a flight lands), and only then sends SIGTERM and SIGKILL. A second Ctrl-C kills it at once.
     - SIGTERM and SIGHUP take the Ctrl-C path. Before, they ended the runner at once and left the stack and the recorder running, with no metadata and no ledger line. A second interrupt during the teardown waits until the recorder and the stack have stopped.
