@@ -7,6 +7,7 @@ The quickstart test runs real processes, on a copy, so the source tree stays cle
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -62,8 +63,13 @@ def test_the_quickstart_runs_the_example_from_plan_to_coverage_index(tmp_path):
         found = shutil.which(tool)
         if found:
             (bin_dir / tool).symlink_to(found)
+    # A wrapper, not a link: a Python started through a link to a venv's python3 looks for
+    # pyvenv.cfg next to the link, finds none and runs without the venv's packages, so the
+    # quickstart failed on "import yaml" in a venv (2026-11-26, a lab's pre-push hook).
     (bin_dir / "python3").unlink()
-    (bin_dir / "python3").symlink_to(sys.executable)
+    (bin_dir / "python3").write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
+                                     encoding="utf-8")
+    (bin_dir / "python3").chmod(0o755)
     env = {"PATH": str(bin_dir), "PYTHONPATH": str(PACKAGE), "HOME": str(tmp_path), "TRIALS_VOICE": "off"}
     # quickstart.sh adds its own folder to PYTHONPATH when `trials` is not installed. Here
     # the package is next to the test, not next to the copy, so the variable carries it.
