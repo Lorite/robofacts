@@ -68,7 +68,7 @@ hosts:
     local: true
   # rig:
   #   host: my-robot-host            # an ssh alias
-  #   container: my_container        # omit to run directly on the host
+  #   container: my_container        # required: every command runs in it (docker exec -i)
   #   workspace: /workspaces/my_project
   #   env_setup: [/home/me/env.sh]   # files to source before each command
   # The T-0 gate of a trial runs on its host as well, with the checklist sent along.

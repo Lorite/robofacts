@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# No operator stop latch younger than 120 s (2026-10-12, SAC 2027 framework paper).
+# No operator stop latch is younger than 120 s.
 #
 # Every robots.yaml stop command writes the stop latch FIRST. On the lab
 # day of 2026-10-07 the T-0 gate passed 62 s after a latch was written, because

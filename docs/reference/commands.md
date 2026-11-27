@@ -43,7 +43,7 @@ usage: trials plan [-h] [--experiments-root EXPERIMENTS_ROOT] [--set name=a[,b]]
                    [--include-unverified] [--json] [--schedule] [--limit LIMIT]
                    campaign
 
-The planner: which cells of a campaign are still missing (phase 3).
+The planner: which cells of a campaign are still missing.
 
 positional arguments:
   campaign              campaign YAML
@@ -71,7 +71,7 @@ usage: trials run [-h] [--experiments-root EXPERIMENTS_ROOT] [--set name=a[,b]]
                   [--gate-override REASON] [--no-voice] [--keep-going]
                   campaign
 
-Run the trials a campaign still needs (phase 4).
+Run the trials a campaign still needs.
 
 positional arguments:
   campaign
@@ -127,7 +127,8 @@ options:
   --no-voice            print the spoken cues but send none (sets TRIALS_VOICE=off for
                         this run and its child processes). Cues go to the laptop's voice
                         daemon at TRIALS_VOICE_HOST:TRIALS_VOICE_PORT, default
-                        127.0.0.1:47900. See the framework guide.
+                        127.0.0.1:47900. See
+                        https://lorite.github.io/robofacts/guides/spoken-cues/.
   --keep-going          continue the campaign after a blocked trial (the default stops,
                         because a stack that fails the gate usually fails it again).
                         Automatic for a campaign that names a `gate` factor.
@@ -140,7 +141,7 @@ usage: trials index [-h] [--experiments-root EXPERIMENTS_ROOT] [--experiment EXP
                     [--factors FACTORS] [--report REPORT] [--summary] [--no-validate]
                     [--condition-space YAML] [--json]
 
-Cross-experiment trial index and coverage report (phase 1).
+Cross-experiment trial index and coverage report.
 
 options:
   -h, --help            show this help message and exit
@@ -393,7 +394,7 @@ usage: trials analyze [-h] [--experiments-root EXPERIMENTS_ROOT] [--where factor
                       [--include-unverified] [--include-excluded] [--list] [--execute]
                       experiment [analysis]
 
-Named analyses as a headless API (phase 4b).
+Named analyses as a headless API.
 
 positional arguments:
   experiment
@@ -418,7 +419,7 @@ usage: trials check [-h] [--experiments-root EXPERIMENTS_ROOT] [--factors EXPERI
                     [--set name=a[,b]] [--limit LIMIT]
                     [campaign]
 
-Declarative trial and campaign specification (phase 2).
+Declarative trial and campaign specification.
 
 positional arguments:
   campaign              path to a campaign YAML
@@ -439,7 +440,7 @@ options:
 usage: trials metadata [-h] [--experiments-root EXPERIMENTS_ROOT]
                        [--experiment EXPERIMENT] [--show-schema] [--quiet] [--strict]
 
-The trial-metadata contract: shared core + per-experiment fields (phase 0).
+The trial-metadata contract: shared core + per-experiment fields.
 
 options:
   -h, --help            show this help message and exit
@@ -493,7 +494,7 @@ options:
 ```text
 usage: trials version [-h] [--workspace WORKSPACE] [--json]
 
-Which code produced a trial (2026-08-04).
+Which code produced a trial.
 
 options:
   -h, --help            show this help message and exit
@@ -698,7 +699,8 @@ usage: trials profiles [-h] [--list] [--cf-name CF_NAME] [--output OUTPUT]
                        [--compression] [--topics-only] [--run]
                        [profile]
 
-The record profiles as the ROS 2 backend uses them: which topics a slim copy of a bag
+Record profiles in the ROS 2 backend: the topics a slim copy drops, and a profile's
+record command.
 
 positional arguments:
   profile               a profile name (omit with --list)

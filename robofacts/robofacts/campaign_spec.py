@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Declarative trial and campaign specification (phase 2).
+"""Declarative trial and campaign specification.
 
 A trial used to exist only as loose variables inside a run notebook, so nothing
 could enumerate the space, diff it against what had been recorded, or hand a

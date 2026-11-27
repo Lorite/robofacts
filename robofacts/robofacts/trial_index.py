@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-experiment trial index and coverage report (phase 1).
+"""Cross-experiment trial index and coverage report.
 
 Answers the question that used to need reading notebooks: **which combinations
 do we already have bags for, and which cells are still empty?**

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The trial-metadata contract: shared core + per-experiment fields (phase 0).
+"""The trial-metadata contract: shared core + per-experiment fields.
 
 An index is only as trustworthy as the metadata under it, and a coverage grid
 built on holes looks authoritative while being wrong. So the contract is a file

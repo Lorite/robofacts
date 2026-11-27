@@ -73,7 +73,7 @@ A campaign is "which set of trials, under which conditions". So it may also decl
 | Key | What it adds |
 | --- | --- |
 | `operator_steps` | what a person must do before each trial. The runner shows them and waits for a confirmation |
-| `operator_live_steps` | what a person must do while the trial runs |
+| `operator_live_steps` | what a person must do while the trial runs. The runner prints them when the trial starts and does not wait for them |
 | `setup_steps` | commands that run after those of `runner.yaml` and before the stack starts |
 | `verify_steps` | checks of the recording, added to those of `runner.yaml` |
 | `preflight_checklist` | the campaign's own T-0 gate, instead of `config/preflight_checklist.json` |

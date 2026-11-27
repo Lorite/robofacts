@@ -51,7 +51,7 @@ An operator step is a string, or a mapping:
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `text` | empty | The instruction. |
-| `run` | empty | A command that the web interface runs with one click, on the host of the campaign's fixed `execution_host`. Only the fixed factors fill its placeholders. |
+| `run` | empty | A command that the web interface runs with one click, on the host of the campaign's fixed `execution_host`. Only the fixed factors fill its placeholders. For a live step, `trials run` also prints the command with the trial's levels, for you to run by hand. |
 | `when` | `always` | `first`, `repeat` or `always`, as for setup steps. |
 
 ```yaml

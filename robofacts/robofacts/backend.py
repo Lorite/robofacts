@@ -180,8 +180,6 @@ class Backend:
         """The module of an optional feature, or None when this backend does not offer it."""
         dotted = self.features.get(name)
         return importlib.import_module(dotted) if dotted else None
-    #: Run once before the machine checks of a gate (a middleware daemon restart).
-    gate_prepare: Callable[[], None] = field(default=lambda: None)
 
 
 _LOADED: Dict[str, Backend] = {}

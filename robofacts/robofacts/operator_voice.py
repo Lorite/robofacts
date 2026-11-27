@@ -3,9 +3,11 @@
 
 The laptop speaks, the trial runner does not: the runner lives in a dev
 container without audio (on the laptop or on the robot computer), so a cue travels as one
-UDP datagram to ``scripts/operator_voice_daemon.py`` on the laptop host, which
-speaks it with ``spd-say``. This module is the sending half, stdlib only and
-Free of middleware, importable by every framework script.
+UDP datagram to a voice daemon on the machine with the speaker, which speaks it (with
+``spd-say`` on Linux, for example). The package does not ship the daemon:
+https://lorite.github.io/robofacts/guides/spoken-cues/ says what it must do. This module
+is the sending half, stdlib only and free of middleware, importable by every framework
+script.
 
 Two promises the trial depends on:
 
@@ -47,7 +49,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-#: Same port as scripts/operator_voice_daemon.py DEFAULT_PORT (a test pins it).
+#: The voice daemon's default UDP port (a test pins it).
 DEFAULT_PORT = 47900
 DEFAULT_HOST = "127.0.0.1"
 #: Longest text one cue may carry. The daemon applies the same cap.
@@ -266,8 +268,10 @@ class CueTimeline:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Speak one operator cue on the laptop "
-                                             "(through scripts/operator_voice_daemon.py).")
+    ap = argparse.ArgumentParser(
+        description="Speak one operator cue: send it as one UDP datagram of UTF-8 text to the voice "
+                    "daemon on the machine with the speaker, which speaks it and answers a ping. "
+                    "See https://lorite.github.io/robofacts/guides/spoken-cues/.")
     ap.add_argument("text", nargs="*", help="the cue to speak")
     ap.add_argument("--host", help=f"daemon host (default ${ENV_HOST} or {DEFAULT_HOST})")
     ap.add_argument("--port", type=int, help=f"daemon port (default ${ENV_PORT} or {DEFAULT_PORT})")
@@ -279,8 +283,8 @@ def main(argv=None) -> int:
     if args.check:
         ok = check(host=args.host, port=args.port)
         print(f"[voice] daemon at {host}:{port}: " + ("answered" if ok else "NO ANSWER (is "
-              "the operator-voice daemon (scripts/operator_voice_daemon.py) running on the laptop, and the firewall open for "
-              "this source?)"))
+              "the voice daemon running on the machine with the speaker, and the firewall open "
+              "for this source?)"))
         return 0 if ok else 1
     if not args.text:
         ap.error("give the text to speak, or --check")

@@ -4,6 +4,7 @@ own test, experiments/common/scripts/test_lab_project_settings.py)."""
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -70,13 +71,17 @@ def test_the_environment_beats_the_project_for_the_latch(project, monkeypatch):
 
 def test_no_lab_name_and_no_legacy_variable_in_the_package():
     package = Path(rp.__file__).resolve().parent
-    lab = ("lorite", "crazylori", "spot_BD_", "helix", "LORITE_")
+    lab = ("crazylori", "spot_BD_", "helix", "LORITE_")
+    # "lorite" is a lab name, except in the address of the documentation site, which the help
+    # texts link (robofacts_ros2's test of lab names makes the same exception).
+    lorite = re.compile(r"lorite(?!\.github\.io/robofacts)")
+    assert lorite.search("lorite_ros2") and not lorite.search("https://lorite.github.io/robofacts/")
     hits = []
     for path in package.rglob("*"):
         if path.suffix not in (".py", ".sh", ".md", ".html", ".yaml", ".json") or "__pycache__" in path.parts:
             continue
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if any(word in line for word in lab):
+            if any(word in line for word in lab) or lorite.search(line):
                 hits.append(f"{path.relative_to(package)}:{i}: {line.strip()[:80]}")
     assert not hits, "lab names in the package:\n" + "\n".join(hits)
     assert rpf.CONCURRENCY_ENV == "TRIALS_PREFLIGHT_CONCURRENCY"

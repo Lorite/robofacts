@@ -21,12 +21,12 @@ hosts:
   laptop: {local: true}
   robot:
     host: my-robot-host         # an ssh alias
-    container: my_container     # omit to run directly on the host
+    container: my_container     # every command runs in it
     container_hostname: robot-dev
     shell: zsh
 ```
 
-A level is either `local: true` or an ssh `host`, with an optional `container`, the `shell` inside it, and setup files to source. `container_hostname` is the host name inside that container: when the runner finds itself running there, it runs the commands directly instead of over ssh. [[robots-and-hosts]] lists every key.
+A level is either `local: true` or an ssh `host` with the `container` that runs the commands, the `shell` inside it, and setup files to source. `container_hostname` is the host name inside that container: when the runner finds itself running there, it runs the commands directly instead of over ssh. [[robots-and-hosts]] lists every key.
 
 ## What an experiment declares
 

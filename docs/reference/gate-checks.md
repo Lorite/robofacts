@@ -24,14 +24,14 @@ These checks work in every project, whatever its backend. They live in `robofact
 
 | Check | Verifies | Arguments | Concurrency |
 | --- | --- | --- | --- |
-| `address_on_interface` | The rig's IP address is carried by the interface we think it is. | `addr=192.0.2.20 iface=wlan1 [why=...]` | parallel-safe |
-| `bag_dir_writable`<br>(also `recording_dir_writable`) | The directory the bag will be written to exists and is actually writable. | `path=/workspaces/.../experiments/<exp>/bags [label=bags]` | parallel-safe |
-| `disk_space` | Enough free disk for the bag. | `[path=.] [min_gb=20]` | parallel-safe |
-| `file_exists` | A required file is present (and optionally non-trivial in size). | `path=/ssd/engines/refine.plan [min_mb=1] [label=refine engine]` | parallel-safe |
-| `gpu_memory` | Enough free VRAM for the GPU nodes about to start. | `min_free_mb=4096 [index=0]` | parallel-safe |
-| `host_reachable` | Another machine answers, and the link is not pathologically slow. | `host=192.0.2.3 [max_rtt_ms=0] [count=3]` | parallel-safe |
-| `mem_available` | Enough free MEMORY on the recording host, now. | `[min_gb=4]` | sequential |
-| `stop_latch` | No operator stop latch younger than 120 s. | `[path=<latch file>]` | parallel-safe |
+| `address_on_interface` | The named network interface carries the expected IP address. | `addr=192.0.2.20 iface=wlan1 [why=...]` | parallel-safe |
+| `bag_dir_writable`<br>(also `recording_dir_writable`) | The directory that the recording goes to exists and is writable. | `path=/workspaces/.../experiments/<exp>/bags [label=bags]` | parallel-safe |
+| `disk_space` | The disk has enough free space for the recording. | `[path=.] [min_gb=20]` | parallel-safe |
+| `file_exists` | A required file exists and, optionally, has a minimum size. | `path=/ssd/engines/refine.plan [min_mb=1] [label=refine engine]` | parallel-safe |
+| `gpu_memory` | The GPU has enough free memory for the processes that start next. | `min_free_mb=4096 [index=0]` | parallel-safe |
+| `host_reachable` | Another machine answers ping, optionally within a maximum round-trip time. | `host=192.0.2.3 [max_rtt_ms=0] [count=3]` | parallel-safe |
+| `mem_available` | The recording host has enough free memory at the time of the check. | `[min_gb=4]` | sequential |
+| `stop_latch` | No operator stop latch is younger than 120 s. | `[path=<latch file>]` | parallel-safe |
 
 The general checks that run alone, and why:
 
@@ -43,19 +43,19 @@ These checks exist only in a project whose backend is `ros2`. They live in `robo
 
 | Check | Verifies | Arguments | Concurrency |
 | --- | --- | --- | --- |
-| `camera_frames` | Camera FRAMES are flowing, not merely a camera node being up. | `[topic=/camera/color/image_raw] [min_hz=20] [required=false]` | parallel-safe |
-| `dds_socket_buffer` | The kernel can actually give CycloneDDS the receive buffer its config DEMANDS. | `[config=<path>] [min_bytes=<n>]` | parallel-safe |
-| `estop_reachable` | The emergency-stop service is visible FROM THIS SHELL, and a LIVE NODE offers it. | `[service=emergency] [node=/driver_server]` | parallel-safe |
-| `gz_world_matches` | Exactly one Gazebo world is running, and it is the world the trial claims. | `world=${world} [gz_ip=127.0.0.1] [timeout_s=5]` | parallel-safe |
-| `mocap_stream` | The MOCAP stream is alive and fast RIGHT NOW. | `[topic=/poses] [min_hz=85] [window_s=10]` | parallel-safe |
+| `camera_frames` | Frames arrive from the camera, which a running camera node alone does not prove. | `[topic=/camera/color/image_raw] [min_hz=20] [required=false]` | parallel-safe |
+| `dds_socket_buffer` | The kernel allows the receive buffer size that the CycloneDDS configuration requests. | `[config=<path>] [min_bytes=<n>]` | parallel-safe |
+| `estop_reachable` | The emergency-stop service is visible from this shell, and a running node offers it. | `[service=emergency] [node=/driver_server]` | parallel-safe |
+| `gz_world_matches` | Exactly one Gazebo world is running, and it is the world that the trial declares. | `world=${world} [gz_ip=127.0.0.1] [timeout_s=5]` | parallel-safe |
+| `mocap_stream` | The motion-capture stream publishes at least at its minimum rate at the time of the check. | `[topic=/poses] [min_hz=85] [window_s=10]` | parallel-safe |
 | `node_present` | A named node is in `ros2 node list`. | `name=/driver_server` or `name=/detector_node exact=true` | parallel-safe |
-| `rigidbody_continuity` | The configured rigid body is present in nearly EVERY mocap frame, not just occasionally. | `name=robot1 [topic=/poses] [min_pct=90] [window_s=5]` | sequential |
-| `rigidbody_near` | The rigid body stands within max_m of a point, sampled NOW, seconds before arming. | `name=robot1 x=0.0 y=0.0 [max_m=0.25] [topic=/poses] [timeout_s=6]` or `name=robot1 node=/teleop [param_prefix=initial_position] [max_m=0.25]` | sequential |
+| `rigidbody_continuity` | The configured rigid body is present in almost every motion-capture frame, not only in some. | `name=robot1 [topic=/poses] [min_pct=90] [window_s=5]` | sequential |
+| `rigidbody_near` | The rigid body is within max_m of a given point, measured seconds before the robot arms. | `name=robot1 x=0.0 y=0.0 [max_m=0.25] [topic=/poses] [timeout_s=6]` or `name=robot1 node=/teleop [param_prefix=initial_position] [max_m=0.25]` | sequential |
 | `ros_clean_slate` | Nothing is left over from the previous run. | `[max_each=1] [pattern=component_container]` | sequential |
-| `ros_param_equals` | A live node's parameter holds the value the trial declares, right now. | `node=/camera param=depth_module.visual_preset expected=3 [timeout_s=10]` | parallel-safe |
-| `rosout_report` | A node's own /rosout reports contain what the trial needs, and NOT what it must not have. | `node=camera_node present='fps, ' absent=JPEG [window_s=7]` | parallel-safe |
-| `topic_rate` | Generic: a topic is not just advertised, its data is actually flowing. | `topic=/poses min_hz=85 [max_hz=<n>] [window_s=10] [required=true]` | parallel-safe |
-| `topic_value` | Generic: a sensor stream is ALIVE, not only flowing. | `topic=<name> field=<path> [min=<n>] [max=<n>] [vary=true] [window_s=2] [min_samples=5] [required=true]` | parallel-safe |
+| `ros_param_equals` | A parameter of a running node has the value that the trial declares. | `node=/camera param=depth_module.visual_preset expected=3 [timeout_s=10]` | parallel-safe |
+| `rosout_report` | The /rosout messages of a node contain the expected text and none of the forbidden text. | `node=camera_node present='fps, ' absent=JPEG [window_s=7]` | parallel-safe |
+| `topic_rate` | Messages arrive on a topic at a rate within its limits, which an advertised topic alone does not prove. | `topic=/poses min_hz=85 [max_hz=<n>] [window_s=10] [required=true]` | parallel-safe |
+| `topic_value` | A field of a sensor's messages has plausible values (inside its limits, not frozen), which a message rate alone does not prove. | `topic=<name> field=<path> [min=<n>] [max=<n>] [vary=true] [window_s=2] [min_samples=5] [required=true]` | parallel-safe |
 
 The ROS 2 checks that run alone, and why:
 

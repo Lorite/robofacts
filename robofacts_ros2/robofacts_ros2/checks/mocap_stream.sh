@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The MOCAP stream is alive and fast RIGHT NOW. Named entry point for the
+# The motion-capture stream publishes at least at its minimum rate at the time of the
+# check. Named entry point for the
 # human checklist item "MOCAP server running and streaming".
 #
 #   mocap_stream.sh [topic=/poses] [min_hz=85] [window_s=10]

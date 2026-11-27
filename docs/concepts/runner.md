@@ -9,13 +9,13 @@ trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1          
 trials run experiments/my_experiment/campaigns/baseline.yaml --limit 1 --execute   # one real trial
 ```
 
-Without `--execute`, the runner prints the plan and the exact commands of the next trials, with their operator steps and setup steps, and runs nothing. `--limit N` runs at most N trials. The runner renders every command of the planned trials before the first trial starts, so a typo in a placeholder stops the run before anything moves.
+Without `--execute`, the runner prints the plan and the exact commands of the next trials, with their operator steps, live steps and setup steps, and runs nothing. `--limit N` runs at most N trials. The runner renders every command of the planned trials before the first trial starts, so a typo in a placeholder stops the run before anything moves.
 
 ## The order of one trial
 
 The runner owns the order, and `runner.yaml` only declares the content of the steps:
 
-1. **Operator steps**: the runner shows the campaign's `operator_steps` and waits until you confirm them.
+1. **Operator steps**: the runner shows the campaign's `operator_steps` and waits until you confirm them. Then it prints the `operator_live_steps` and does not wait for them.
 2. **Setup steps** of `runner.yaml`: foreground commands. A required step that fails aborts the trial.
 3. **Pre-launch checks**: the gate entries marked `"stage": "pre_launch"`.
 4. **Robot resets** of the robots that `runner.yaml` declares (for example a power cycle), then the campaign's own **setup steps**.
@@ -45,7 +45,7 @@ The trial's domain decides which of the two: `simulation` in `runner.yaml`, unle
 A campaign declares two lists of things a person must do, because they are read at different moments:
 
 - `operator_steps` come **before** the trial. The runner prints them and waits for Enter before anything launches. A step's text may name a factor (`{lighting}`), so you read the trial's own level.
-- `operator_live_steps` come **while** the trial runs, during the action. The runner does not wait for them. The web interface shows them on the run page, and a step that declares `run:` gets a button that runs its command on the trial's computer.
+- `operator_live_steps` come **while** the trial runs, during the action. The runner does not wait for them. `trials run` prints them when each trial starts, after the operator steps and before the setup steps, also without a terminal. Their texts name the trial's own levels, as in the operator steps, and the run log holds them. The web interface shows them on the run page, and a step that declares `run:` gets a button that runs its command on the trial's computer. `trials run` prints that command for you to run by hand.
 
 An operator step and a setup step may say `when: first`, `repeat` or `always` (the default). Within one run of `trials run`, the first trial gets the `first` and `always` steps, and every later trial the `repeat` and `always` steps. A trial after a blocked one gets the first-trial steps again.
 

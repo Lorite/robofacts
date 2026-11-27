@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exactly one Gazebo world is running, and it is the world the trial claims.
+# Exactly one Gazebo world is running, and it is the world that the trial declares.
 #
 # Why this exists (2026-10-01). The PX4 simulation script
 # px4-rc.gzsim looks for /world/*/clock and, when a world is already running,

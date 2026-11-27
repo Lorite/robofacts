@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The rigid body stands within max_m of a point, sampled NOW, seconds before
-# arming. Born 2026-10-29 for the gamepad teleoperation of a drone on an
+# The rigid body is within max_m of a given point, measured seconds before the
+# robot arms. Born 2026-10-29 for the gamepad teleoperation of a drone on an
 # external pose: a teleop node (cmd_vel_world) integrates the
 # stick velocities from its `initial_position` parameter, with no feedback of
 # where the drone really is, so the first setpoint after takeoff drags the drone

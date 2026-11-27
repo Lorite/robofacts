@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The directory the bag will be written to exists and is actually writable.
+# The directory that the recording goes to exists and is writable.
 #
 # Exists because of the failure this misses everything else about: on the Lab PC
 # the host user is uid 1001 while the container user is uid 1000, so the mounted

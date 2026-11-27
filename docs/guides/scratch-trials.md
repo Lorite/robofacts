@@ -20,7 +20,7 @@ Run a diagnostic through the framework even when a manual run looks faster. A ma
 ## The same as a real trial
 
 - The full T-0 gate runs before anything moves.
-- The runner shows the operator steps and waits for them.
+- The runner shows the operator steps and waits for them, and then prints the live steps.
 - The stack and its auxiliary launches come up as for a trial.
 - The recorder always runs, and a `trial_metadata.json` lands beside the recording.
 - The rules of [[hardware-runs]] apply: a scratch trial on a real robot needs a gate and a terminal, as any other trial.

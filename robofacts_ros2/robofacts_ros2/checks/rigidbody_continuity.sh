@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The configured rigid body is present in nearly EVERY mocap frame, not just
-# occasionally. 2026-07-23: a flight launched from a dead zone where the drone
+# The configured rigid body is present in almost every motion-capture frame, not
+# only in some. 2026-07-23: a flight launched from a dead zone where the drone
 # appeared in 1.0 % of /poses messages, with gaps up to 0.97 s - the EKF flew
 # blind and ran away. Presence-on-average is not presence.
 #

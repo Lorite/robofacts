@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Enough free disk for the bag. Flight bags here run 6-10 GB; filling the disk
+# The disk has enough free space for the recording.
+# Flight bags here run 6-10 GB; filling the disk
 # mid-trial corrupts the recording and wastes the whole flight.
 #
 #   disk_space.sh [path=.] [min_gb=20]

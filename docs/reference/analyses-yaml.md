@@ -31,7 +31,7 @@ analyses:
 | `command` | string | yes | none | The command line, with placeholders. |
 | `per` | string | no | `bag` | `bag` runs the command once per selected trial. `cohort` runs it once over all of them. |
 | `describe` | string | no | empty | What the analysis computes. `trials analyze --list` shows it, and `analysis_metadata.json` keeps it. |
-| `requires_topics` | list | no | empty | The loader accepts this key and keeps it with the analysis. No command acts on it. |
+| `requires_topics` | list | no | empty | The topics that the analysis reads, as a note for the reader. The loader accepts the key, and nothing acts on it: `trials analyze`, the web interface and Explore run the analysis over every selected recording, also one that lacks these topics, and `analysis_metadata.json` does not record it. To leave out such trials, select the cohort with `--where`. |
 
 ## Placeholders
 

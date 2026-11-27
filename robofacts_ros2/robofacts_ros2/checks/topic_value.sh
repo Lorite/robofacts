@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Generic: a sensor stream is ALIVE, not only flowing. A topic can publish at its
+# A field of a sensor's messages has plausible values (inside its limits, not frozen),
+# which a message rate alone does not prove. A topic can publish at its
 # full rate while the sensor behind it is stuck: on 2026-11-04 a drone's
 # optical-flow sensor came up after a boot with motion.squal 0, motion.shutter
 # frozen at 900 and zero flow deltas, while /<robot>/flow_log streamed at 50 Hz and

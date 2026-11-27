@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Camera FRAMES are flowing, not merely a camera node being up.
+# Frames arrive from the camera, which a running camera node alone does not prove.
 # Optional by default: mocap-only flights have no camera.
 #
 #   camera_frames.sh [topic=/camera/color/image_raw] [min_hz=20] [required=false]

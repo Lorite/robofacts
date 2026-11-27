@@ -1,6 +1,6 @@
 # How to run one trial of the experiment {{name}}.
 #
-# The runner owns the order (gate -> setup steps -> launch -> settle -> record ->
+# The runner owns the order (setup steps -> launch -> settle -> gate -> record ->
 # action -> stop the recorder first -> stop the stack -> verify steps -> metadata
 # -> slim copy). This file only says what is specific to this experiment.
 
@@ -17,8 +17,8 @@ launch:
   package: demo_nodes_cpp
   file: talker
 
-# Foreground commands run after the gate and before the stack is launched, in
-# order. A required step that fails aborts the trial.
+# Foreground commands run before the stack is launched, in order. A required step
+# that fails aborts the trial.
 # setup_steps:
 #   - {name: clean_slate, command: "trials tool kill_ros.sh"}
 #   - {name: robot_ready, command: "trials tool robot_action.sh quadruped stand", required: false}
@@ -69,7 +69,7 @@ hosts:
     local: true
   # rig:
   #   host: my-robot-host              # an ssh alias
-  #   container: ros2_humble_dev       # omit to run directly on the host
+  #   container: ros2_humble_dev       # required: every command runs in it (docker exec -i)
   #   shell: zsh
   #   workspace: /workspaces/my_project
   #   ws_setup: /workspaces/my_project/ros2_ws/install/setup.zsh

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the trials a campaign still needs (phase 4).
+"""Run the trials a campaign still needs.
 
 Composes the pieces that already exist, in the order the lab incidents taught:
 
@@ -113,7 +113,7 @@ class RunnerConfig:
     #: profile of the project's common/config/record_profiles.yaml.
     record_topics: List[str] = field(default_factory=list)
     action: str = ""
-    #: Foreground commands run after the gate and before anything is launched:
+    #: Foreground commands run before the stack is launched (and before the T-0 gate):
     #: the "do this once, in order, or the trial is invalid" steps the run
     #: notebooks kept as their own cells (arm-camera mode, robot setup/
     #: stand, EKF priming). Each is {name, command, optional required: false}.
@@ -1100,6 +1100,54 @@ def speak_gate_reasons(result: Any, limit: int = 3) -> List[str]:
     return lines
 
 
+class _KeepUnknown(dict):
+    # A step may name a factor ("SET THE LIGHTS TO `{lighting}`") so the
+    # operator reads the trial's own level; a brace that is not a factor
+    # stays as written instead of raising (2026-10-07, lab day: the
+    # placeholder was printed literally).
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def step_text(step: Dict[str, Any], values: Dict[str, Any]) -> str:
+    """The text of an operator step or a live step with the trial's factor values filled in.
+
+    A text that the filling cannot handle (literal braces, a positional field, an attribute
+    of a placeholder) is shown as written: printing a step must never stop a trial.
+    """
+    text = str(step.get("text", "")).strip()
+    try:
+        return text.format_map(_KeepUnknown(values))
+    except (ValueError, IndexError, KeyError, AttributeError, TypeError):
+        return text
+
+
+def print_live_steps(trial: cs.TrialSpec, live_steps: Optional[List[Dict[str, Any]]]) -> None:
+    """Print the campaign's ``operator_live_steps`` for this trial. Never waits.
+
+    The web interface shows them on the run page from the start of the run. The command line
+    prints them when the trial starts, before the setup steps and the stack, with the trial's
+    factor values filled in as in the operator steps, so the run log holds them too. The
+    operator does them while the trial runs, so nobody confirms them, with a terminal or
+    without one. A step with a ``run`` command also shows the one-liner that the web
+    interface's button runs, for the operator to run by hand.
+    """
+    if not live_steps:
+        return
+    from . import campaign_live_steps
+    commands = {row["index"]: row["cmd"] for row in campaign_live_steps.annotate(live_steps)}
+    print(_c("35;1", f"[runner] LIVE STEPS for {trial.describe()}: do these while the trial "
+                     f"runs. The runner does not wait for them, and a missed live step means "
+                     f"running the trial again."))
+    for i, step in enumerate(live_steps):
+        first, *rest = step_text(step, trial.values).splitlines() or [""]
+        print(f"  {_c('35;1', f'{i + 1}.')} {_c('1', first)}")
+        for line in rest:
+            print(f"     {line}")
+        if commands.get(i):
+            print(f"     command: {cs.substitute_known(commands[i], trial.values)}")
+
+
 def confirm_operator_steps_tty(trial: cs.TrialSpec,
                                operator_steps: List[Dict[str, Any]]) -> bool:
     """The CLI's confirmation surface: print the steps, wait for Enter.
@@ -1116,23 +1164,8 @@ def confirm_operator_steps_tty(trial: cs.TrialSpec,
     """
     tty = _stdin_is_tty()
     print(_c("36;1", f"\n[runner] OPERATOR STEPS for {trial.describe()}"))
-
-    class _KeepUnknown(dict):
-        # A step may name a factor ("SET THE LIGHTS TO `{lighting}`") so the
-        # operator reads the trial's own level; a brace that is not a factor
-        # stays as written instead of raising (2026-10-07, lab day: the
-        # placeholder was printed literally).
-        def __missing__(self, key):
-            return "{" + key + "}"
-
-    values = _KeepUnknown(trial.values)
     for i, step in enumerate(operator_steps, 1):
-        text = str(step.get("text", "")).strip()
-        try:
-            text = text.format_map(values)
-        except (ValueError, IndexError):
-            pass  # literal braces or positional fields: show the text as written
-        first, *rest = text.splitlines() or [""]
+        first, *rest = step_text(step, trial.values).splitlines() or [""]
         print(f"  {_c('36;1', f'{i}.')} {_c('1', first)}")
         for line in rest:
             print(f"     {line}")
@@ -1181,6 +1214,7 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
               repeat: bool = False,
               campaign_setup_steps: Optional[List[Dict[str, Any]]] = None,
               robot_reset: bool = True,
+              live_steps: Optional[List[Dict[str, Any]]] = None,
               ) -> TrialResult:
     """One trial, end to end.
 
@@ -1477,6 +1511,11 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
             for i, step in enumerate(operator_steps, 1):
                 first_line = (str(step.get("text", "")).strip().splitlines() or [""])[0]
                 print(f"[dry-run]   {i}. {first_line[:150]}")
+        if live_steps:
+            print("[dry-run] live steps of this trial (printed when it starts, never waited on):")
+            for i, step in enumerate(live_steps, 1):
+                first_line = (step_text(step, trial.values).splitlines() or [""])[0]
+                print(f"[dry-run]   {i}. {first_line[:150]}")
         if setup_before_cmds:
             print("[dry-run] setup steps (runner.yaml): "
                   + ", ".join(name for name, _, _ in setup_before_cmds))
@@ -1537,6 +1576,9 @@ def _run_trial(trial: cs.TrialSpec, factors: Dict[str, cs.Factor], config: Runne
         sys.stdout = _LogTee(_saved_stdout, log_file)
     leaving: Optional[BaseException] = None
     try:
+        # The live steps, as the trial starts: the web interface shows them on the run page
+        # from the start of the run. Printed after the tee, so the run log holds them too.
+        print_live_steps(trial, live_steps)
         announce("before_launch")
         # Setup steps run before the stack: they are the preconditions, so failing
         # one must abort the trial rather than record a flight whose rig was never
@@ -2956,6 +2998,7 @@ def _run_plan_items(plan, config, bags_dir, factors, results, session, session_i
                                quiet_children=quiet_children,
                                pause_before_action=pause_before_action,
                                operator_steps=plan.campaign.operator_steps,
+                               live_steps=getattr(plan.campaign, "operator_live_steps", None),
                                confirm_steps=confirm_steps,
                                confirm_pose=confirm_pose,
                                voice_cues=getattr(plan.campaign, "voice_cues", None),
@@ -3051,6 +3094,7 @@ def run_scratch(campaign: "cs.Campaign", config: RunnerConfig, bags_dir: Path, *
                        quiet_children=quiet_children,
                        pause_before_action=pause_before_action,
                        operator_steps=campaign.operator_steps,
+                       live_steps=getattr(campaign, "operator_live_steps", None),
                        campaign_setup_steps=campaign.setup_steps,
                        robot_reset=getattr(campaign, "robot_reset", True),
                        scratch_label=safe_label,
@@ -3203,7 +3247,8 @@ def main(argv=None) -> int:
                     help="print the spoken cues but send none (sets TRIALS_VOICE=off for "
                          "this run and its child processes). Cues go to the laptop's voice "
                          "daemon at TRIALS_VOICE_HOST:TRIALS_VOICE_PORT, default "
-                         "127.0.0.1:47900. See the framework guide.")
+                         "127.0.0.1:47900. See "
+                         "https://lorite.github.io/robofacts/guides/spoken-cues/.")
     ap.add_argument("--keep-going", action="store_true",
                     help="continue the campaign after a blocked trial (the default stops, "
                          "because a stack that fails the gate usually fails it again). "

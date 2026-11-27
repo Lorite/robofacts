@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A node's own /rosout reports contain what the trial needs, and NOT what it must not have.
+# The /rosout messages of a node contain the expected text and none of the forbidden text.
 #
 # Born 2026-10-01: a camera streamer can have a build-time JPEG mode. Flashed with it,
 # the stream still "flows" (8.0 to 8.2 fps of decoded frames on image_raw) and every rate check can be satisfied, but the trial records the wrong

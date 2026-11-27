@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enough free VRAM for the GPU nodes about to start.
+# The GPU has enough free memory for the processes that start next.
 #
 # GPU inference nodes fail late and opaquely when VRAM is already
 # taken (a leftover node from the previous run is the usual culprit - see

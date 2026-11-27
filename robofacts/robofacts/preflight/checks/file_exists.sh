@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A required file is present (and optionally non-trivial in size).
+# A required file exists and, optionally, has a minimum size.
 #
 # Built for the artifacts that take 10+ minutes to regenerate and whose absence
 # only shows up as an opaque vendor-node failure minutes into a session:

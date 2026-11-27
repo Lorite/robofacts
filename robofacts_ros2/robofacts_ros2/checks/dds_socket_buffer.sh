@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The kernel can actually give CycloneDDS the receive buffer its config DEMANDS.
+# The kernel allows the receive buffer size that the CycloneDDS configuration requests.
 #
 # Why this exists (2026-08-19, the last lab day before Spain). The rig's
 # `cyclonedds_rig_lan.xml` carries `<SocketReceiveBufferSize min="16MB"/>`.

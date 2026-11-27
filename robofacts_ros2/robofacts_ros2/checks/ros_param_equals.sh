@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A live node's parameter holds the value the trial declares, right now.
+# A parameter of a running node has the value that the trial declares.
 #
 # Why this exists (2026-10-14, realized conditions).
 # Some levels are node parameters that no launch argument of the experiment

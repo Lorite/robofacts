@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Named analyses as a headless API (phase 4b).
+"""Named analyses as a headless API.
 
 The analysers already exist as CLI scripts writing into
 ``experiments/<name>/results/<timestamp>_*/``. What was missing is everything
@@ -66,6 +66,8 @@ class Analysis:
     command: str
     describe: str = ""
     per: str = "bag"            # "bag" -> once per bag; "cohort" -> once for all
+    #: Read so that the files that set it keep loading. Nothing uses it: the cohort is not
+    #: filtered by the topics that a recording holds.
     requires_topics: List[str] = field(default_factory=list)
 
     def __post_init__(self):

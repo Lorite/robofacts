@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""The record profiles as the ROS 2 backend uses them: which topics a slim copy of a bag
-drops, and the ``ros2 bag record`` command of a profile.
+"""Record profiles in the ROS 2 backend: the topics a slim copy drops, and a profile's record command.
+
+The record command of a profile is its ``ros2 bag record`` command line.
 
 The profiles themselves (the files, the blocks, the names) are the core's
 (robofacts.record_profiles), and every name of that module is available here too.

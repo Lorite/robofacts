@@ -35,7 +35,7 @@ The same keys appear in `hosts.yaml` and under `hosts:` of [[runner-yaml|runner.
 | --- | --- | --- | --- |
 | `local` | boolean | `false` | `true` runs the commands on the runner's own machine. |
 | `host` | string | none | The ssh alias of the machine. A host that is not local needs it. |
-| `container` | string | none | The container on that machine that runs the commands. The runner starts each remote command as `ssh <host> docker exec -i <container> <shell> -c ...`. |
+| `container` | string | none | The container on that machine that runs the commands. The runner starts each remote command as `ssh <host> docker exec -i <container> <shell> -c ...`, so a trial on a host that is not local needs it. |
 | `container_hostname` | string | none | The host name inside that container. A runner that runs inside this container runs the commands directly, without ssh. The stop tools use it to tell the robot's container from a local container of the same name. |
 | `shell` | string | `zsh` | The shell inside the container. |
 | `workspace` | path | the project root | The directory of the project's checkout on that machine. The commands run there. |

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The emergency-stop service is visible FROM THIS SHELL, and a LIVE NODE offers
+# The emergency-stop service is visible from this shell, and a running node offers
 # it. Must be run in the exact kill-terminal context: on 2026-07-22 the e-stop
 # terminal had no DDS discovery, so the kill command could not have reached the
 # drone while everything else looked fine.

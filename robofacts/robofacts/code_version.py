@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Which code produced a trial (2026-08-04).
+"""Which code produced a trial.
 
 The metadata contract already answered *which machine* ran a trial
 (``execution_host``) and *which image* it ran in (``execution_container``), but

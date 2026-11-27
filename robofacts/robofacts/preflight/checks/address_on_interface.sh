@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The rig's IP address is carried by the interface we think it is.
+# The named network interface carries the expected IP address.
 #
 # Why this is a HARD gate and not a nicety
 # ----------------------------------------

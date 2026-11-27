@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Another machine answers, and the link is not pathologically slow.
+# Another machine answers ping, optionally within a maximum round-trip time.
 #
 # Covers "laptop is on the same network as the MOCAP host" and "WiFi/ethernet
 # link to the robot is stable" - both of which otherwise fail deep inside a driver.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Generic: a topic is not just advertised, its data is actually flowing.
+# Messages arrive on a topic at a rate within its limits, which an advertised topic
+# alone does not prove.
 # "Camera Node Is Up!" means nothing - a flight recorded 0 camera frames
 # from an "up" node (2026-07-22).
 #

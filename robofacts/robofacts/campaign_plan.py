@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The planner: which cells of a campaign are still missing (phase 3).
+"""The planner: which cells of a campaign are still missing.
 
 Joins the Phase 2 campaign (what we *want*) to the Phase 1 index (what we
 *have*) and answers the operational question directly: **you already have 6 of
