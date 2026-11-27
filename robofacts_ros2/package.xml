@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robofacts_ros2</name>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <description>The ROS 2 backend of RoboFACTS (Factors, A Contract, and checked Trials in Simulation and on hardware): ros2 launch, ros2 bag record, the bag readers, the ROS 2 gate checks, the robot adapters and the web interface. The general package robofacts holds the declarations, the planner, the trial loop, the gate protocol and the coverage index.</description>
   <maintainer email="a.lorite.mora@gmail.com">Alejandro Lorite Mora</maintainer>
   <license>Apache-2.0</license>

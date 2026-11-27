@@ -3,7 +3,7 @@ message: "If you use RoboFACTS, please cite the paper below."
 title: "RoboFACTS"
 abstract: "A declarative experiment design framework for multi-robot trials in simulation and on hardware."
 type: software
-version: 0.1.1
+version: 0.1.2
 license: Apache-2.0
 repository-code: "https://github.com/Lorite/robofacts"
 authors:

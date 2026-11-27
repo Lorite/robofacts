@@ -2,4 +2,4 @@
 runner, a coverage index, a linter and named analyses, driven by five declaration
 files per experiment."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

@@ -19,7 +19,7 @@ def files_under(subdir: str) -> list:
 
 setup(
     name=package_name,
-    version="0.1.1",
+    version="0.1.2",
     packages=find_packages(exclude=["test", "test.*"]),
     # Everything the package needs at run time that is not a .py file: the ROS 2 gate
     # checks and their bash helper, the robot adapters' checks, the web interface's

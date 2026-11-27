@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-11-27)
 
 - A documentation site (2026-11-26): https://lorite.github.io/robofacts/, built with MkDocs and Material from `docs/` and published on GitHub Pages by `.github/workflows/docs.yaml` (every push and pull request builds it with `--strict`, a push to `main` publishes it). The long README is split into 52 small pages (getting started, concepts, guides, backends, reference), which link to each other with wikilinks (`[[page]]`, resolved by file name with `mkdocs-obsidian-bridge`, so a broken link fails the build). The reference of the commands, the lint rules and the gate checks is generated from the code by `tools/gen_docs_reference.py`, and `robofacts_ros2/test/test_docs_reference_is_current.py` fails when a committed page is stale. The README now points to the site. `setup.py` names the site as the project's documentation, which the PyPI page shows from the next release. The test that no lab name reaches the packages also scans `docs/`, `mkdocs.yml` and `tools/`.
 - The runner's message when an override is set (2026-11-26) said "failures will not block", which was wrong since 0.1.1: it now says that a failed soft item will not block and a failed `[HARD]` item or factor check still blocks.
